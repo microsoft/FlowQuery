@@ -31,6 +31,15 @@ post {
 } as data
 return data
 ```
+```
+/*
+* Return 10 random facts about cats
+* from an open API.
+*/
+unwind range(0,10) as i
+load json from "https://catfact.ninja/fact" as item
+return item.fact as catfact
+```
 
 ## Contributing
 

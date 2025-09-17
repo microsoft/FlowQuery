@@ -17,19 +17,14 @@ FlowQuery is written in TypeScript (https://www.typescriptlang.org/) and built/c
 
 ## Examples
 ```
-// Test completion from Azure OpenAI API
-with
-    'YOUR_AZURE_OPENAI_API_KEY' as AZURE_OPENAI_API_KEY
-load json from 'https://YOUR_DEPLOYMENT_NAME.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview'
-headers {
-    `Content-Type`: 'application/json',
-    `api-key`: AZURE_OPENAI_API_KEY,
-}
-post {
-    messages: [{role: 'user', content: 'Answer with this is a test!'}],
-    temperature: 0.7
-} as data
-return data
+/*
+Collect 10 random pieces of wisdom and create a letter histogram.
+*/
+unwind range(0,10) as i
+load json from "https://api.adviceslip.com/advice" as item
+with join(collect(item.slip.advice),"") as wisdom
+unwind split(wisdom,"") as letter
+return letter, sum(1) as lettercount
 ```
 ```
 /*
@@ -72,14 +67,19 @@ with openai_response.choices[0].message.content as catfacts_analysis
 return catfacts_analysis
 ```
 ```
-/*
-Collect 10 random cat facts and create a letter histogram.
-*/
-unwind range(0,10) as i
-load json from "https://catfact.ninja/fact" as item
-with join(collect(item.fact),"") as catfacts
-unwind split(catfacts,"") as letter
-return letter, sum(1) as lettercount
+// Test completion from Azure OpenAI API
+with
+    'YOUR_AZURE_OPENAI_API_KEY' as AZURE_OPENAI_API_KEY
+load json from 'https://YOUR_DEPLOYMENT_NAME.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview'
+headers {
+    `Content-Type`: 'application/json',
+    `api-key`: AZURE_OPENAI_API_KEY,
+}
+post {
+    messages: [{role: 'user', content: 'Answer with this is a test!'}],
+    temperature: 0.7
+} as data
+return data
 ```
 
 ## Contributing

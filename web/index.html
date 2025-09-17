@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="flowquery.min.js"></script>
+    <title>FlowQuery</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0; /* Prevent unexpected scroll issues */
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        #input {
+            margin-top: 5px;
+            width: 100%;
+            height: 300px;
+            font-family: monospace;
+            resize: none;
+            box-sizing: border-box; /* Include padding/border in width/height */
+        }
+
+        #output {
+            margin-top: 5px;
+            width: 100%;
+            flex-grow: 1;
+            overflow-y: auto;
+            font-family: monospace;
+            box-sizing: border-box;
+            max-height: calc(100vh - 300px - 5px); /* Prevent excessive growth */
+        }
+    </style>
+    <script>
+        function createTable(results) {
+            const table = document.createElement("table");
+
+            if (results.length === 0) return table;
+            
+            const headerRow = document.createElement("tr");
+            Object.entries(results[0]).forEach(([key, _]) => {
+                const th = document.createElement("th");
+                th.style.textAlign = "left";
+                th.textContent = key;
+                headerRow.appendChild(th);
+            });
+            
+            table.appendChild(headerRow);
+
+            results.forEach(row => {
+                const tr = document.createElement("tr");
+                Object.entries(row).forEach(([_, value]) => {
+                    const td = document.createElement("td");
+                    if (typeof value === "object" || Array.isArray(value)) {
+                        td.textContent = JSON.stringify(value);
+                    } else {
+                        td.textContent = value;
+                    }
+                    tr.appendChild(td);
+                });
+                table.appendChild(tr);
+            });
+
+            return table;
+        }
+
+        function run() {
+            const input = document.getElementById("input").value;
+            const output = document.getElementById("output");
+            output.innerHTML = "";
+            try {
+                const flowquery = new FlowQuery(input);
+                flowquery.run().then(() => {
+                    const table = createTable(flowquery.results);
+                    output.appendChild(table);
+                }).catch(e => {
+                    console.error(e);
+                    output.innerHTML = e.message;
+                });
+            } catch (e) {
+                console.error(e);
+                output.innerHTML = e.message;
+                return;
+            }
+        }
+    </script>
+</head>
+    <body>
+        <textarea
+            id="input"
+            rows="10"
+            placeholder="Type your FlowQuery statement here and press Shift+Enter to run it."
+            onkeydown="if (event.key === 'Enter' && event.shiftKey) {
+                            run();
+                            event.preventDefault();
+                        }"
+        ></textarea>
+        <div id="output"></div>
+    </body>
+</html>

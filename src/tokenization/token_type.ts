@@ -1,0 +1,15 @@
+enum TokenType {
+    KEYWORD = "KEYWORD",
+    OPERATOR = "OPERATOR",
+    UNARY_OPERATOR = "UNARY_OPERATOR",
+    IDENTIFIER = "IDENTIFIER",
+    STRING = "STRING",
+    F_STRING = "F-STRING",
+    BACKTICK_STRING = "BACKTICK_STRING",
+    NUMBER = "NUMBER",
+    SYMBOL = "SYMBOL",
+    WHITESPACE = "WHITESPACE",
+    COMMENT = "COMMENT",
+    EOF = "EOF",
+}
+export default TokenType;

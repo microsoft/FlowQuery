@@ -1,0 +1,434 @@
+import Parser from "../../src/parsing/parser";
+
+test('Test Parser', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN 1, 2, 3');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Number (1)\n' +
+        '-- Expression\n' +
+        '--- Number (2)\n' +
+        '-- Expression\n' +
+        '--- Number (3)'
+    );
+});
+
+test('Test Parser with function', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN f()');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Function (f)'
+    );
+});
+
+test('Test Parser with associative array', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN {a: 1, b: 2}');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- AssociativeArray\n' +
+        '---- KeyValuePair\n' +
+        '----- String (a)\n' +
+        '----- Expression\n' +
+        '------ Number (1)\n' +
+        '---- KeyValuePair\n' +
+        '----- String (b)\n' +
+        '----- Expression\n' +
+        '------ Number (2)'
+    );
+});
+
+test('Test Parser with JSON array', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN [1, 2]');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- JSONArray\n' +
+        '---- Expression\n' +
+        '----- Number (1)\n' +
+        '---- Expression\n' +
+        '----- Number (2)'
+    );
+});
+
+test('Test Parser with nested associative array', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN {a:{}}');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- AssociativeArray\n' +
+        '---- KeyValuePair\n' +
+        '----- String (a)\n' +
+        '----- Expression\n' +
+        '------ AssociativeArray'
+    );
+});
+
+test('Test Parser with multiple operations', () => {
+    const parser = new Parser();
+    const ast = parser.parse('WITH 1 AS n RETURN n');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (n)\n' +
+        '--- Number (1)\n' +
+        '- Return\n' +
+        '-- Expression (n)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test Parser with multiple operations and comments', () => {
+    const parser = new Parser();
+    const ast = parser.parse('WITH 1 AS n /* comment */ RETURN n');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (n)\n' +
+        '--- Number (1)\n' +
+        '- Return\n' +
+        '-- Expression (n)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test Parser with multiple operations including UNWIND', () => {
+    const parser = new Parser();
+    const ast = parser.parse('UNWIND [1, 2, 3] AS n RETURN n');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Unwind\n' +
+        '-- Expression (n)\n' +
+        '--- JSONArray\n' +
+        '---- Expression\n' +
+        '----- Number (1)\n' +
+        '---- Expression\n' +
+        '----- Number (2)\n' +
+        '---- Expression\n' +
+        '----- Number (3)\n' +
+        '- Return\n' +
+        '-- Expression (n)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test Unwind with invalid expression', () => {
+    const parser = new Parser();
+    expect(() => parser.parse('UNWIND 1 AS n RETURN n')).toThrow('Expected array, function, reference, or lookup.');
+});
+
+test('Test Unwind with invalid alias', () => {
+    const parser = new Parser();
+    expect(() => parser.parse('UNWIND [1, 2, 3] AS 1 RETURN n')).toThrow('Expected identifier');
+});
+
+test('Test Unwind with missing alias', () => {
+    const parser = new Parser();
+    expect(() => parser.parse('UNWIND [1, 2, 3] RETURN n')).toThrow('Expected alias');
+});
+
+test('Test statement with where clause', () => {
+    const parser = new Parser();
+    const ast = parser.parse('with 1 as n where n > 0 return n');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (n)\n' +
+        '--- Number (1)\n' +
+        '- Where\n' +
+        '-- Expression\n' +
+        '--- GreaterThan\n' +
+        '---- Reference (n)\n' +
+        '---- Number (0)\n' +
+        '- Return\n' +
+        '-- Expression (n)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test lookup', () => {
+    const parser = new Parser();
+    const ast = parser.parse('return {a: 1}.a');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Lookup\n' +
+        '---- Identifier (a)\n' +
+        '---- AssociativeArray\n' +
+        '----- KeyValuePair\n' +
+        '------ String (a)\n' +
+        '------ Expression\n' +
+        '------- Number (1)'
+    );
+});
+
+test('Test lookup as part of expression', () => {
+    const parser = new Parser();
+    const ast = parser.parse('return {a: 1}.a + 1');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Add\n' +
+        '---- Lookup\n' +
+        '----- Identifier (a)\n' +
+        '----- AssociativeArray\n' +
+        '------ KeyValuePair\n' +
+        '------- String (a)\n' +
+        '------- Expression\n' +
+        '-------- Number (1)\n' +
+        '---- Number (1)'
+    );
+});
+
+test('Test lookup with nested associative array', () => {
+    const parser = new Parser();
+    const ast = parser.parse('return {a: {b: 1}}.a.b');
+    const _return = ast.firstChild();
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Lookup\n' +
+        '---- Identifier (b)\n' +
+        '---- Lookup\n' +
+        '----- Identifier (a)\n' +
+        '----- AssociativeArray\n' +
+        '------ KeyValuePair\n' +
+        '------- String (a)\n' +
+        '------- Expression\n' +
+        '-------- AssociativeArray\n' +
+        '--------- KeyValuePair\n' +
+        '---------- String (b)\n' +
+        '---------- Expression\n' +
+        '----------- Number (1)'
+    );
+    expect(_return.firstChild().value()).toBe(1);
+});
+
+test('Test lookup with JSON array', () => {
+    const parser = new Parser();
+    const ast = parser.parse('return [1, 2][1]');
+    const _return = ast.firstChild();
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Lookup\n' +
+        '---- Expression\n' +
+        '----- Number (1)\n' +
+        '---- JSONArray\n' +
+        '----- Expression\n' +
+        '------ Number (1)\n' +
+        '----- Expression\n' +
+        '------ Number (2)'
+    );
+    expect(_return.firstChild().value()).toBe(2);
+});
+
+test('Test load with post', () => {
+    const parser = new Parser();
+    const ast = parser.parse('load json from "https://jsonplaceholder.typicode.com/posts" post {userId: 1} as data return data');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Load\n' +
+        '-- JSON\n' +
+        '-- From\n' +
+        '--- Expression\n' +
+        '---- String (https://jsonplaceholder.typicode.com/posts)\n' +
+        '-- Post\n' +
+        '--- Expression\n' +
+        '---- AssociativeArray\n' +
+        '----- KeyValuePair\n' +
+        '------ String (userId)\n' +
+        '------ Expression\n' +
+        '------- Number (1)\n' +
+        '-- Alias (data)\n' +
+        '- Return\n' +
+        '-- Expression (data)\n' +
+        '--- Reference (data)'
+    );
+});
+
+test('Test nested aggregate functions', () => {
+    expect(() => {
+        const parser = new Parser();
+        parser.parse('RETURN sum(sum(1))');
+    }).toThrow('Aggregate functions cannot be nested');
+});
+
+test('Test with and return with renamed variable', () => {
+    const parser = new Parser();
+    const ast = parser.parse('WITH 1 AS n RETURN n AS m');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (n)\n' +
+        '--- Number (1)\n' +
+        '- Return\n' +
+        '-- Expression (m)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test with and return with variable lookup', () => {
+    const parser = new Parser();
+    const ast = parser.parse('WITH {a: n} AS obj RETURN obj.a');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (obj)\n' +
+        '--- AssociativeArray\n' +
+        '---- KeyValuePair\n' +
+        '----- String (a)\n' +
+        '----- Expression\n' +
+        '------ Reference (n)\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Lookup\n' +
+        '---- Identifier (a)\n' +
+        '---- Reference (obj)'
+    );
+});
+
+test('Test unwind', () => {
+    const parser = new Parser();
+    const ast = parser.parse('WITH [1, 2, 4] as n unwind n as i return i');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- With\n' +
+        '-- Expression (n)\n' +
+        '--- JSONArray\n' +
+        '---- Expression\n' +
+        '----- Number (1)\n' +
+        '---- Expression\n' +
+        '----- Number (2)\n' +
+        '---- Expression\n' +
+        '----- Number (4)\n' +
+        '- Unwind\n' +
+        '-- Expression (i)\n' +
+        '--- Reference (n)\n' +
+        '- Return\n' +
+        '-- Expression (i)\n' +
+        '--- Reference (i)'
+    );
+});
+
+test('Test predicate function', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN sum(n in [1, 2, 3] | n where n > 1)');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- PredicateFunction (sum)\n' +
+        '---- Reference (n)\n' +
+        '---- Expression\n' +
+        '----- JSONArray\n' +
+        '------ Expression\n' +
+        '------- Number (1)\n' +
+        '------ Expression\n' +
+        '------- Number (2)\n' +
+        '------ Expression\n' +
+        '------- Number (3)\n' +
+        '---- Expression\n' +
+        '----- Reference (n)\n' +
+        '---- Where\n' +
+        '----- Expression\n' +
+        '------ GreaterThan\n' +
+        '------- Reference (n)\n' +
+        '------- Number (1)'
+    );
+});
+
+test('Test case statement', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN CASE WHEN 1 THEN 2 ELSE 3 END');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Case\n' +
+        '---- When\n' +
+        '----- Expression\n' +
+        '------ Number (1)\n' +
+        '---- Then\n' +
+        '----- Expression\n' +
+        '------ Number (2)\n' +
+        '---- Else\n' +
+        '----- Expression\n' +
+        '------ Number (3)'
+    );
+});
+
+test('Test functions with wrong number of arguments', () => {
+    expect(() => (new Parser()).parse('RETURN range(1)')).toThrow('Function range expected 2 parameters, but got 1');
+    expect(() => (new Parser()).parse('RETURN range(1, 2, 3)')).toThrow('Function range expected 2 parameters, but got 3');
+    expect(() => (new Parser()).parse('RETURN avg(1, 2, 3)')).toThrow('Function avg expected 1 parameters, but got 3');
+    expect(() => (new Parser()).parse('RETURN sum(1, 2)')).toThrow('Function sum expected 1 parameters, but got 2');
+    expect(() => (new Parser()).parse('RETURN split("a", "b", "c")')).toThrow('Function split expected 2 parameters, but got 3');
+    expect(() => (new Parser()).parse('RETURN size(1, 2)')).toThrow('Function size expected 1 parameters, but got 2');
+    expect(() => (new Parser()).parse('RETURN round(1, 2)')).toThrow('Function round expected 1 parameters, but got 2');
+});
+
+test('Test non-well formed statements', () => {
+    expect(() => (new Parser()).parse('return 1 return 1')).toThrow('Only one RETURN statement is allowed');
+    expect(() => (new Parser()).parse('return 1 with 1 as n')).toThrow('Last statement must be a RETURN or a WHERE statement');
+});
+
+test('Test associative array with backtick string', () => {
+    const parser = new Parser();
+    const ast = parser.parse('RETURN {`key`: `value`}');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- AssociativeArray\n' +
+        '---- KeyValuePair\n' +
+        '----- String (key)\n' +
+        '----- Expression\n' +
+        '------ Reference (value)'
+    );
+});
+
+test('Test limit', () => {
+    const parser = new Parser();
+    const ast = parser.parse('unwind range(1, 10) as n limit 5 return n');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Unwind\n' +
+        '-- Expression (n)\n' +
+        '--- Function (range)\n' +
+        '---- Expression\n' +
+        '----- Number (1)\n' +
+        '---- Expression\n' +
+        '----- Number (10)\n' +
+        '- Limit\n' +
+        '- Return\n' +
+        '-- Expression (n)\n' +
+        '--- Reference (n)'
+    );
+});
+
+test('Test return -2', () => {
+    const parser = new Parser();
+    const ast = parser.parse('return -2');
+    expect(ast.print()).toBe(
+        'ASTNode\n' +
+        '- Return\n' +
+        '-- Expression\n' +
+        '--- Number (-2)'
+    );
+});

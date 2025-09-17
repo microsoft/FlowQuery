@@ -71,6 +71,16 @@ with openai_response.choices[0].message.content as catfacts_analysis
 // Return the analysis
 return catfacts_analysis
 ```
+```
+/*
+Collect 10 random cat facts and create a letter histogram.
+*/
+unwind range(0,10) as i
+load json from "https://catfact.ninja/fact" as item
+with join(collect(item.fact),"") as catfacts
+unwind split(catfacts,"") as letter
+return letter, sum(1) as lettercount
+```
 
 ## Contributing
 

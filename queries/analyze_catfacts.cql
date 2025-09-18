@@ -15,7 +15,7 @@
     6. Returns the cat facts, the analysis, and the topics.
 */
 
-// Setup OpenAI API key and organization ID
+// Setup OpenAI API key and organization ID (read from .env file in same directory as this query file)
 with
     '$OPENAI_API_KEY' as OPENAI_API_KEY,
     '$OPENAI_ORGANIZATION_ID' as OPENAI_ORGANIZATION_ID

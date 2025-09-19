@@ -1,0 +1,53 @@
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Make JSON output wrap nicely and be readable inside the webview */
+#json-content {
+    white-space: -moz-pre-wrap;
+    white-space: -o-pre-wrap;
+    white-space: pre-wrap;        /* Preserve whitespace but allow wrapping */
+    word-wrap: break-word;        /* Legacy */
+    overflow-wrap: anywhere;     /* Modern fallback for long words/strings */
+    word-break: break-word;
+    font-family: monospace;
+    font-size: 12px; /* fixed default size - font controls removed */
+    padding: 12px;
+    margin: 40px 20px 20px 20px; /* Avoid overlap with the fixed tab bar and give breathing room */
+    max-width: calc(100% - 60px);
+    box-sizing: border-box;
+}
+
+/* Controls placed near the top-right (left of the copy button) */
+.json-controls {
+    position: fixed;
+    top: 25px;
+    right: 120px; /* leave room for the copy button */
+    display: flex;
+    gap: 6px;
+    z-index: 1001;
+}
+.json-controls button {
+    background-color: #333;
+    color: white;
+    border: none;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+/* Syntax highlighting classes for JSON */
+#json-content .key { color: #9cdcfe; }
+#json-content .string { color: #ce9178; }
+#json-content .number { color: #b5cea8; }
+#json-content .boolean { color: #569cd6; }
+#json-content .null { color: #c586c0; }
+
+/* No-wrap mode: preserve single-line JSON and allow horizontal scrolling */
+#json-content.nowrap {
+    white-space: pre;
+    overflow-x: auto;
+}

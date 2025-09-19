@@ -1,0 +1,66 @@
+.tab {
+    display: flex;
+    position: fixed; /* Makes the tab bar stay fixed at the top */
+    top: 0; /* Positions it at the very top */
+    width: 100%; /* Ensures the tab bar spans the full width */
+    margin: 0;
+    padding: 0;
+    background-color: #333; /* Ensure background color for fixed element */
+    z-index: 1000; /* Ensures the tab bar stays on top */
+}
+
+.tab button {
+    background-color: #333;
+    border: 0;
+    outline: none;
+    font-size: 14px;
+    color: gray;
+    padding: 0;
+    margin-top: 0;
+    margin-right: 2px;
+    margin-bottom: 0;
+}
+
+.tab button:hover {
+    background-color: #444;
+}
+
+.tab button.active {
+    background-color: #1F1F1F;
+    color: white;
+}
+
+.tab-content {
+    display: none;
+    margin-top: 20px; /* Adds space below the fixed tab bar */
+    height: calc(100vh - 20px); /* Adjusts height to account for the fixed tab bar */
+    overflow-y: auto; /* Enables scrolling within the content area */
+    position: relative;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.hidden {
+    display: none;
+}
+
+.copy-button {
+    position: fixed;
+    top: 25px;
+    right: 40px;
+    background-color: #333;
+    color: white;
+    border: none;
+    padding: 5px 5px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 12px;
+    opacity: 0.8; /* Makes it slightly transparent */
+}
+
+.copy-button:hover {
+    background-color: #333;
+    opacity: 1; /* Full opacity on hover */
+}

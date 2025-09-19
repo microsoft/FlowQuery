@@ -6,4 +6,8 @@ headers {
     Authorization: f'Bearer {OPENAI_API_KEY}'
 } as l
 unwind l.data as model
-return model
+return
+    model.id as `Model ID`,
+    model.object as `Object Type`,
+    model.created as `Created Timestamp`,
+    model.owned_by as `Owned By`

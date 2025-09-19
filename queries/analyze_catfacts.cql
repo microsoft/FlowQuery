@@ -1,10 +1,10 @@
 /*
   This query demonstrates how to use the OpenAI API in FlowQuery to analyze cat facts.
   
-  To run this query, you need to set the OPENAI_API_KEY variable to your OpenAI API key.
-  You also need to set the OpenAI-Organization header to your organization ID.
-    You can find your organization ID in the OpenAI dashboard.
-    See https://platform.openai.com/docs/guides/chat for more information.
+  To run this query, you need to create a .env file in the same folder as this query within your VSCode project.
+  Create two variables in the .env file:
+    OPENAI_API_KEY='YOUR_OPENAI_API_KEY'
+    OPENAI_ORGANIZATION_ID='YOUR_OPENAI_ORGANIZATION_ID'
 
   This FlowQuery script implements a chain-of-thoughts LLM pipeline which does the following steps:
     1. Fetches 10 cat facts from the Cat Facts API and collects them into a list.

@@ -1,6 +1,7 @@
 {
   "name": "flowquery-vscode",
   "displayName": "FlowQuery-VSCode",
+  "icon": "images/FlowQueryLogoIcon.png",
   "description": "FlowQuery - A declarative query language for data processing pipelines.",
   "version": "0.0.1",
   "publisher": "Microsoft",

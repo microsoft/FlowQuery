@@ -9,7 +9,7 @@ import Parser from "../parsing/parser";
  * 
  * @example
  * ```typescript
- * const runner = new Runner("WITH x = 1 RETURN x");
+ * const runner = new Runner("WITH 1 as x RETURN x");
  * await runner.run();
  * console.log(runner.results); // [{ x: 1 }]
  * ```

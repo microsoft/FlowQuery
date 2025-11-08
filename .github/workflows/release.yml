@@ -40,6 +40,24 @@ jobs:
           echo "Checking build artifacts..."
           ls -la dist/flowquery.min.js || echo "dist/flowquery.min.js not found"
       
+      - name: Copy to VS Code extension
+        run: |
+          echo "Copying flowquery.min.js to VS Code extension..."
+          mkdir -p flowquery-vscode/flowQueryEngine
+          cp dist/flowquery.min.js flowquery-vscode/flowQueryEngine/
+          ls -la flowquery-vscode/flowQueryEngine/
+      
+      - name: Install VS Code extension dependencies
+        working-directory: ./flowquery-vscode
+        run: |
+          npm install @vscode/vsce
+      
+      - name: Package VS Code extension
+        working-directory: ./flowquery-vscode
+        run: |
+          npx @vscode/vsce package
+          ls -la *.vsix
+      
       - name: Generate version tag
         id: version
         run: |
@@ -58,7 +76,9 @@ jobs:
             Automated release from main branch
             Version: ${{ steps.version.outputs.version }}
             Commit: ${{ github.sha }}
-          files: dist/flowquery.min.js
+          files: |
+            dist/flowquery.min.js
+            flowquery-vscode/*.vsix
           draft: false
           prerelease: false
         env:

@@ -6,4 +6,4 @@ Run FlowQuery statements from within VSCode.
 1. Open a .cql file and press shift+enter.
 2. Query results show up in a separate tab.
 
-Niclas Kjäll-Ohlsson (niclask@microsoft.com).
+You can create a .env (key=value pairs) file in the same directory as your .cql files and refer to variables defined in the .env file from cql files, for example '$key'.

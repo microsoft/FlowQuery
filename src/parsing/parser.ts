@@ -49,7 +49,7 @@ import Null from "./components/null";
  * @example
  * ```typescript
  * const parser = new Parser();
- * const ast = parser.parse("WITH 1 as x RETURN x");
+ * const ast = parser.parse("unwind [1, 2, 3] as num return num");
  * ```
  */
 class Parser extends BaseParser {

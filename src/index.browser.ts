@@ -1,7 +1,7 @@
 /**
  * FlowQuery - A declarative query language for data processing pipelines.
  * 
- * This is the main entry point for the FlowQuery browser interface.
+ * This is the main entry point for the FlowQuery in-browser execution.
  * 
  * @packageDocumentation
  */

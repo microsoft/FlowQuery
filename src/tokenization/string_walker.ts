@@ -8,7 +8,7 @@ import StringUtils from "../utils/string_utils";
  * 
  * @example
  * ```typescript
- * const walker = new StringWalker("WITH x = 1");
+ * const walker = new StringWalker("WITH x as variable");
  * while (!walker.isAtEnd) {
  *   // Process characters
  * }

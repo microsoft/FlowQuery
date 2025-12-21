@@ -1,0 +1,39 @@
+.app-root {
+    min-height: 100vh;
+    background-color: #fafafa;
+    padding: 24px;
+}
+
+.app-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.app-card {
+    margin-bottom: 16px;
+}
+
+.query-input {
+    width: 100%;
+    min-height: 120px;
+}
+
+.button-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+}
+
+.results-container {
+    background-color: #ffffff;
+    padding: 16px;
+    border-radius: 4px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 100px;
+}
+
+.error-text {
+    color: #c50f1f;
+}

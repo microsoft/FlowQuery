@@ -1,32 +1,43 @@
 const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
-  mode: 'production',
-  entry: './src/index.ts',
-  target: 'node',
+  mode: 'development',
+  entry: './src/index.tsx',
+  target: 'web',
   output: {
-    filename: 'rag.bundle.js',
+    filename: 'bundle.js',
     path: path.resolve(__dirname, 'dist'),
-    libraryTarget: 'commonjs2'
+    clean: true
   },
   resolve: {
-    extensions: ['.ts', '.js']
+    extensions: ['.tsx', '.ts', '.js', '.jsx']
   },
   module: {
     rules: [
       {
-        test: /\.ts$/,
+        test: /\.tsx?$/,
         use: 'ts-loader',
         exclude: /node_modules/
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader']
       }
     ]
   },
-  externals: {
-    // Add any externals here if needed
-    // For example, if you want to exclude flowquery from the bundle:
-    // 'flowquery': 'commonjs flowquery'
+  plugins: [
+    new HtmlWebpackPlugin({
+      template: './public/index.html'
+    })
+  ],
+  devServer: {
+    static: './dist',
+    port: 3000,
+    open: true,
+    hot: true
   },
   optimization: {
-    minimize: true
+    minimize: false
   }
 };

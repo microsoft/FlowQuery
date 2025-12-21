@@ -12,13 +12,6 @@ A RAG (Retrieval Augmented Generation) loop based on [FlowQuery](https://www.npm
 ```bash
 # Install dependencies
 npm install
-
-# Run in development mode (with ts-node)
-npm run dev
-
-# Or build and run
-npm run build
-npm start
 ```
 
 ## Available Scripts

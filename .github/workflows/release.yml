@@ -47,6 +47,24 @@ jobs:
           cp dist/flowquery.min.js flowquery-vscode/flowQueryEngine/
           ls -la flowquery-vscode/flowQueryEngine/
       
+      - name: Bump version
+        id: version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Bump patch version (use 'minor' or 'major' for other bump types)
+          npm version patch --no-git-tag-version
+          
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Commit the version bump
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+          git push
+      
       - name: Install VS Code extension dependencies
         working-directory: ./flowquery-vscode
         run: |
@@ -57,15 +75,6 @@ jobs:
         run: |
           npx @vscode/vsce package
           ls -la *.vsix
-      
-      - name: Generate version tag
-        id: version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          TAG="v${VERSION}-${TIMESTAMP}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

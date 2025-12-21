@@ -4,6 +4,7 @@ import ASTNode from "./ast_node";
 import BaseParser from "./base_parser";
 import FunctionFactory from "./functions/function_factory";
 import Function from "./functions/function";
+import AsyncFunction from "./functions/async_function";
 import AssociativeArray from "./data_structures/associative_array";
 import JSONArray from "./data_structures/json_array";
 import KeyValuePair from "./data_structures/key_value_pair";
@@ -218,11 +219,19 @@ class Parser extends BaseParser {
         this.expectAndSkipWhitespaceAndComments();
         const from = new From();
         load.addChild(from);
-        const expression = this.parseExpression();
-        if(expression === null) {
-            throw new Error('Expected expression');
+        
+        // Check if the source is an async function
+        const asyncFunc = this.parseAsyncFunction();
+        if (asyncFunc !== null) {
+            from.addChild(asyncFunc);
+        } else {
+            const expression = this.parseExpression();
+            if(expression === null) {
+                throw new Error('Expected expression or async function');
+            }
+            from.addChild(expression);
         }
-        from.addChild(expression);
+        
         this.expectAndSkipWhitespaceAndComments();
         if(this.token.isHeaders()) {
             const headers = new Headers();
@@ -569,6 +578,38 @@ class Parser extends BaseParser {
         return func;
     }
 
+    /**
+     * Parses an async function call for use in LOAD operations.
+     * Only matches if the identifier is registered as an async data provider.
+     * 
+     * @returns An AsyncFunction node if a registered async function is found, otherwise null
+     */
+    private parseAsyncFunction(): AsyncFunction | null {
+        if(!this.token.isIdentifier()) {
+            return null;
+        }
+        if(this.token.value === null) {
+            return null;
+        }
+        // Only parse as async function if it's registered as an async provider
+        if(!FunctionFactory.isAsyncProvider(this.token.value)) {
+            return null;
+        }
+        if(!this.peek()?.isLeftParenthesis()) {
+            return null;
+        }
+        const asyncFunc = new AsyncFunction(this.token.value);
+        this.setNextToken(); // skip function name
+        this.setNextToken(); // skip left parenthesis
+        this.skipWhitespaceAndComments();
+        asyncFunc.parameters = Array.from(this.parseExpressions(AliasOption.NOT_ALLOWED));
+        this.skipWhitespaceAndComments();
+        if(!this.token.isRightParenthesis()) {
+            throw new Error('Expected right parenthesis');
+        }
+        this.setNextToken();
+        return asyncFunc;
+    }
     private parsePredicateFunction(): PredicateFunction | null {
         if(!this.ahead([Token.IDENTIFIER(""), Token.LEFT_PARENTHESIS, Token.IDENTIFIER(""), Token.IN])) {
             return null;

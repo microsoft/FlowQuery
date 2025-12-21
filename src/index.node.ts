@@ -1,7 +1,7 @@
 /**
  * FlowQuery - A declarative query language for data processing pipelines.
  * 
- * This is the main entry point for the FlowQuery in-browser usage.
+ * This is the main entry point for the FlowQuery Node.js library usage.
  * 
  * @packageDocumentation
  */
@@ -127,3 +127,15 @@ FlowQuery.getFunctionMetadata = function(name: string): FunctionMetadata | undef
 FlowQuery.Function = Function;
 
 export default FlowQuery;
+export { 
+    FlowQuery, 
+    Function, 
+    FunctionFactory, 
+    FunctionCreator, 
+    AsyncDataProvider,
+    FunctionMetadata,
+    ParameterSchema,
+    OutputSchema,
+    RegisterFunctionOptions,
+    RegisterAsyncProviderOptions
+};

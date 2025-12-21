@@ -2,13 +2,30 @@
   "name": "flowquery",
   "version": "1.0.0",
   "description": "A declarative query language for data processing pipelines.",
-  "main": "index.js",
+  "main": "dist/index.node.js",
+  "types": "dist/index.node.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.node.js",
+      "require": "./dist/index.node.js",
+      "types": "./dist/index.node.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/flowquery.min.js",
+      "require": "./dist/flowquery.min.js"
+    }
+  },
+  "bin": {
+    "flowquery": "./dist/index.js"
+  },
   "scripts": {
     "start": "ts-node src/index.ts",
     "test": "jest",
-    "build": "webpack && copyfiles -f dist/flowquery.min.js docs/ && copyfiles -f dist/flowquery.min.js flowquery-vscode/flowQueryEngine/",
+    "build": "tsc && webpack && copyfiles -f dist/flowquery.min.js docs/ && copyfiles -f dist/flowquery.min.js flowquery-vscode/flowQueryEngine/",
+    "build:node": "tsc",
+    "build:browser": "webpack",
     "main": "tsc & node dist/index.js",
-    "docs": "typedoc --out docs/api src/index.ts"
+    "docs": "typedoc --out docs/api src/index.node.ts"
   },
   "keywords": [],
   "author": "",

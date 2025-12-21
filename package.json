@@ -1,5 +1,5 @@
 {
-  "name": "FlowQuery",
+  "name": "flowquery",
   "version": "1.0.0",
   "description": "A declarative query language for data processing pipelines.",
   "main": "index.js",

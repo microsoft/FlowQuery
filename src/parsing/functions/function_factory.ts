@@ -16,6 +16,7 @@ import "./stringify";
 import "./size";
 import "./functions";
 import "./predicate_sum";
+import "./type";
 import { 
     FunctionMetadata, 
     getRegisteredFunctionMetadata,

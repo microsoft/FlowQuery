@@ -67,25 +67,72 @@ export interface FunctionMetadata {
 }
 
 /**
- * Registry for function metadata collected via decorators.
- */
-const functionMetadataRegistry: Map<string, FunctionMetadata> = new Map();
-
-/**
- * Registry for function factories collected via decorators.
- * Allows @FunctionDef to automatically register functions for instantiation.
- */
-const functionFactoryRegistry: Map<string, () => any> = new Map();
-
-/**
  * Type for async data provider functions used in LOAD operations.
  */
 export type AsyncDataProvider = (...args: any[]) => AsyncGenerator<any, void, unknown> | Promise<any>;
 
 /**
- * Registry for async data providers collected via decorators.
+ * Centralized registry for function metadata, factories, and async providers.
+ * Encapsulates all registration logic for the @FunctionDef decorator.
  */
-const asyncProviderRegistry: Map<string, AsyncDataProvider> = new Map();
+class FunctionRegistry {
+    private static metadata: Map<string, FunctionMetadata> = new Map<string, FunctionMetadata>();
+    private static factories: Map<string, () => any> = new Map<string, () => any>();
+    private static asyncProviders: Map<string, AsyncDataProvider> = new Map<string, AsyncDataProvider>();
+
+    /** Derives a camelCase display name from a class name, removing 'Loader' suffix. */
+    private static deriveDisplayName(className: string): string {
+        const baseName: string = className.endsWith('Loader') ? className.slice(0, -6) : className;
+        return baseName.charAt(0).toLowerCase() + baseName.slice(1);
+    }
+
+    /** Registers an async data provider class. */
+    static registerAsync<T extends new (...args: any[]) => any>(constructor: T, options: FunctionDefOptions): void {
+        const displayName: string = this.deriveDisplayName(constructor.name);
+        const registryKey: string = displayName.toLowerCase();
+
+        this.metadata.set(registryKey, { name: displayName, ...options });
+        this.asyncProviders.set(registryKey, (...args: any[]) => new constructor().fetch(...args));
+    }
+
+    /** Registers a regular function class. */
+    static registerFunction<T extends new (...args: any[]) => any>(constructor: T, options: FunctionDefOptions): void {
+        const instance: any = new constructor();
+        const baseName: string = (instance.name?.toLowerCase() || constructor.name.toLowerCase());
+        const displayName: string = baseName.includes(':') ? baseName.split(':')[0] : baseName;
+        const registryKey: string = options.category ? `${displayName}:${options.category}` : displayName;
+
+        this.metadata.set(registryKey, { name: displayName, ...options });
+        
+        if (options.category !== 'predicate') {
+            this.factories.set(displayName, () => new constructor());
+        }
+        this.factories.set(registryKey, () => new constructor());
+    }
+
+    static getAllMetadata(): FunctionMetadata[] {
+        return Array.from(this.metadata.values());
+    }
+
+    static getMetadata(name: string, category?: string): FunctionMetadata | undefined {
+        const lowerName: string = name.toLowerCase();
+        if (category) return this.metadata.get(`${lowerName}:${category}`);
+        for (const meta of this.metadata.values()) {
+            if (meta.name === lowerName) return meta;
+        }
+        return undefined;
+    }
+
+    static getFactory(name: string, category?: string): (() => any) | undefined {
+        const lowerName: string = name.toLowerCase();
+        if (category) return this.factories.get(`${lowerName}:${category}`);
+        return this.factories.get(lowerName);
+    }
+
+    static getAsyncProvider(name: string): AsyncDataProvider | undefined {
+        return this.asyncProviders.get(name.toLowerCase());
+    }
+}
 
 /**
  * Decorator options - metadata without the name (derived from class).
@@ -131,127 +178,39 @@ export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
  */
 export function FunctionDef(options: FunctionDefOptions) {
     return function <T extends new (...args: any[]) => any>(constructor: T): T {
-        // Handle async providers differently
         if (options.category === 'async') {
-            // Derive the function name from the class name
-            // Remove 'Loader' suffix if present and convert to lowercase for registry
-            let baseName = constructor.name;
-            if (baseName.endsWith('Loader')) {
-                baseName = baseName.slice(0, -6);
-            }
-            // Keep display name in camelCase, but use lowercase for registry keys
-            const displayName = baseName.charAt(0).toLowerCase() + baseName.slice(1);
-            const registryKey = displayName.toLowerCase();
-            
-            // Register metadata with display name
-            const metadata: FunctionMetadata = {
-                name: displayName,
-                ...options
-            };
-            functionMetadataRegistry.set(registryKey, metadata);
-            
-            // Register the async provider (wraps the class's fetch method)
-            asyncProviderRegistry.set(registryKey, (...args: any[]) => new constructor().fetch(...args));
-            
-            return constructor;
+            FunctionRegistry.registerAsync(constructor, options);
+        } else {
+            FunctionRegistry.registerFunction(constructor, options);
         }
-        
-        // Regular function handling
-        // Create an instance to get the function name from super() call
-        const instance = new constructor();
-        const baseName = instance.name?.toLowerCase() || constructor.name.toLowerCase();
-        
-        // Use category-qualified key to avoid collisions (e.g., sum vs sum:predicate)
-        // but store the display name without the qualifier
-        const displayName = baseName.includes(':') ? baseName.split(':')[0] : baseName;
-        const registryKey = options.category ? `${displayName}:${options.category}` : displayName;
-        
-        // Register metadata with display name but category-qualified key
-        const metadata: FunctionMetadata = {
-            name: displayName,
-            ...options
-        };
-        functionMetadataRegistry.set(registryKey, metadata);
-        
-        // Register factory function for automatic instantiation
-        // Only register to the simple name if no collision exists (predicate functions use qualified keys)
-        if (options.category !== 'predicate') {
-            functionFactoryRegistry.set(displayName, () => new constructor());
-        }
-        functionFactoryRegistry.set(registryKey, () => new constructor());
-        
         return constructor;
     };
 }
 
 /**
  * Gets all registered function metadata from decorators.
- * 
- * @returns Array of function metadata
  */
 export function getRegisteredFunctionMetadata(): FunctionMetadata[] {
-    return Array.from(functionMetadataRegistry.values());
+    return FunctionRegistry.getAllMetadata();
 }
 
 /**
  * Gets a registered function factory by name.
- * Used by FunctionFactory to instantiate decorator-registered functions.
- * 
- * @param name - Function name (case-insensitive)
- * @param category - Optional category to disambiguate (e.g., 'predicate')
- * @returns Factory function or undefined
  */
 export function getRegisteredFunctionFactory(name: string, category?: string): (() => any) | undefined {
-    const lowerName = name.toLowerCase();
-    
-    // If category specified, look for exact match
-    if (category) {
-        return functionFactoryRegistry.get(`${lowerName}:${category}`);
-    }
-    
-    // Try direct match first
-    if (functionFactoryRegistry.has(lowerName)) {
-        return functionFactoryRegistry.get(lowerName);
-    }
-    
-    return undefined;
+    return FunctionRegistry.getFactory(name, category);
 }
 
 /**
  * Gets metadata for a specific function by name.
- * If multiple functions share the same name (e.g., aggregate vs predicate),
- * optionally specify the category to get the specific one.
- * 
- * @param name - Function name (case-insensitive)
- * @param category - Optional category to disambiguate
- * @returns Function metadata or undefined
  */
 export function getFunctionMetadata(name: string, category?: string): FunctionMetadata | undefined {
-    const lowerName = name.toLowerCase();
-    
-    // If category specified, look for exact match
-    if (category) {
-        return functionMetadataRegistry.get(`${lowerName}:${category}`);
-    }
-    
-    // Otherwise, first try direct match (for functions without category conflicts)
-    // Then search for any function with matching name
-    for (const [key, meta] of functionMetadataRegistry) {
-        if (meta.name === lowerName) {
-            return meta;
-        }
-    }
-    
-    return undefined;
+    return FunctionRegistry.getMetadata(name, category);
 }
 
 /**
  * Gets a registered async data provider by name.
- * Used by FunctionFactory to get decorator-registered async providers.
- * 
- * @param name - Function name (case-insensitive)
- * @returns Async data provider or undefined
  */
 export function getRegisteredAsyncProvider(name: string): AsyncDataProvider | undefined {
-    return asyncProviderRegistry.get(name.toLowerCase());
+    return FunctionRegistry.getAsyncProvider(name);
 }

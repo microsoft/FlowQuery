@@ -8,8 +8,8 @@
  * available async data loaders and their metadata.
  */
 
-import { PluginMetadata, ParameterSchema, OutputSchema } from '../plugins/types';
-import { pluginRegistry } from '../plugins/PluginRegistry';
+import { FunctionMetadata, ParameterSchema, OutputSchema } from 'flowquery/extensibility';
+import { getAllPluginMetadata, getAvailableLoaders } from '../plugins';
 
 /**
  * FlowQuery language reference documentation.
@@ -171,7 +171,7 @@ export class FlowQuerySystemPrompt {
     /**
      * Format a plugin metadata into a readable documentation block.
      */
-    private static formatPluginDocumentation(plugin: PluginMetadata): string {
+    private static formatPluginDocumentation(plugin: FunctionMetadata): string {
         const lines: string[] = [];
         
         lines.push(`### \`${plugin.name}\``);
@@ -210,7 +210,7 @@ export class FlowQuerySystemPrompt {
     /**
      * Generate documentation for all available plugins.
      */
-    private static generatePluginDocumentation(plugins: PluginMetadata[]): string {
+    private static generatePluginDocumentation(plugins: FunctionMetadata[]): string {
         if (plugins.length === 0) {
             return 'No data loader plugins are currently available.';
         }
@@ -218,7 +218,7 @@ export class FlowQuerySystemPrompt {
         const sections: string[] = [];
         
         // Group plugins by category
-        const byCategory = new Map<string, PluginMetadata[]>();
+        const byCategory = new Map<string, FunctionMetadata[]>();
         for (const plugin of plugins) {
             const category = plugin.category || 'general';
             if (!byCategory.has(category)) {
@@ -307,7 +307,7 @@ Now help the user with their request.`;
      */
     public static generate(additionalContext?: string): string {
         // Uses FlowQuery's introspection to get available async providers
-        const plugins = pluginRegistry.getAllPluginMetadata();
+        const plugins = getAllPluginMetadata();
         const pluginDocs = this.generatePluginDocumentation(plugins);
         
         return this.buildSystemPrompt(pluginDocs, additionalContext);
@@ -346,7 +346,7 @@ You are now receiving the execution results. Your job is to:
      * Useful for contexts where token count is a concern.
      */
     public static getMinimalPrompt(): string {
-        const plugins = pluginRegistry.getAllPluginMetadata();
+        const plugins = getAllPluginMetadata();
         const pluginList = plugins.map(p => `- \`${p.name}\`: ${p.description}`).join('\n');
         
         return `You are a FlowQuery assistant. Generate FlowQuery statements based on user requests.
@@ -369,7 +369,7 @@ Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
      */
     public static async generateAsync(additionalContext?: string): Promise<string> {
         // Use FlowQuery's functions() introspection to discover available loaders
-        const plugins = await pluginRegistry.getAvailableLoadersAsync();
+        const plugins = await getAvailableLoaders();
         const pluginDocs = this.generatePluginDocumentation(plugins);
         
         return this.buildSystemPrompt(pluginDocs, additionalContext);

@@ -17,27 +17,20 @@ import "./functions";
 import "./predicate_sum";
 import { 
     FunctionMetadata, 
-    RegisterFunctionOptions, 
-    RegisterAsyncProviderOptions,
     getRegisteredFunctionMetadata,
     getFunctionMetadata,
-    getRegisteredFunctionFactory
+    getRegisteredFunctionFactory,
+    getRegisteredAsyncProvider,
+    AsyncDataProvider
 } from "./function_metadata";
 
-/**
- * Type for synchronous function factories.
- */
-export type FunctionCreator = () => Function;
-
-/**
- * Type for async data provider functions used in LOAD operations.
- * These functions can yield data asynchronously.
- */
-export type AsyncDataProvider = (...args: any[]) => AsyncGenerator<any, void, unknown> | Promise<any>;
+// Re-export AsyncDataProvider for backwards compatibility
+export { AsyncDataProvider };
 
 /**
  * Factory for creating function instances by name.
  * 
+ * All functions are registered via the @FunctionDef decorator.
  * Maps function names (case-insensitive) to their corresponding implementation classes.
  * Supports built-in functions like sum, avg, collect, range, split, join, etc.
  * 
@@ -49,120 +42,13 @@ export type AsyncDataProvider = (...args: any[]) => AsyncGenerator<any, void, un
  */
 class FunctionFactory {
     /**
-     * Registry for plugin functions (synchronous).
-     */
-    private static plugins: Map<string, FunctionCreator> = new Map();
-
-    /**
-     * Registry for async data provider functions used in LOAD operations.
-     */
-    private static asyncProviders: Map<string, AsyncDataProvider> = new Map();
-
-    /**
-     * Registry for function metadata (both sync and async).
-     */
-    private static metadata: Map<string, FunctionMetadata> = new Map();
-
-    /**
-     * Registers a synchronous plugin function.
-     * 
-     * @param name - The function name (will be lowercased)
-     * @param factoryOrOptions - Factory function or options object with metadata
-     */
-    public static register(name: string, factoryOrOptions: FunctionCreator | RegisterFunctionOptions): void {
-        const lowerName = name.toLowerCase();
-        if (typeof factoryOrOptions === 'function') {
-            FunctionFactory.plugins.set(lowerName, factoryOrOptions);
-        } else {
-            FunctionFactory.plugins.set(lowerName, factoryOrOptions.factory);
-            FunctionFactory.metadata.set(lowerName, {
-                ...factoryOrOptions.metadata,
-                name: lowerName,
-                isAsyncProvider: false
-            });
-        }
-    }
-
-    /**
-     * Unregisters a synchronous plugin function.
-     * 
-     * @param name - The function name to unregister
-     */
-    public static unregister(name: string): void {
-        const lowerName = name.toLowerCase();
-        FunctionFactory.plugins.delete(lowerName);
-        FunctionFactory.metadata.delete(lowerName);
-    }
-
-    /**
-     * Registers an async data provider function for use in LOAD operations.
-     * 
-     * @param name - The function name (will be lowercased)
-     * @param providerOrOptions - Async provider or options object with metadata
-     * 
-     * @example
-     * ```typescript
-     * // Register with metadata for LLM consumption
-     * FunctionFactory.registerAsyncProvider("fetchUsers", {
-     *     provider: async function* (endpoint: string) {
-     *         const response = await fetch(endpoint);
-     *         const data = await response.json();
-     *         for (const item of data) {
-     *             yield item;
-     *         }
-     *     },
-     *     metadata: {
-     *         name: "fetchUsers",
-     *         description: "Fetches user data from an API endpoint",
-     *         parameters: [
-     *             { name: "endpoint", description: "API endpoint URL", type: "string" }
-     *         ],
-     *         output: {
-     *             description: "User objects",
-     *             type: "object",
-     *             properties: {
-     *                 id: { description: "User ID", type: "number" },
-     *                 name: { description: "User name", type: "string" }
-     *             }
-     *         },
-     *         examples: ["LOAD JSON FROM fetchUsers('https://api.example.com/users') AS user"]
-     *     }
-     * });
-     * ```
-     */
-    public static registerAsyncProvider(name: string, providerOrOptions: AsyncDataProvider | RegisterAsyncProviderOptions): void {
-        const lowerName = name.toLowerCase();
-        if (typeof providerOrOptions === 'function') {
-            FunctionFactory.asyncProviders.set(lowerName, providerOrOptions);
-        } else {
-            FunctionFactory.asyncProviders.set(lowerName, providerOrOptions.provider);
-            FunctionFactory.metadata.set(lowerName, {
-                ...providerOrOptions.metadata,
-                name: lowerName,
-                isAsyncProvider: true
-            });
-        }
-    }
-
-    /**
-     * Unregisters an async data provider function.
-     * 
-     * @param name - The function name to unregister
-     */
-    public static unregisterAsyncProvider(name: string): void {
-        const lowerName = name.toLowerCase();
-        FunctionFactory.asyncProviders.delete(lowerName);
-        FunctionFactory.metadata.delete(lowerName);
-    }
-
-    /**
      * Gets an async data provider by name.
      * 
      * @param name - The function name (case-insensitive)
      * @returns The async data provider, or undefined if not found
      */
     public static getAsyncProvider(name: string): AsyncDataProvider | undefined {
-        return FunctionFactory.asyncProviders.get(name.toLowerCase());
+        return getRegisteredAsyncProvider(name.toLowerCase());
     }
 
     /**
@@ -172,7 +58,7 @@ class FunctionFactory {
      * @returns True if the function is an async data provider
      */
     public static isAsyncProvider(name: string): boolean {
-        return FunctionFactory.asyncProviders.has(name.toLowerCase());
+        return getRegisteredAsyncProvider(name.toLowerCase()) !== undefined;
     }
 
     /**
@@ -182,45 +68,26 @@ class FunctionFactory {
      * @returns The function metadata, or undefined if not found
      */
     public static getMetadata(name: string): FunctionMetadata | undefined {
-        const lowerName = name.toLowerCase();
-        // Check plugin metadata first
-        if (FunctionFactory.metadata.has(lowerName)) {
-            return FunctionFactory.metadata.get(lowerName);
-        }
-        // Fall back to decorator-registered metadata
-        return getFunctionMetadata(lowerName);
+        return getFunctionMetadata(name.toLowerCase());
     }
 
     /**
      * Lists all registered functions with their metadata.
-     * Includes both built-in and plugin functions.
      * 
      * @param options - Optional filter options
      * @returns Array of function metadata
      */
     public static listFunctions(options?: { 
         category?: string; 
-        includeBuiltins?: boolean;
         asyncOnly?: boolean;
         syncOnly?: boolean;
     }): FunctionMetadata[] {
         const result: FunctionMetadata[] = [];
-        const includeBuiltins = options?.includeBuiltins !== false;
         
-        // Add decorator-registered functions (built-ins)
-        if (includeBuiltins) {
-            for (const meta of getRegisteredFunctionMetadata()) {
-                if (options?.category && meta.category !== options.category) continue;
-                if (options?.asyncOnly) continue; // Built-ins are sync
-                result.push(meta);
-            }
-        }
-        
-        // Add plugin functions
-        for (const [name, meta] of FunctionFactory.metadata) {
+        for (const meta of getRegisteredFunctionMetadata()) {
             if (options?.category && meta.category !== options.category) continue;
-            if (options?.asyncOnly && !meta.isAsyncProvider) continue;
-            if (options?.syncOnly && meta.isAsyncProvider) continue;
+            if (options?.asyncOnly && meta.category !== 'async') continue;
+            if (options?.syncOnly && meta.category === 'async') continue;
             result.push(meta);
         }
         
@@ -233,10 +100,7 @@ class FunctionFactory {
      * @returns Array of function names
      */
     public static listFunctionNames(): string[] {
-        const builtinNames = getRegisteredFunctionMetadata().map(m => m.name);
-        const pluginNames = Array.from(FunctionFactory.plugins.keys());
-        const asyncNames = Array.from(FunctionFactory.asyncProviders.keys());
-        return [...new Set([...builtinNames, ...pluginNames, ...asyncNames])];
+        return getRegisteredFunctionMetadata().map(m => m.name);
     }
 
     /**
@@ -259,11 +123,6 @@ class FunctionFactory {
     public static create(name: string): Function {
         const lowerName = name.toLowerCase();
         
-        // Check plugin registry first (allows overriding built-ins)
-        if (FunctionFactory.plugins.has(lowerName)) {
-            return FunctionFactory.plugins.get(lowerName)!();
-        }
-
         // Check decorator-registered functions (built-ins use @FunctionDef)
         const decoratorFactory = getRegisteredFunctionFactory(lowerName);
         if (decoratorFactory) {

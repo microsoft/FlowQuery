@@ -16,7 +16,7 @@
  *   console.log(response.choices[0].message.content);
  */
 
-import { AsyncLoaderPlugin } from '../types';
+import { FunctionDef } from 'flowquery/extensibility';
 
 // Default configuration - can be overridden via options
 const DEFAULT_CONFIG = {
@@ -80,6 +80,59 @@ export interface LlmResponse {
 /**
  * LLM Loader class - calls OpenAI-compatible APIs for chat completions.
  */
+@FunctionDef({
+    isAsyncProvider: true,
+    description: 'Calls OpenAI-compatible chat completion APIs. Supports GPT models and any OpenAI-compatible endpoint.',
+    category: 'ai',
+    parameters: [
+        {
+            name: 'prompt',
+            description: 'The user prompt to send to the LLM',
+            type: 'string',
+            required: true,
+            example: 'What is the capital of France?'
+        },
+        {
+            name: 'options',
+            description: 'Optional configuration for the LLM request',
+            type: 'object',
+            required: false,
+            properties: {
+                apiKey: { description: 'OpenAI API key', type: 'string' },
+                apiUrl: { description: 'API endpoint URL (defaults to OpenAI chat completions)', type: 'string' },
+                model: { description: 'Model to use (defaults to gpt-4o-mini)', type: 'string' },
+                temperature: { description: 'Sampling temperature 0-2 (defaults to 0.7)', type: 'number' },
+                maxTokens: { description: 'Maximum tokens to generate', type: 'number' },
+                systemPrompt: { description: 'System prompt to set context', type: 'string' },
+                messages: { description: 'Additional conversation messages', type: 'array' },
+                organizationId: { description: 'OpenAI organization ID', type: 'string' },
+                headers: { description: 'Additional request headers', type: 'object' },
+                stream: { description: 'Enable streaming response', type: 'boolean' },
+                additionalParams: { description: 'Additional API parameters', type: 'object' }
+            }
+        }
+    ],
+    output: {
+        description: 'OpenAI chat completion response',
+        type: 'object',
+        properties: {
+            id: { description: 'Unique identifier for the completion', type: 'string' },
+            model: { description: 'Model used for completion', type: 'string' },
+            choices: { 
+                description: 'Array of completion choices', 
+                type: 'array',
+                example: [{ message: { role: 'assistant', content: 'Paris is the capital of France.' } }]
+            },
+            usage: { description: 'Token usage statistics', type: 'object' }
+        }
+    },
+    examples: [
+        "LOAD JSON FROM llm('What is 2+2?') AS response RETURN response.choices[0].message.content",
+        "LOAD JSON FROM llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) AS response RETURN response.choices[0].message.content",
+        "LOAD JSON FROM llm('Write a haiku', { systemPrompt: 'You are a poet' }) AS response RETURN response.choices[0].message.content"
+    ],
+    notes: 'Requires API key configured in Settings or passed as apiKey option. Works with any OpenAI-compatible API by setting the apiUrl option.'
+})
 export class LlmLoader {
     private readonly defaultOptions: Partial<LlmOptions>;
 
@@ -381,61 +434,4 @@ export function extractContent(response: LlmResponse): string {
     return LlmLoader.extractContent(response);
 }
 
-export const llmPlugin: AsyncLoaderPlugin = {
-    name: 'llm',
-    provider: (prompt: string, options?: LlmOptions) => new LlmLoader().fetch(prompt, options),
-    metadata: {
-        description: 'Calls OpenAI-compatible chat completion APIs. Supports GPT models and any OpenAI-compatible endpoint.',
-        category: 'ai',
-        parameters: [
-            {
-                name: 'prompt',
-                description: 'The user prompt to send to the LLM',
-                type: 'string',
-                required: true,
-                example: 'What is the capital of France?'
-            },
-            {
-                name: 'options',
-                description: 'Optional configuration for the LLM request',
-                type: 'object',
-                required: false,
-                properties: {
-                    apiKey: { description: 'OpenAI API key', type: 'string' },
-                    apiUrl: { description: 'API endpoint URL (defaults to OpenAI chat completions)', type: 'string' },
-                    model: { description: 'Model to use (defaults to gpt-4o-mini)', type: 'string' },
-                    temperature: { description: 'Sampling temperature 0-2 (defaults to 0.7)', type: 'number' },
-                    maxTokens: { description: 'Maximum tokens to generate', type: 'number' },
-                    systemPrompt: { description: 'System prompt to set context', type: 'string' },
-                    messages: { description: 'Additional conversation messages', type: 'array' },
-                    organizationId: { description: 'OpenAI organization ID', type: 'string' },
-                    headers: { description: 'Additional request headers', type: 'object' },
-                    stream: { description: 'Enable streaming response', type: 'boolean' },
-                    additionalParams: { description: 'Additional API parameters', type: 'object' }
-                }
-            }
-        ],
-        output: {
-            description: 'OpenAI chat completion response',
-            type: 'object',
-            properties: {
-                id: { description: 'Unique identifier for the completion', type: 'string' },
-                model: { description: 'Model used for completion', type: 'string' },
-                choices: { 
-                    description: 'Array of completion choices', 
-                    type: 'array',
-                    example: [{ message: { role: 'assistant', content: 'Paris is the capital of France.' } }]
-                },
-                usage: { description: 'Token usage statistics', type: 'object' }
-            }
-        },
-        examples: [
-            "LOAD JSON FROM llm('What is 2+2?') AS response RETURN response.choices[0].message.content",
-            "LOAD JSON FROM llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) AS response RETURN response.choices[0].message.content",
-            "LOAD JSON FROM llm('Write a haiku', { systemPrompt: 'You are a poet' }) AS response RETURN response.choices[0].message.content"
-        ],
-        notes: 'Requires API key configured in Settings or passed as apiKey option. Works with any OpenAI-compatible API by setting the apiUrl option.'
-    }
-};
-
-export default llmPlugin;
+export default LlmLoader;

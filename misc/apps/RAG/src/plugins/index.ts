@@ -3,38 +3,27 @@
  * 
  * To add a new plugin:
  * 1. Create a new file in the `loaders/` directory
- * 2. Export your plugin(s) following the AsyncLoaderPlugin interface
- * 3. Import and add to the plugins array in this file
+ * 2. Add the @AsyncProviderDef decorator to your loader class
+ * 3. Import the class in this file (the decorator auto-registers with FlowQuery)
  */
 
-import pluginRegistry from './PluginRegistry';
-import { AsyncLoaderPlugin, PluginMetadata } from './types';
+import FlowQuery from 'flowquery';
+import { FunctionMetadata } from 'flowquery/extensibility';
 
-// Import individual plugins
-import fetchJsonPlugin from './loaders/FetchJson';
-import catFactsPlugin from './loaders/CatFacts';
-import mockDataPlugins from './loaders/MockData';
-import llmPlugin from './loaders/Llm';
-
-/**
- * All plugins to be loaded on startup.
- * Add new plugins here as they are created.
- */
-const allPlugins: AsyncLoaderPlugin[] = [
-    fetchJsonPlugin,
-    catFactsPlugin,
-    ...mockDataPlugins,
-    llmPlugin,
-];
+// Import loader classes - the @AsyncProviderDef decorator auto-registers them with FlowQuery
+import './loaders/FetchJson';
+import './loaders/CatFacts';
+import './loaders/MockData';
+import './loaders/Llm';
 
 /**
- * Initialize and load all plugins.
- * Call this function once on app startup.
+ * Initialize plugins.
+ * Plugins are auto-registered via @AsyncProviderDef decorators when imported.
+ * This function just logs the registered plugins for debugging.
  */
 export function initializePlugins(): void {
-    console.log('Initializing FlowQuery plugins...');
-    pluginRegistry.registerAll(allPlugins);
-    console.log(`Loaded ${pluginRegistry.getLoadedPlugins().length} plugins`);
+    const plugins = getLoadedPluginNames();
+    console.log(`FlowQuery plugins loaded: ${plugins.join(', ')}`);
 }
 
 /**
@@ -42,15 +31,15 @@ export function initializePlugins(): void {
  * Uses FlowQuery's introspection to discover registered async providers.
  */
 export function getLoadedPluginNames(): string[] {
-    return pluginRegistry.getLoadedPlugins();
+    return FlowQuery.listFunctions({ asyncOnly: true }).map(f => f.name);
 }
 
 /**
  * Get metadata for all loaded plugins.
  * Uses FlowQuery's functions() introspection as the single source of truth.
  */
-export function getAllPluginMetadata(): PluginMetadata[] {
-    return pluginRegistry.getAllPluginMetadata();
+export function getAllPluginMetadata(): FunctionMetadata[] {
+    return FlowQuery.listFunctions({ asyncOnly: true });
 }
 
 /**
@@ -59,13 +48,20 @@ export function getAllPluginMetadata(): PluginMetadata[] {
  * 
  * @returns Promise resolving to array of plugin metadata
  */
-export async function getAvailableLoaders(): Promise<PluginMetadata[]> {
-    return pluginRegistry.getAvailableLoadersAsync();
+export async function getAvailableLoaders(): Promise<FunctionMetadata[]> {
+    const runner = new FlowQuery(`
+        WITH functions() AS funcs 
+        UNWIND funcs AS f 
+        WHERE f.isAsyncProvider = true
+        RETURN f
+    `);
+    await runner.run();
+    return runner.results.map((r: any) => r.expr0 as FunctionMetadata);
 }
 
-// Re-export types and registry for external use
-export { pluginRegistry } from './PluginRegistry';
-export type { AsyncLoaderPlugin, PluginModule, PluginMetadata, AsyncDataProvider, ParameterSchema, OutputSchema, FunctionMetadata } from './types';
+// Re-export types for external use
+export type { FunctionMetadata, FunctionDefOptions, ParameterSchema, OutputSchema, AsyncDataProvider } from 'flowquery/extensibility';
+export { FunctionDef } from 'flowquery/extensibility';
 
 // Re-export standalone loader functions for use outside of FlowQuery
 export { llm, llmStream, extractContent } from './loaders/Llm';

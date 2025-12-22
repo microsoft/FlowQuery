@@ -6,11 +6,40 @@
  *   RETURN user.name, user.email
  */
 
-import { AsyncLoaderPlugin } from '../types';
+import { FunctionDef } from 'flowquery/extensibility';
 
 /**
  * MockUsers loader class - generates mock user data for testing.
  */
+@FunctionDef({
+    isAsyncProvider: true,
+    description: 'Generates mock user data for testing purposes',
+    category: 'testing',
+    parameters: [
+        {
+            name: 'count',
+            description: 'Number of mock users to generate',
+            type: 'number',
+            required: false,
+            default: 5
+        }
+    ],
+    output: {
+        description: 'Mock user object',
+        type: 'object',
+        properties: {
+            id: { description: 'User ID', type: 'number' },
+            name: { description: 'Full name', type: 'string' },
+            email: { description: 'Email address', type: 'string' },
+            age: { description: 'Age in years', type: 'number' },
+            active: { description: 'Whether user is active', type: 'boolean' }
+        }
+    },
+    examples: [
+        "LOAD JSON FROM mockUsers(10) AS user RETURN user.name, user.email",
+        "LOAD JSON FROM mockUsers(20) AS user RETURN user WHERE user.active = true"
+    ]
+})
 export class MockUsersLoader {
     private readonly firstNames: string[];
     private readonly lastNames: string[];
@@ -51,6 +80,36 @@ export class MockUsersLoader {
 /**
  * MockProducts loader class - generates mock product data for testing.
  */
+@FunctionDef({
+    isAsyncProvider: true,
+    description: 'Generates mock product data for testing purposes',
+    category: 'testing',
+    parameters: [
+        {
+            name: 'count',
+            description: 'Number of mock products to generate',
+            type: 'number',
+            required: false,
+            default: 5
+        }
+    ],
+    output: {
+        description: 'Mock product object',
+        type: 'object',
+        properties: {
+            id: { description: 'Product ID', type: 'number' },
+            name: { description: 'Product name', type: 'string' },
+            category: { description: 'Product category', type: 'string' },
+            price: { description: 'Price in dollars', type: 'number' },
+            inStock: { description: 'Whether product is in stock', type: 'boolean' },
+            rating: { description: 'Customer rating (0-5)', type: 'number' }
+        }
+    },
+    examples: [
+        "LOAD JSON FROM mockProducts(10) AS p RETURN p.name, p.price",
+        "LOAD JSON FROM mockProducts(50) AS p RETURN p WHERE p.category = 'Electronics'"
+    ]
+})
 export class MockProductsLoader {
     private readonly categories: string[];
     private readonly adjectives: string[];
@@ -89,73 +148,4 @@ export class MockProductsLoader {
     }
 }
 
-export const mockUsersPlugin: AsyncLoaderPlugin = {
-    name: 'mockUsers',
-    provider: (count: number = 5) => new MockUsersLoader().fetch(count),
-    metadata: {
-        description: 'Generates mock user data for testing purposes',
-        category: 'testing',
-        parameters: [
-            {
-                name: 'count',
-                description: 'Number of mock users to generate',
-                type: 'number',
-                required: false,
-                default: 5
-            }
-        ],
-        output: {
-            description: 'Mock user object',
-            type: 'object',
-            properties: {
-                id: { description: 'User ID', type: 'number' },
-                name: { description: 'Full name', type: 'string' },
-                email: { description: 'Email address', type: 'string' },
-                age: { description: 'Age in years', type: 'number' },
-                active: { description: 'Whether user is active', type: 'boolean' }
-            }
-        },
-        examples: [
-            "LOAD JSON FROM mockUsers(10) AS user RETURN user.name, user.email",
-            "LOAD JSON FROM mockUsers(20) AS user RETURN user WHERE user.active = true"
-        ]
-    }
-};
-
-export const mockProductsPlugin: AsyncLoaderPlugin = {
-    name: 'mockProducts',
-    provider: (count: number = 5) => new MockProductsLoader().fetch(count),
-    metadata: {
-        description: 'Generates mock product data for testing purposes',
-        category: 'testing',
-        parameters: [
-            {
-                name: 'count',
-                description: 'Number of mock products to generate',
-                type: 'number',
-                required: false,
-                default: 5
-            }
-        ],
-        output: {
-            description: 'Mock product object',
-            type: 'object',
-            properties: {
-                id: { description: 'Product ID', type: 'number' },
-                name: { description: 'Product name', type: 'string' },
-                category: { description: 'Product category', type: 'string' },
-                price: { description: 'Price in dollars', type: 'number' },
-                inStock: { description: 'Whether product is in stock', type: 'boolean' },
-                rating: { description: 'Customer rating (0-5)', type: 'number' }
-            }
-        },
-        examples: [
-            "LOAD JSON FROM mockProducts(10) AS p RETURN p.name, p.price",
-            "LOAD JSON FROM mockProducts(50) AS p RETURN p WHERE p.category = 'Electronics'"
-        ]
-    }
-};
-
-export const plugins = [mockUsersPlugin, mockProductsPlugin];
-
-export default plugins;
+export { MockUsersLoader as default };

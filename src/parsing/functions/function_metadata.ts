@@ -3,7 +3,7 @@
  * Core categories: scalar, aggregate, predicate, async
  * Additional categories for organization: string, math, data, etc.
  */
-export type FunctionCategory = "scalar" | "aggregate" | "predicate" | "async" | "string" | "math" | "data" | "introspection" | string;
+export type FunctionCategory = "scalar" | "aggregate" | "predicate" | "async" | string;
 
 /**
  * Schema definition for function arguments and outputs.
@@ -54,8 +54,8 @@ export interface FunctionMetadata {
     name: string;
     /** Human-readable description of what the function does */
     description: string;
-    /** Category for grouping functions */
-    category?: FunctionCategory;
+    /** Category that determines function type and behavior */
+    category: FunctionCategory;
     /** Array of parameter schemas */
     parameters: ParameterSchema[];
     /** Output schema */
@@ -64,28 +64,6 @@ export interface FunctionMetadata {
     examples?: string[];
     /** Additional notes or caveats */
     notes?: string;
-    /** Whether this is an async data provider (for LOAD operations) */
-    isAsyncProvider?: boolean;
-}
-
-/**
- * Options for registering a sync function with metadata.
- */
-export interface RegisterFunctionOptions {
-    /** Factory function that creates the Function instance */
-    factory: () => any;
-    /** Function metadata for documentation */
-    metadata: FunctionMetadata;
-}
-
-/**
- * Options for registering an async data provider with metadata.
- */
-export interface RegisterAsyncProviderOptions {
-    /** Async generator or function that returns data */
-    provider: (...args: any[]) => AsyncGenerator<any, void, unknown> | Promise<any>;
-    /** Function metadata for documentation */
-    metadata: FunctionMetadata;
 }
 
 /**
@@ -100,19 +78,35 @@ const functionMetadataRegistry: Map<string, FunctionMetadata> = new Map();
 const functionFactoryRegistry: Map<string, () => any> = new Map();
 
 /**
+ * Type for async data provider functions used in LOAD operations.
+ */
+export type AsyncDataProvider = (...args: any[]) => AsyncGenerator<any, void, unknown> | Promise<any>;
+
+/**
+ * Registry for async data providers collected via decorators.
+ */
+const asyncProviderRegistry: Map<string, AsyncDataProvider> = new Map();
+
+/**
  * Decorator options - metadata without the name (derived from class).
  */
 export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
 
 /**
  * Class decorator that registers function metadata.
- * The function name is derived from the class's constructor call to super().
+ * The function name is derived from the class's constructor call to super() for regular functions,
+ * or from the class name for async providers.
+ * 
+ * For async providers (category: "async"), the class must have a `fetch` method that returns
+ * an AsyncGenerator. The function name is derived from the class name (removing 'Loader' suffix
+ * if present) and converted to camelCase.
  * 
  * @param options - Function metadata (excluding name)
  * @returns Class decorator
  * 
  * @example
  * ```typescript
+ * // Regular function
  * @FunctionDef({
  *     description: "Calculates the sum of numeric values",
  *     category: "aggregate",
@@ -121,10 +115,48 @@ export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
  *     examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN sum(n)"]
  * })
  * class Sum extends AggregateFunction { ... }
+ * 
+ * // Async data provider
+ * @FunctionDef({
+ *     description: "Fetches random cat facts from the Cat Facts API",
+ *     category: "async",
+ *     parameters: [{ name: "count", description: "Number of facts", type: "number", required: false, default: 1 }],
+ *     output: { description: "Cat fact object", type: "object" },
+ *     examples: ["LOAD JSON FROM catFacts(5) AS fact RETURN fact.text"]
+ * })
+ * class CatFactsLoader {
+ *     async *fetch(count: number = 1): AsyncGenerator<any> { ... }
+ * }
  * ```
  */
 export function FunctionDef(options: FunctionDefOptions) {
     return function <T extends new (...args: any[]) => any>(constructor: T): T {
+        // Handle async providers differently
+        if (options.category === 'async') {
+            // Derive the function name from the class name
+            // Remove 'Loader' suffix if present and convert to lowercase for registry
+            let baseName = constructor.name;
+            if (baseName.endsWith('Loader')) {
+                baseName = baseName.slice(0, -6);
+            }
+            // Keep display name in camelCase, but use lowercase for registry keys
+            const displayName = baseName.charAt(0).toLowerCase() + baseName.slice(1);
+            const registryKey = displayName.toLowerCase();
+            
+            // Register metadata with display name
+            const metadata: FunctionMetadata = {
+                name: displayName,
+                ...options
+            };
+            functionMetadataRegistry.set(registryKey, metadata);
+            
+            // Register the async provider (wraps the class's fetch method)
+            asyncProviderRegistry.set(registryKey, (...args: any[]) => new constructor().fetch(...args));
+            
+            return constructor;
+        }
+        
+        // Regular function handling
         // Create an instance to get the function name from super() call
         const instance = new constructor();
         const baseName = instance.name?.toLowerCase() || constructor.name.toLowerCase();
@@ -211,4 +243,15 @@ export function getFunctionMetadata(name: string, category?: string): FunctionMe
     }
     
     return undefined;
+}
+
+/**
+ * Gets a registered async data provider by name.
+ * Used by FunctionFactory to get decorator-registered async providers.
+ * 
+ * @param name - Function name (case-insensitive)
+ * @returns Async data provider or undefined
+ */
+export function getRegisteredAsyncProvider(name: string): AsyncDataProvider | undefined {
+    return asyncProviderRegistry.get(name.toLowerCase());
 }

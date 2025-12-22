@@ -496,3 +496,11 @@ test('Test range with size', async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({'indices': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]});
 });
+
+test('Test keys function', async () => {
+    const runner = new Runner('RETURN keys({name: "Alice", age: 30}) as keys');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({'keys': ['name', 'age']});
+});

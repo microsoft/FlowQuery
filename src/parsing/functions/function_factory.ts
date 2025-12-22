@@ -9,6 +9,7 @@ import "./rand";
 import "./round";
 import "./split";
 import "./join";
+import "./keys";
 import "./to_json";
 import "./replace";
 import "./stringify";

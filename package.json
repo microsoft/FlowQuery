@@ -1,6 +1,6 @@
 {
   "name": "flowquery",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "A declarative query language for data processing pipelines.",
   "main": "dist/index.node.js",
   "types": "dist/index.node.d.ts",

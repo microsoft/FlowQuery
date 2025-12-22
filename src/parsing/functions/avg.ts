@@ -1,6 +1,7 @@
 import AggregateFunction from "./aggregate_function";
 import ASTNode from "../ast_node";
 import ReducerElement from "./reducer_element";
+import { FunctionDef } from "./function_metadata";
 
 class AvgReducerElement extends ReducerElement {
     private _count: number = 0;
@@ -21,6 +22,15 @@ class AvgReducerElement extends ReducerElement {
     }
 }
 
+@FunctionDef({
+    description: "Calculates the average of numeric values across grouped rows",
+    category: "aggregate",
+    parameters: [
+        { name: "value", description: "Numeric value to average", type: "number" }
+    ],
+    output: { description: "Average of all values", type: "number", example: 50 },
+    examples: ["WITH [10, 20, 30] AS nums UNWIND nums AS n RETURN avg(n)"]
+})
 class Avg extends AggregateFunction {
     constructor() {
         super("avg");

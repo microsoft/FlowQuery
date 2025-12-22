@@ -1,7 +1,18 @@
 import ASTNode from "../ast_node";
 import Function from "./function";
 import String from "../expressions/string";
+import { FunctionDef } from "./function_metadata";
 
+@FunctionDef({
+    description: "Splits a string into an array by a delimiter",
+    category: "scalar",
+    parameters: [
+        { name: "text", description: "String to split", type: "string" },
+        { name: "delimiter", description: "Delimiter to split by", type: "string" }
+    ],
+    output: { description: "Array of string parts", type: "array", items: { type: "string" }, example: ["a", "b", "c"] },
+    examples: ["WITH 'a,b,c' AS s RETURN split(s, ',')"]
+})
 class Split extends Function {
     constructor() {
         super("split");

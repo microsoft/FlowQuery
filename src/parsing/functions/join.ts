@@ -1,7 +1,18 @@
 import ASTNode from "../ast_node";
 import Function from "./function";
 import String from "../expressions/string";
+import { FunctionDef } from "./function_metadata";
 
+@FunctionDef({
+    description: "Joins an array of strings with a delimiter",
+    category: "scalar",
+    parameters: [
+        { name: "array", description: "Array of values to join", type: "array" },
+        { name: "delimiter", description: "Delimiter to join with", type: "string" }
+    ],
+    output: { description: "Joined string", type: "string", example: "a,b,c" },
+    examples: ["WITH ['a', 'b', 'c'] AS arr RETURN join(arr, ',')"]
+})
 class Join extends Function {
     constructor() {
         super("join");

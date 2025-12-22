@@ -1,4 +1,11 @@
 /**
+ * Category types for functions.
+ * Core categories: scalar, aggregate, predicate, async
+ * Additional categories for organization: string, math, data, etc.
+ */
+export type FunctionCategory = "scalar" | "aggregate" | "predicate" | "async" | "string" | "math" | "data" | "introspection" | string;
+
+/**
  * Schema definition for function arguments and outputs.
  * Compatible with JSON Schema for LLM consumption.
  */
@@ -47,18 +54,18 @@ export interface FunctionMetadata {
     name: string;
     /** Human-readable description of what the function does */
     description: string;
-    /** Category for grouping functions (e.g., "aggregation", "string", "data") */
-    category?: string;
+    /** Category for grouping functions */
+    category?: FunctionCategory;
     /** Array of parameter schemas */
     parameters: ParameterSchema[];
     /** Output schema */
     output: OutputSchema;
     /** Example usage in FlowQuery syntax */
     examples?: string[];
-    /** Whether this is an async data provider for LOAD operations */
-    isAsyncProvider?: boolean;
     /** Additional notes or caveats */
     notes?: string;
+    /** Whether this is an async data provider (for LOAD operations) */
+    isAsyncProvider?: boolean;
 }
 
 /**
@@ -82,157 +89,126 @@ export interface RegisterAsyncProviderOptions {
 }
 
 /**
- * Built-in function metadata definitions.
+ * Registry for function metadata collected via decorators.
  */
-export const BUILTIN_FUNCTION_METADATA: FunctionMetadata[] = [
-    {
-        name: "sum",
-        description: "Calculates the sum of numeric values across grouped rows",
-        category: "aggregation",
-        parameters: [
-            { name: "value", description: "Numeric value to sum", type: "number" }
-        ],
-        output: { description: "Sum of all values", type: "number", example: 150 },
-        examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN sum(n)"]
-    },
-    {
-        name: "avg",
-        description: "Calculates the average of numeric values across grouped rows",
-        category: "aggregation",
-        parameters: [
-            { name: "value", description: "Numeric value to average", type: "number" }
-        ],
-        output: { description: "Average of all values", type: "number", example: 50 },
-        examples: ["WITH [10, 20, 30] AS nums UNWIND nums AS n RETURN avg(n)"]
-    },
-    {
-        name: "collect",
-        description: "Collects values into an array across grouped rows",
-        category: "aggregation",
-        parameters: [
-            { name: "value", description: "Value to collect", type: "any" }
-        ],
-        output: { description: "Array of collected values", type: "array", example: [1, 2, 3] },
-        examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN collect(n)"]
-    },
-    {
-        name: "range",
-        description: "Generates an array of sequential integers",
-        category: "generator",
-        parameters: [
-            { name: "start", description: "Starting number (inclusive)", type: "number" },
-            { name: "end", description: "Ending number (inclusive)", type: "number" }
-        ],
-        output: { description: "Array of integers from start to end", type: "array", items: { type: "number" }, example: [1, 2, 3, 4, 5] },
-        examples: ["WITH range(1, 5) AS nums RETURN nums"]
-    },
-    {
-        name: "rand",
-        description: "Generates a random number between 0 and 1",
-        category: "generator",
-        parameters: [],
-        output: { description: "Random number between 0 and 1", type: "number", example: 0.7234 },
-        examples: ["WITH rand() AS r RETURN r"]
-    },
-    {
-        name: "round",
-        description: "Rounds a number to the nearest integer",
-        category: "math",
-        parameters: [
-            { name: "value", description: "Number to round", type: "number" }
-        ],
-        output: { description: "Rounded integer", type: "number", example: 4 },
-        examples: ["WITH 3.7 AS n RETURN round(n)"]
-    },
-    {
-        name: "split",
-        description: "Splits a string into an array by a delimiter",
-        category: "string",
-        parameters: [
-            { name: "text", description: "String to split", type: "string" },
-            { name: "delimiter", description: "Delimiter to split by", type: "string" }
-        ],
-        output: { description: "Array of string parts", type: "array", items: { type: "string" }, example: ["a", "b", "c"] },
-        examples: ["WITH 'a,b,c' AS s RETURN split(s, ',')"]
-    },
-    {
-        name: "join",
-        description: "Joins an array of strings with a delimiter",
-        category: "string",
-        parameters: [
-            { name: "array", description: "Array of values to join", type: "array" },
-            { name: "delimiter", description: "Delimiter to join with", type: "string" }
-        ],
-        output: { description: "Joined string", type: "string", example: "a,b,c" },
-        examples: ["WITH ['a', 'b', 'c'] AS arr RETURN join(arr, ',')"]
-    },
-    {
-        name: "replace",
-        description: "Replaces occurrences of a pattern in a string",
-        category: "string",
-        parameters: [
-            { name: "text", description: "Source string", type: "string" },
-            { name: "pattern", description: "Pattern to find", type: "string" },
-            { name: "replacement", description: "Replacement string", type: "string" }
-        ],
-        output: { description: "String with replacements", type: "string", example: "hello world" },
-        examples: ["WITH 'hello there' AS s RETURN replace(s, 'there', 'world')"]
-    },
-    {
-        name: "stringify",
-        description: "Converts a value to its JSON string representation",
-        category: "conversion",
-        parameters: [
-            { name: "value", description: "Value to stringify", type: "any" }
-        ],
-        output: { description: "JSON string", type: "string", example: "{\"a\":1}" },
-        examples: ["WITH {a: 1} AS obj RETURN stringify(obj)"]
-    },
-    {
-        name: "tojson",
-        description: "Parses a JSON string into an object",
-        category: "conversion",
-        parameters: [
-            { name: "text", description: "JSON string to parse", type: "string" }
-        ],
-        output: { description: "Parsed object or array", type: "object", example: { a: 1 } },
-        examples: ["WITH '{\"a\": 1}' AS s RETURN tojson(s)"]
-    },
-    {
-        name: "size",
-        description: "Returns the length of an array or string",
-        category: "utility",
-        parameters: [
-            { name: "value", description: "Array or string to measure", type: "array" }
-        ],
-        output: { description: "Length of the input", type: "number", example: 3 },
-        examples: ["WITH [1, 2, 3] AS arr RETURN size(arr)"]
-    },
-    {
-        name: "functions",
-        description: "Lists all registered functions with their metadata. Useful for discovering available functions and their documentation. Results include name, description, parameters, output schema, and usage examples.",
-        category: "introspection",
-        parameters: [
-            { name: "category", description: "Optional category to filter by (e.g., 'aggregation', 'string', 'math')", type: "string", required: false }
-        ],
-        output: { 
-            description: "Array of function metadata objects", 
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    name: { description: "Function name", type: "string" },
-                    description: { description: "What the function does", type: "string" },
-                    category: { description: "Function category", type: "string" },
-                    parameters: { description: "Array of parameter definitions", type: "array" },
-                    output: { description: "Output schema", type: "object" },
-                    examples: { description: "Usage examples", type: "array" }
-                }
-            }
-        },
-        examples: [
-            "WITH functions() AS funcs RETURN funcs",
-            "WITH functions('aggregation') AS funcs UNWIND funcs AS f RETURN f.name, f.description"
-        ]
+const functionMetadataRegistry: Map<string, FunctionMetadata> = new Map();
+
+/**
+ * Registry for function factories collected via decorators.
+ * Allows @FunctionDef to automatically register functions for instantiation.
+ */
+const functionFactoryRegistry: Map<string, () => any> = new Map();
+
+/**
+ * Decorator options - metadata without the name (derived from class).
+ */
+export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
+
+/**
+ * Class decorator that registers function metadata.
+ * The function name is derived from the class's constructor call to super().
+ * 
+ * @param options - Function metadata (excluding name)
+ * @returns Class decorator
+ * 
+ * @example
+ * ```typescript
+ * @FunctionDef({
+ *     description: "Calculates the sum of numeric values",
+ *     category: "aggregate",
+ *     parameters: [{ name: "value", description: "Numeric value to sum", type: "number" }],
+ *     output: { description: "Sum of all values", type: "number", example: 150 },
+ *     examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN sum(n)"]
+ * })
+ * class Sum extends AggregateFunction { ... }
+ * ```
+ */
+export function FunctionDef(options: FunctionDefOptions) {
+    return function <T extends new (...args: any[]) => any>(constructor: T): T {
+        // Create an instance to get the function name from super() call
+        const instance = new constructor();
+        const baseName = instance.name?.toLowerCase() || constructor.name.toLowerCase();
+        
+        // Use category-qualified key to avoid collisions (e.g., sum vs sum:predicate)
+        // but store the display name without the qualifier
+        const displayName = baseName.includes(':') ? baseName.split(':')[0] : baseName;
+        const registryKey = options.category ? `${displayName}:${options.category}` : displayName;
+        
+        // Register metadata with display name but category-qualified key
+        const metadata: FunctionMetadata = {
+            name: displayName,
+            ...options
+        };
+        functionMetadataRegistry.set(registryKey, metadata);
+        
+        // Register factory function for automatic instantiation
+        // Only register to the simple name if no collision exists (predicate functions use qualified keys)
+        if (options.category !== 'predicate') {
+            functionFactoryRegistry.set(displayName, () => new constructor());
+        }
+        functionFactoryRegistry.set(registryKey, () => new constructor());
+        
+        return constructor;
+    };
+}
+
+/**
+ * Gets all registered function metadata from decorators.
+ * 
+ * @returns Array of function metadata
+ */
+export function getRegisteredFunctionMetadata(): FunctionMetadata[] {
+    return Array.from(functionMetadataRegistry.values());
+}
+
+/**
+ * Gets a registered function factory by name.
+ * Used by FunctionFactory to instantiate decorator-registered functions.
+ * 
+ * @param name - Function name (case-insensitive)
+ * @param category - Optional category to disambiguate (e.g., 'predicate')
+ * @returns Factory function or undefined
+ */
+export function getRegisteredFunctionFactory(name: string, category?: string): (() => any) | undefined {
+    const lowerName = name.toLowerCase();
+    
+    // If category specified, look for exact match
+    if (category) {
+        return functionFactoryRegistry.get(`${lowerName}:${category}`);
     }
-];
+    
+    // Try direct match first
+    if (functionFactoryRegistry.has(lowerName)) {
+        return functionFactoryRegistry.get(lowerName);
+    }
+    
+    return undefined;
+}
+
+/**
+ * Gets metadata for a specific function by name.
+ * If multiple functions share the same name (e.g., aggregate vs predicate),
+ * optionally specify the category to get the specific one.
+ * 
+ * @param name - Function name (case-insensitive)
+ * @param category - Optional category to disambiguate
+ * @returns Function metadata or undefined
+ */
+export function getFunctionMetadata(name: string, category?: string): FunctionMetadata | undefined {
+    const lowerName = name.toLowerCase();
+    
+    // If category specified, look for exact match
+    if (category) {
+        return functionMetadataRegistry.get(`${lowerName}:${category}`);
+    }
+    
+    // Otherwise, first try direct match (for functions without category conflicts)
+    // Then search for any function with matching name
+    for (const [key, meta] of functionMetadataRegistry) {
+        if (meta.name === lowerName) {
+            return meta;
+        }
+    }
+    
+    return undefined;
+}

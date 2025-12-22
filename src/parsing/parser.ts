@@ -31,7 +31,6 @@ import AggregateFunction from "./functions/aggregate_function";
 import ObjectUtils from "../utils/object_utils";
 import PredicateFunction from "./functions/predicate_function";
 import Token from "../tokenization/token";
-import PredicateFunctionFactory from "./functions/predicate_function_factory";
 import FString from "./expressions/f_string";
 import String from "./expressions/string";
 import AggregatedWith from "./operations/aggregated_with";
@@ -617,7 +616,7 @@ class Parser extends BaseParser {
         if(this.token.value === null) {
             throw new Error('Expected identifier');
         }
-        const func = PredicateFunctionFactory.create(this.token.value);
+        const func = FunctionFactory.createPredicate(this.token.value);
         this.setNextToken();
         if(!this.token.isLeftParenthesis()) {
             throw new Error('Expected left parenthesis');

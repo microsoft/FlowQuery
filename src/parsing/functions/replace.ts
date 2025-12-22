@@ -1,5 +1,17 @@
 import Function from "./function";
+import { FunctionDef } from "./function_metadata";
 
+@FunctionDef({
+    description: "Replaces occurrences of a pattern in a string",
+    category: "scalar",
+    parameters: [
+        { name: "text", description: "Source string", type: "string" },
+        { name: "pattern", description: "Pattern to find", type: "string" },
+        { name: "replacement", description: "Replacement string", type: "string" }
+    ],
+    output: { description: "String with replacements", type: "string", example: "hello world" },
+    examples: ["WITH 'hello there' AS s RETURN replace(s, 'there', 'world')"]
+})
 class Replace extends Function {
     constructor() {
         super("replace");

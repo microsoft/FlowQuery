@@ -1,5 +1,6 @@
 import AggregateFunction from "./aggregate_function";
 import ReducerElement from "./reducer_element";
+import { FunctionDef } from "./function_metadata";
 
 class SumReducerElement extends ReducerElement {
     private _value: any = null;
@@ -15,6 +16,15 @@ class SumReducerElement extends ReducerElement {
     }
 }
 
+@FunctionDef({
+    description: "Calculates the sum of numeric values across grouped rows",
+    category: "aggregate",
+    parameters: [
+        { name: "value", description: "Numeric value to sum", type: "number" }
+    ],
+    output: { description: "Sum of all values", type: "number", example: 150 },
+    examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN sum(n)"]
+})
 class Sum extends AggregateFunction {
     constructor() {
         super("sum");

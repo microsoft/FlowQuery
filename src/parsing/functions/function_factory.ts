@@ -1,22 +1,27 @@
-import Sum from "./sum";
-import Collect from "./collect";
-import Avg from "./avg";
-import Range from "./range";
-import Rand from "./rand";
-import Round from "./round";
-import Split from "./split";
-import Join from "./join";
-import ToJson from "./to_json";
-import Replace from "./replace";
-import Stringify from "./stringify";
-import Size from "./size";
-import Functions from "./functions";
 import Function from "./function";
+import PredicateFunction from "./predicate_function";
+// Import built-in functions to ensure their @FunctionDef decorators run
+import "./sum";
+import "./collect";
+import "./avg";
+import "./range";
+import "./rand";
+import "./round";
+import "./split";
+import "./join";
+import "./to_json";
+import "./replace";
+import "./stringify";
+import "./size";
+import "./functions";
+import "./predicate_sum";
 import { 
     FunctionMetadata, 
     RegisterFunctionOptions, 
     RegisterAsyncProviderOptions,
-    BUILTIN_FUNCTION_METADATA 
+    getRegisteredFunctionMetadata,
+    getFunctionMetadata,
+    getRegisteredFunctionFactory
 } from "./function_metadata";
 
 /**
@@ -182,8 +187,8 @@ class FunctionFactory {
         if (FunctionFactory.metadata.has(lowerName)) {
             return FunctionFactory.metadata.get(lowerName);
         }
-        // Fall back to built-in metadata
-        return BUILTIN_FUNCTION_METADATA.find(m => m.name === lowerName);
+        // Fall back to decorator-registered metadata
+        return getFunctionMetadata(lowerName);
     }
 
     /**
@@ -202,9 +207,9 @@ class FunctionFactory {
         const result: FunctionMetadata[] = [];
         const includeBuiltins = options?.includeBuiltins !== false;
         
-        // Add built-in functions
+        // Add decorator-registered functions (built-ins)
         if (includeBuiltins) {
-            for (const meta of BUILTIN_FUNCTION_METADATA) {
+            for (const meta of getRegisteredFunctionMetadata()) {
                 if (options?.category && meta.category !== options.category) continue;
                 if (options?.asyncOnly) continue; // Built-ins are sync
                 result.push(meta);
@@ -228,7 +233,7 @@ class FunctionFactory {
      * @returns Array of function names
      */
     public static listFunctionNames(): string[] {
-        const builtinNames = BUILTIN_FUNCTION_METADATA.map(m => m.name);
+        const builtinNames = getRegisteredFunctionMetadata().map(m => m.name);
         const pluginNames = Array.from(FunctionFactory.plugins.keys());
         const asyncNames = Array.from(FunctionFactory.asyncProviders.keys());
         return [...new Set([...builtinNames, ...pluginNames, ...asyncNames])];
@@ -259,36 +264,34 @@ class FunctionFactory {
             return FunctionFactory.plugins.get(lowerName)!();
         }
 
-        switch (lowerName) {
-            case "sum":
-                return new Sum();
-            case "collect":
-                return new Collect();
-            case "avg":
-                return new Avg();
-            case "range":
-                return new Range();
-            case "rand":
-                return new Rand();
-            case "round":
-                return new Round();
-            case "split":
-                return new Split();
-            case "join":
-                return new Join();
-            case "tojson":
-                return new ToJson();
-            case "replace":
-                return new Replace();
-            case "stringify":
-                return new Stringify();
-            case "size":
-                return new Size();
-            case "functions":
-                return new Functions();
-            default:
-                return new Function(name);
+        // Check decorator-registered functions (built-ins use @FunctionDef)
+        const decoratorFactory = getRegisteredFunctionFactory(lowerName);
+        if (decoratorFactory) {
+            return decoratorFactory();
         }
+
+        // Unknown function - return generic Function instance
+        return new Function(name);
+    }
+
+    /**
+     * Creates a predicate function instance by name.
+     * Predicate functions are used in WHERE clauses with quantifiers (e.g., ANY, ALL).
+     * 
+     * @param name - The function name (case-insensitive)
+     * @returns A PredicateFunction instance of the appropriate type
+     */
+    public static createPredicate(name: string): PredicateFunction {
+        const lowerName = name.toLowerCase();
+        
+        // Check decorator-registered predicate functions
+        const decoratorFactory = getRegisteredFunctionFactory(lowerName, 'predicate');
+        if (decoratorFactory) {
+            return decoratorFactory();
+        }
+
+        // Unknown predicate function - return generic PredicateFunction instance
+        return new PredicateFunction(name);
     }
 }
 

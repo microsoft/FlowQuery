@@ -1,5 +1,6 @@
 import Function from "./function";
 import FunctionFactory from "./function_factory";
+import { FunctionDef } from "./function_metadata";
 
 /**
  * Built-in function that lists all registered functions with their metadata.
@@ -15,6 +16,32 @@ import FunctionFactory from "./function_factory";
  * RETURN func.name, func.description
  * ```
  */
+@FunctionDef({
+    description: "Lists all registered functions with their metadata. Useful for discovering available functions and their documentation. Results include name, description, parameters, output schema, and usage examples.",
+    category: "scalar",
+    parameters: [
+        { name: "category", description: "Optional category to filter by (e.g., 'aggregation', 'string', 'math')", type: "string", required: false }
+    ],
+    output: { 
+        description: "Array of function metadata objects", 
+        type: "array",
+        items: {
+            type: "object",
+            properties: {
+                name: { description: "Function name", type: "string" },
+                description: { description: "What the function does", type: "string" },
+                category: { description: "Function category", type: "string" },
+                parameters: { description: "Array of parameter definitions", type: "array" },
+                output: { description: "Output schema", type: "object" },
+                examples: { description: "Usage examples", type: "array" }
+            }
+        }
+    },
+    examples: [
+        "WITH functions() AS funcs RETURN funcs",
+        "WITH functions('aggregation') AS funcs UNWIND funcs AS f RETURN f.name, f.description"
+    ]
+})
 class Functions extends Function {
     constructor() {
         super("functions");

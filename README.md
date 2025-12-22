@@ -143,6 +143,188 @@ post {
 return data
 ```
 
+## Extending FlowQuery with Custom Functions
+
+FlowQuery provides a plugin system that allows you to register custom functions. You can create scalar functions for synchronous operations or async providers for data loading.
+
+### Creating a Custom Scalar Function
+
+To create a custom function, extend the `Function` base class and register it with FlowQuery:
+
+```javascript
+const FlowQuery = require('flowquery').default;
+const { Function } = require('flowquery');
+
+// Create a custom function class
+class UpperCase extends Function {
+    constructor() {
+        super("uppercase");  // Function name used in queries
+        this._expectedParameterCount = 1;  // Number of required parameters
+    }
+    
+    // Implement the value() method to define the function's behavior
+    value() {
+        const input = this.getChildren()[0].value();  // Get first parameter
+        return String(input).toUpperCase();
+    }
+}
+
+// Register the function with FlowQuery
+FlowQuery.registerFunction("uppercase", () => new UpperCase());
+
+// Now use it in queries!
+async function main() {
+    const query = new FlowQuery("WITH 'hello world' AS greeting RETURN uppercase(greeting)");
+    await query.run();
+    console.log(query.results);  // [ { expr0: 'HELLO WORLD' } ]
+}
+```
+
+### Registering Functions with Metadata
+
+For better documentation and LLM integration, you can register functions with full metadata using the `@FunctionDef` decorator pattern:
+
+```javascript
+FlowQuery.registerFunction("uppercase", {
+    factory: () => new UpperCase(),
+    metadata: {
+        name: "uppercase",
+        description: "Converts a string to uppercase",
+        category: "string",
+        parameters: [
+            { name: "text", description: "String to convert", type: "string" }
+        ],
+        output: { 
+            description: "Uppercase string", 
+            type: "string",
+            example: "HELLO WORLD"
+        },
+        examples: ["WITH 'hello' AS s RETURN uppercase(s)"]
+    }
+});
+```
+
+### TypeScript: Using the @FunctionDef Decorator
+
+In TypeScript projects, you can use the `@FunctionDef` decorator directly on your function class. Import from the extensibility module for a clean API:
+
+```typescript
+import { Function, FunctionDef } from "flowquery/extensibility";
+
+@FunctionDef({
+    description: "Converts a string to uppercase",
+    category: "string",
+    parameters: [
+        { name: "text", description: "String to convert", type: "string" }
+    ],
+    output: { 
+        description: "Uppercase string", 
+        type: "string",
+        example: "HELLO WORLD"
+    },
+    examples: ["WITH 'hello' AS s RETURN uppercase(s)"]
+})
+class UpperCase extends Function {
+    constructor() {
+        super("uppercase");
+        this._expectedParameterCount = 1;
+    }
+    
+    public value(): string {
+        const input = this.getChildren()[0].value();
+        return String(input).toUpperCase();
+    }
+}
+```
+
+The decorator automatically registers the function with the FlowQuery function factory.
+
+The extensibility module (`flowquery/extensibility`) exports:
+- `Function` - Base class for scalar functions
+- `AggregateFunction` - Base class for aggregate functions (like `sum`, `avg`, `collect`)
+- `PredicateFunction` - Base class for predicate functions (like list comprehensions)
+- `FunctionDef` - Decorator for registering functions with metadata
+- `ReducerElement` - Helper class for aggregate function state
+- `FunctionFactory` - Direct access to the function factory for advanced usage
+
+### Creating Async Data Providers
+
+For functions that fetch data asynchronously (used with `LOAD ... FROM`), register an async provider:
+
+```javascript
+FlowQuery.registerAsyncProvider("fetchUsers", {
+    provider: async function* (endpoint) {
+        const response = await fetch(endpoint);
+        const data = await response.json();
+        for (const user of data) {
+            yield user;  // Yield each item individually
+        }
+    },
+    metadata: {
+        name: "fetchUsers",
+        description: "Fetches user data from an API endpoint",
+        category: "data",
+        parameters: [
+            { name: "endpoint", description: "API URL to fetch users from", type: "string" }
+        ],
+        output: {
+            description: "User object",
+            type: "object",
+            properties: {
+                id: { description: "User ID", type: "number" },
+                name: { description: "User name", type: "string" }
+            }
+        },
+        examples: ["LOAD JSON FROM fetchUsers('https://api.example.com/users') AS user"]
+    }
+});
+
+// Use in a query
+const query = new FlowQuery(`
+    LOAD JSON FROM fetchUsers('https://api.example.com/users') AS user
+    RETURN user.name, user.id
+`);
+await query.run();
+```
+
+### Listing and Querying Functions
+
+You can discover available functions programmatically:
+
+```javascript
+// List all functions
+const allFunctions = FlowQuery.listFunctions();
+
+// Filter by category
+const stringFunctions = FlowQuery.listFunctions({ category: "string" });
+const asyncFunctions = FlowQuery.listFunctions({ asyncOnly: true });
+
+// Get metadata for a specific function
+const sumMetadata = FlowQuery.getFunctionMetadata("sum");
+console.log(sumMetadata.description);  // "Calculates the sum of numeric values..."
+```
+
+You can also query functions from within FlowQuery itself:
+
+```cypher
+// List all available functions
+WITH functions() AS funcs
+UNWIND funcs AS f
+RETURN f.name, f.description, f.category
+```
+
+### Unregistering Functions
+
+To remove a registered function:
+
+```javascript
+// Unregister a sync function
+FlowQuery.unregisterFunction("uppercase");
+
+// Unregister an async provider
+FlowQuery.unregisterAsyncProvider("fetchUsers");
+```
+
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a

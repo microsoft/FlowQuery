@@ -1,5 +1,15 @@
 import Function from "./function";
+import { FunctionDef } from "./function_metadata";
 
+@FunctionDef({
+    description: "Rounds a number to the nearest integer",
+    category: "scalar",
+    parameters: [
+        { name: "value", description: "Number to round", type: "number" }
+    ],
+    output: { description: "Rounded integer", type: "number", example: 4 },
+    examples: ["WITH 3.7 AS n RETURN round(n)"]
+})
 class Round extends Function {
     constructor() {
         super("round");

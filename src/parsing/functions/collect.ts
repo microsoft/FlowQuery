@@ -1,5 +1,6 @@
 import AggregateFunction from "./aggregate_function";
 import ReducerElement from "./reducer_element";
+import { FunctionDef } from "./function_metadata";
 
 class CollectReducerElement extends ReducerElement {
     private _value: any[] = [];
@@ -24,6 +25,15 @@ class DistinctCollectReducerElement extends ReducerElement {
     }
 }
 
+@FunctionDef({
+    description: "Collects values into an array across grouped rows",
+    category: "aggregate",
+    parameters: [
+        { name: "value", description: "Value to collect", type: "any" }
+    ],
+    output: { description: "Array of collected values", type: "array", example: [1, 2, 3] },
+    examples: ["WITH [1, 2, 3] AS nums UNWIND nums AS n RETURN collect(n)"]
+})
 class Collect extends AggregateFunction {
     private _distinct: boolean = false;
     constructor() {

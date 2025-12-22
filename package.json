@@ -4,6 +4,7 @@
   "description": "A declarative query language for data processing pipelines.",
   "main": "dist/index.node.js",
   "types": "dist/index.node.d.ts",
+  "sideEffects": true,
   "exports": {
     ".": {
       "import": "./dist/index.node.js",
@@ -13,6 +14,11 @@
     "./browser": {
       "import": "./dist/flowquery.min.js",
       "require": "./dist/flowquery.min.js"
+    },
+    "./extensibility": {
+      "import": "./dist/extensibility.js",
+      "require": "./dist/extensibility.js",
+      "types": "./dist/extensibility.d.ts"
     }
   },
   "bin": {

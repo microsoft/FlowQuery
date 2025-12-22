@@ -1,7 +1,17 @@
 import ASTNode from "../ast_node";
 import Function from "./function";
 import Number from "../expressions/number";
+import { FunctionDef } from "./function_metadata";
 
+@FunctionDef({
+    description: "Converts a value to its JSON string representation",
+    category: "scalar",
+    parameters: [
+        { name: "value", description: "Value to stringify", type: "any" }
+    ],
+    output: { description: "JSON string", type: "string", example: "{\"a\":1}" },
+    examples: ["WITH {a: 1} AS obj RETURN stringify(obj)"]
+})
 class Stringify extends Function {
     constructor() {
         super("stringify");

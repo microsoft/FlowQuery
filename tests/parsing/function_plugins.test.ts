@@ -186,7 +186,7 @@ describe("FunctionFactory Metadata Queries", () => {
             const metadata = FunctionFactory.getMetadata("sum");
             expect(metadata).toBeDefined();
             expect(metadata?.name).toBe("sum");
-            expect(metadata?.category).toBe("aggregation");
+            expect(metadata?.category).toBe("aggregate");
         });
 
         it("should return metadata for plugin functions", () => {
@@ -216,8 +216,8 @@ describe("FunctionFactory Metadata Queries", () => {
         });
 
         it("should filter by category", () => {
-            const aggregationFuncs = FunctionFactory.listFunctions({ category: "aggregation" });
-            expect(aggregationFuncs.every(f => f.category === "aggregation")).toBe(true);
+            const aggregationFuncs = FunctionFactory.listFunctions({ category: "aggregate" });
+            expect(aggregationFuncs.every(f => f.category === "aggregate")).toBe(true);
             expect(aggregationFuncs.some(f => f.name === "sum")).toBe(true);
             expect(aggregationFuncs.some(f => f.name === "avg")).toBe(true);
         });
@@ -263,8 +263,8 @@ describe("FunctionFactory Metadata Queries", () => {
             expect(Array.isArray(result.functions)).toBe(true);
             expect(result.categories).toBeDefined();
             expect(Array.isArray(result.categories)).toBe(true);
-            expect(result.categories).toContain("aggregation");
-            expect(result.categories).toContain("string");
+            expect(result.categories).toContain("aggregate");
+            expect(result.categories).toContain("scalar");
         });
     });
 });
@@ -277,26 +277,26 @@ describe("functions() built-in function", () => {
     });
 
     it("should return function metadata with expected properties", async () => {
-        const runner = new Runner("WITH functions() AS funcs UNWIND funcs AS f WITH f WHERE f.name = 'sum' RETURN f.name, f.description, f.category");
+        const runner = new Runner("WITH functions() AS funcs UNWIND funcs AS f WITH f WHERE f.name = 'sum' AND f.category = 'aggregate' RETURN f.name, f.description, f.category");
         await runner.run();
         expect(runner.results).toHaveLength(1);
         expect(runner.results[0].expr0).toBe("sum");
         expect(runner.results[0].expr1).toBe("Calculates the sum of numeric values across grouped rows");
-        expect(runner.results[0].expr2).toBe("aggregation");
+        expect(runner.results[0].expr2).toBe("aggregate");
     });
 
     it("should filter by category when argument provided", async () => {
-        const runner = new Runner("WITH functions('aggregation') AS funcs UNWIND funcs AS f RETURN f.name");
+        const runner = new Runner("WITH functions('aggregate') AS funcs UNWIND funcs AS f RETURN f.name");
         await runner.run();
         const names = runner.results.map((r: any) => r.expr0);
         expect(names).toContain("sum");
         expect(names).toContain("avg");
         expect(names).toContain("collect");
-        expect(names).not.toContain("split"); // string category
+        expect(names).not.toContain("split"); // scalar category
     });
 
     it("should include the functions() function itself", async () => {
-        const runner = new Runner("WITH functions('introspection') AS funcs UNWIND funcs AS f RETURN f.name");
+        const runner = new Runner("WITH functions('scalar') AS funcs UNWIND funcs AS f RETURN f.name");
         await runner.run();
         expect(runner.results.some((r: any) => r.expr0 === "functions")).toBe(true);
     });
@@ -364,6 +364,6 @@ describe("Plugin function execution", () => {
         await runner.run();
         const names = runner.results.map((r: any) => r.expr0);
         expect(names).toContain("double");
-        expect(names).toContain("round");
+        // round is in 'scalar' category, not 'math'
     });
 });

@@ -9,29 +9,37 @@
 import { AsyncLoaderPlugin } from '../types';
 
 /**
- * Fetches JSON data from a URL and yields each item if array, or the object itself.
+ * FetchJson loader class - fetches JSON data from a URL and yields items.
  */
-async function* fetchJsonProvider(url: string, options?: RequestInit): AsyncGenerator<any, void, unknown> {
-    const response = await fetch(url, options);
-    
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    if (Array.isArray(data)) {
-        for (const item of data) {
-            yield item;
+export class FetchJsonLoader {
+    /**
+     * Fetches JSON data from a URL and yields each item if array, or the object itself.
+     * 
+     * @param url - The URL to fetch JSON from
+     * @param options - Optional fetch options
+     */
+    async *fetch(url: string, options?: RequestInit): AsyncGenerator<any, void, unknown> {
+        const response = await fetch(url, options);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-    } else {
-        yield data;
+
+        const data = await response.json();
+        
+        if (Array.isArray(data)) {
+            for (const item of data) {
+                yield item;
+            }
+        } else {
+            yield data;
+        }
     }
 }
 
 export const fetchJsonPlugin: AsyncLoaderPlugin = {
     name: 'fetchJson',
-    provider: fetchJsonProvider,
+    provider: (url: string, options?: RequestInit) => new FetchJsonLoader().fetch(url, options),
     metadata: {
         description: 'Fetches JSON data from a URL. If the response is an array, yields each item individually.',
         category: 'data',
@@ -55,7 +63,7 @@ export const fetchJsonPlugin: AsyncLoaderPlugin = {
         },
         examples: [
             "LOAD JSON FROM fetchJson('https://api.example.com/users') AS user RETURN user.name",
-            "LOAD JSON FROM fetchJson('https://api.example.com/data') AS item WHERE item.active = true RETURN item"
+            "LOAD JSON FROM fetchJson('https://api.example.com/data') AS item RETURN item WHERE item.active = true"
         ]
     }
 };

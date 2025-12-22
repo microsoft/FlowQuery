@@ -1,37 +1,40 @@
 .app-root {
-    min-height: 100vh;
+    height: 100vh;
     background-color: #fafafa;
-    padding: 24px;
+    display: flex;
+    flex-direction: column;
 }
 
 .app-container {
-    max-width: 800px;
-    margin: 0 auto;
-}
-
-.app-card {
-    margin-bottom: 16px;
-}
-
-.query-input {
+    max-width: 900px;
     width: 100%;
-    min-height: 120px;
-}
-
-.button-row {
+    margin: 0 auto;
+    padding: 24px;
     display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
+    flex-direction: column;
+    height: 100%;
+    box-sizing: border-box;
 }
 
-.results-container {
-    background-color: #ffffff;
-    padding: 16px;
-    border-radius: 4px;
-    font-family: monospace;
-    white-space: pre-wrap;
-    word-break: break-word;
-    min-height: 100px;
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+}
+
+.app-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.chat-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .error-text {

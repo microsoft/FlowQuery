@@ -1,51 +1,24 @@
 /**
  * Plugin type definitions for FlowQuery async data loaders.
+ * 
+ * Re-exports core types from FlowQuery library for consistency.
  */
 
-/**
- * Schema for function parameter descriptions.
- */
-export interface ParameterSchema {
-    name: string;
-    description: string;
-    type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | string;
-    required?: boolean;
-    default?: any;
-    items?: Omit<ParameterSchema, 'name' | 'required' | 'default'>;
-    properties?: Record<string, Omit<ParameterSchema, 'name' | 'required'>>;
-    enum?: any[];
-    example?: any;
-}
+import {
+    ParameterSchema,
+    OutputSchema,
+    FunctionMetadata,
+    AsyncDataProvider
+} from 'flowquery';
+
+// Re-export core types from FlowQuery
+export { ParameterSchema, OutputSchema, FunctionMetadata, AsyncDataProvider };
 
 /**
- * Schema for function output descriptions.
+ * Alias for FunctionMetadata - used for plugin definitions.
+ * This type is identical to FunctionMetadata from FlowQuery.
  */
-export interface OutputSchema {
-    description: string;
-    type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | string;
-    items?: Omit<OutputSchema, 'description'>;
-    properties?: Record<string, Omit<ParameterSchema, 'name' | 'required'>>;
-    example?: any;
-}
-
-/**
- * Metadata for describing a plugin function.
- * This metadata can be used by LLMs to understand available functions.
- */
-export interface PluginMetadata {
-    name: string;
-    description: string;
-    category?: string;
-    parameters: ParameterSchema[];  // Required to match FunctionMetadata
-    output: OutputSchema;           // Required to match FunctionMetadata
-    examples?: string[];
-    notes?: string;
-}
-
-/**
- * Type for async data provider functions used in LOAD operations.
- */
-export type AsyncDataProvider = (...args: any[]) => AsyncGenerator<any, void, unknown> | Promise<any>;
+export type PluginMetadata = FunctionMetadata;
 
 /**
  * A plugin definition for an async data loader.

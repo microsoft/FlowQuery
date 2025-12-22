@@ -1,0 +1,104 @@
+.flowquery-runner-surface {
+    max-width: 800px;
+    width: 90vw;
+}
+
+.flowquery-runner-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 16px;
+}
+
+.flowquery-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.flowquery-textarea {
+    width: 100%;
+    min-height: 120px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    resize: vertical;
+}
+
+.flowquery-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.flowquery-execution-time {
+    margin-left: auto;
+    font-size: 12px;
+    color: #666;
+}
+
+.flowquery-results-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.flowquery-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.flowquery-results-count {
+    font-size: 12px;
+    color: #666;
+}
+
+.flowquery-results {
+    max-height: 300px;
+    overflow: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background-color: #f8f8f8;
+}
+
+.flowquery-results-content {
+    padding: 12px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+}
+
+.flowquery-error {
+    color: #c50f1f;
+    padding: 12px;
+    margin: 0;
+}
+
+.flowquery-no-results {
+    color: #666;
+    font-style: italic;
+    padding: 12px;
+}
+
+.flowquery-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    color: #666;
+}
+
+.flowquery-examples-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.flowquery-example-button {
+    text-align: left;
+    justify-content: flex-start;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+}

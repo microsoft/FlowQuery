@@ -1,0 +1,136 @@
+.chat-message {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.chat-message-user {
+    background-color: #e8f4fd;
+}
+
+.chat-message-assistant {
+    background-color: #f5f5f5;
+}
+
+.chat-message-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 18px;
+}
+
+.chat-message-user .chat-message-avatar {
+    background-color: #0078d4;
+    color: white;
+}
+
+.chat-message-assistant .chat-message-avatar {
+    background-color: #6b6b6b;
+    color: white;
+}
+
+.chat-message-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-message-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.chat-message-role {
+    font-weight: 600;
+}
+
+.chat-message-time {
+    font-size: 12px;
+    color: #666;
+}
+
+.chat-message-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.streaming-indicator {
+    margin-left: 8px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* FlowQuery code block styling */
+.flowquery-code-block {
+    margin: 12px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: #f8f8f8;
+}
+
+.flowquery-code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    background-color: #e8e8e8;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.flowquery-code-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.flowquery-code-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.flowquery-run-link {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0078d4;
+    text-decoration: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+}
+
+.flowquery-run-link:hover {
+    background-color: rgba(0, 120, 212, 0.1);
+    text-decoration: none;
+}
+
+.flowquery-run-button {
+    font-size: 11px;
+}
+
+.flowquery-code-content {
+    margin: 0;
+    padding: 12px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+.flowquery-code-content code {
+    font-family: inherit;
+}

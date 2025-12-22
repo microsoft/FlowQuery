@@ -81,9 +81,11 @@ LOAD JSON FROM myData('users') AS user
 WHERE user.active = true
 RETURN user.name, user.email
 
--- Use multiple plugins together
-LOAD JSON FROM mockUsers(10) AS user
-RETURN user.name, user.age
+-- Combine with filtering and ordering
+LOAD JSON FROM myData('products', 50) AS product
+WHERE product.price > 10
+ORDER BY product.name ASC
+RETURN product.name, product.price
 ```
 
 ## Available Built-in Plugins
@@ -91,9 +93,8 @@ RETURN user.name, user.age
 | Plugin | Description | Example |
 |--------|-------------|---------|
 | `fetchJson` | Fetch JSON from any URL | `fetchJson('https://api.example.com/data')` |
-| `catFacts` | Random cat facts API | `catFacts(5)` |
-| `mockUsers` | Generate mock user data | `mockUsers(10)` |
-| `mockProducts` | Generate mock product data | `mockProducts(20)` |
+
+> **Note**: Additional plugins may be registered. Check `index.ts` for the current list of available plugins.
 
 ## Plugin Types
 

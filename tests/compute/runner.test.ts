@@ -504,3 +504,23 @@ test('Test keys function', async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({'keys': ['name', 'age']});
 });
+
+test('Test type function', async () => {
+    const runner = new Runner(`
+        RETURN type(123) as type1,
+               type("hello") as type2,
+               type([1, 2, 3]) as type3,
+                type({a: 1, b: 2}) as type4,
+                type(null) as type5
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({
+        'type1': 'number',
+        'type2': 'string',
+        'type3': 'array',
+        'type4': 'object',
+        'type5': 'null'
+    });
+});

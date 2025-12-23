@@ -80,15 +80,9 @@ class FunctionRegistry {
     private static factories: Map<string, () => any> = new Map<string, () => any>();
     private static asyncProviders: Map<string, AsyncDataProvider> = new Map<string, AsyncDataProvider>();
 
-    /** Derives a camelCase display name from a class name, removing 'Loader' suffix. */
-    private static deriveDisplayName(className: string): string {
-        const baseName: string = className.endsWith('Loader') ? className.slice(0, -6) : className;
-        return baseName.charAt(0).toLowerCase() + baseName.slice(1);
-    }
-
     /** Registers an async data provider class. */
     static registerAsync<T extends new (...args: any[]) => any>(constructor: T, options: FunctionDefOptions): void {
-        const displayName: string = this.deriveDisplayName(constructor.name);
+        const displayName: string = constructor.name;
         const registryKey: string = displayName.toLowerCase();
 
         this.metadata.set(registryKey, { name: displayName, ...options });
@@ -98,8 +92,7 @@ class FunctionRegistry {
     /** Registers a regular function class. */
     static registerFunction<T extends new (...args: any[]) => any>(constructor: T, options: FunctionDefOptions): void {
         const instance: any = new constructor();
-        const baseName: string = (instance.name?.toLowerCase() || constructor.name.toLowerCase());
-        const displayName: string = baseName.includes(':') ? baseName.split(':')[0] : baseName;
+        const displayName: string = (instance.name?.toLowerCase() || constructor.name.toLowerCase());
         const registryKey: string = options.category ? `${displayName}:${options.category}` : displayName;
 
         this.metadata.set(registryKey, { name: displayName, ...options });
@@ -118,7 +111,7 @@ class FunctionRegistry {
         const lowerName: string = name.toLowerCase();
         if (category) return this.metadata.get(`${lowerName}:${category}`);
         for (const meta of this.metadata.values()) {
-            if (meta.name === lowerName) return meta;
+            if (meta.name.toLowerCase() === lowerName) return meta;
         }
         return undefined;
     }
@@ -145,8 +138,8 @@ export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
  * or from the class name for async providers.
  * 
  * For async providers (category: "async"), the class must have a `fetch` method that returns
- * an AsyncGenerator. The function name is derived from the class name (removing 'Loader' suffix
- * if present) and converted to camelCase.
+ * an AsyncGenerator. The function name is derived from the class name, converted to camelCase
+ * (first letter lowercased).
  * 
  * @param options - Function metadata (excluding name)
  * @returns Class decorator
@@ -171,7 +164,7 @@ export type FunctionDefOptions = Omit<FunctionMetadata, 'name'>;
  *     output: { description: "Cat fact object", type: "object" },
  *     examples: ["LOAD JSON FROM catFacts(5) AS fact RETURN fact.text"]
  * })
- * class CatFactsLoader {
+ * class CatFacts {
  *     async *fetch(count: number = 1): AsyncGenerator<any> { ... }
  * }
  * ```

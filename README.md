@@ -283,7 +283,7 @@ import { FunctionDef } from 'flowquery/extensibility';
     parameters: [],
     output: { description: "Example data object", type: "object" }
 })
-class GetExampleDataLoader {
+class GetExampleData {
     async *fetch(): AsyncGenerator<any> {
         yield { id: 1, name: "Alice" };
         yield { id: 2, name: "Bob" };

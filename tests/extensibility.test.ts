@@ -216,7 +216,7 @@ describe("FunctionDef Decorator", () => {
             ],
             output: { description: "Data object", type: "object" }
         })
-        class SimpleLoader {
+        class Simple {
             async *fetch(count: number = 1): AsyncGenerator<any> {
                 for (let i = 0; i < count; i++) {
                     yield { id: i, data: `item${i}` };
@@ -225,7 +225,7 @@ describe("FunctionDef Decorator", () => {
         }
         
         // Verify the decorated class still works correctly
-        const loader = new SimpleLoader();
+        const loader = new Simple();
         const results: any[] = [];
         for await (const item of loader.fetch(2)) {
             results.push(item);
@@ -242,7 +242,7 @@ describe("FunctionDef Decorator", () => {
         // Verify the metadata was registered
         const metadata = getFunctionMetadata("simple");
         expect(metadata).toBeDefined();
-        expect(metadata?.name).toBe("simple");
+        expect(metadata?.name).toBe("Simple");
         expect(metadata?.category).toBe("async");
         expect(metadata?.description).toBe("Test async provider for extensibility");
     });
@@ -542,7 +542,7 @@ describe("Plugin Functions Integration with FlowQuery", () => {
             parameters: [],
             output: { description: "Example data object", type: "object" }
         })
-        class GetExampleDataLoader {
+        class GetExampleData {
             async *fetch(): AsyncGenerator<any> {
                 yield { id: 1, name: "Alice" };
                 yield { id: 2, name: "Bob" };
@@ -559,6 +559,44 @@ describe("Plugin Functions Integration with FlowQuery", () => {
         expect(runner.results.length).toBe(2);
         expect(runner.results[0]).toEqual({ id: 1, name: "Alice" });
         expect(runner.results[1]).toEqual({ id: 2, name: "Bob" });
+    });
+
+    test("Function names are case-insensitive", async () => {
+        @FunctionDef({
+            description: "Test function for case insensitivity",
+            category: "async",
+            parameters: [],
+            output: { description: "Test data", type: "object" }
+        })
+        class MixedCaseFunc {
+            async *fetch(): AsyncGenerator<any> {
+                yield { value: 42 };
+            }
+        }
+
+        // Verify registration works with different casings
+        expect(getRegisteredAsyncProvider("MixedCaseFunc")).toBeDefined();
+        expect(getRegisteredAsyncProvider("mixedcasefunc")).toBeDefined();
+        expect(getRegisteredAsyncProvider("MIXEDCASEFUNC")).toBeDefined();
+        expect(getRegisteredAsyncProvider("mIxEdCaSeFuNc")).toBeDefined();
+
+        // Verify metadata lookup is case-insensitive
+        expect(getFunctionMetadata("MixedCaseFunc")).toBeDefined();
+        expect(getFunctionMetadata("mixedcasefunc")).toBeDefined();
+        expect(getFunctionMetadata("MIXEDCASEFUNC")).toBeDefined();
+
+        // Test using different casings in FlowQuery statements
+        const runner1 = new Runner("LOAD JSON FROM mixedcasefunc() AS d RETURN d.value AS v");
+        await runner1.run();
+        expect(runner1.results[0]).toEqual({ v: 42 });
+
+        const runner2 = new Runner("LOAD JSON FROM MIXEDCASEFUNC() AS d RETURN d.value AS v");
+        await runner2.run();
+        expect(runner2.results[0]).toEqual({ v: 42 });
+
+        const runner3 = new Runner("LOAD JSON FROM MixedCaseFunc() AS d RETURN d.value AS v");
+        await runner3.run();
+        expect(runner3.results[0]).toEqual({ v: 42 });
     });
 
     test("Custom function can be retrieved via functions() in a FlowQuery statement", async () => {

@@ -145,45 +145,137 @@ return data
 
 ## Extending FlowQuery with Custom Functions
 
-FlowQuery provides a plugin system that allows you to register custom functions using the `@FunctionDef` decorator. Import from the extensibility module for a clean API:
+FlowQuery supports extending its functionality with custom functions using the `@FunctionDef` decorator. You can create scalar functions, aggregate functions, predicate functions, and async data providers.
+
+### Installing the Extensibility API
+
+Import the necessary classes and decorators from the extensibility module:
 
 ```typescript
-import { Function, FunctionDef } from "flowquery/extensibility";
+import {
+    Function,
+    AggregateFunction,
+    PredicateFunction,
+    ReducerElement,
+    FunctionDef
+} from 'flowquery/extensibility';
+```
+
+### Creating a Custom Scalar Function
+
+Scalar functions operate on individual values and return a result:
+
+```typescript
+import { Function, FunctionDef } from 'flowquery/extensibility';
 
 @FunctionDef({
-    description: "Converts a string to uppercase",
-    category: "string",
-    parameters: [
-        { name: "text", description: "String to convert", type: "string" }
-    ],
-    output: { 
-        description: "Uppercase string", 
-        type: "string",
-        example: "HELLO WORLD"
-    },
-    examples: ["WITH 'hello' AS s RETURN uppercase(s)"]
+    description: "Doubles a number",
+    category: "scalar",
+    parameters: [{ name: "value", description: "Number to double", type: "number" }],
+    output: { description: "Doubled value", type: "number" }
 })
-class UpperCase extends Function {
+class Double extends Function {
     constructor() {
-        super("uppercase");  // Function name used in queries
-        this._expectedParameterCount = 1;  // Number of required parameters
+        super("double");
+        this._expectedParameterCount = 1;
     }
     
-    public value(): string {
-        const input = this.getChildren()[0].value();
-        return String(input).toUpperCase();
+    public value(): number {
+        return this.getChildren()[0].value() * 2;
     }
 }
 ```
 
-The decorator automatically registers the function with the FlowQuery function factory.
+Once defined, use it in your queries:
 
-### Creating Async Data Providers
+```cypher
+WITH 5 AS num RETURN double(num) AS result
+// Returns: [{ result: 10 }]
+```
 
-For functions that fetch data asynchronously (used with `LOAD JSON FROM`), use the `@FunctionDef` decorator with `category: "async"`. The class must have a `fetch` method that returns an async generator:
+### Creating a Custom String Function
 
 ```typescript
-import { FunctionDef } from "flowquery/extensibility";
+import { Function, FunctionDef } from 'flowquery/extensibility';
+
+@FunctionDef({
+    description: "Reverses a string",
+    category: "scalar",
+    parameters: [{ name: "text", description: "String to reverse", type: "string" }],
+    output: { description: "Reversed string", type: "string" }
+})
+class StrReverse extends Function {
+    constructor() {
+        super("strreverse");
+        this._expectedParameterCount = 1;
+    }
+    
+    public value(): string {
+        const input = String(this.getChildren()[0].value());
+        return input.split('').reverse().join('');
+    }
+}
+```
+
+Usage:
+
+```cypher
+WITH 'hello' AS s RETURN strreverse(s) AS reversed
+// Returns: [{ reversed: 'olleh' }]
+```
+
+### Creating a Custom Aggregate Function
+
+Aggregate functions process multiple values and return a single result. They require a `ReducerElement` to track state:
+
+```typescript
+import { AggregateFunction, ReducerElement, FunctionDef } from 'flowquery/extensibility';
+
+class ProductElement extends ReducerElement {
+    private _value: number = 1;
+    public get value(): number {
+        return this._value;
+    }
+    public set value(v: number) {
+        this._value *= v;
+    }
+}
+
+@FunctionDef({
+    description: "Calculates the product of values",
+    category: "aggregate",
+    parameters: [{ name: "value", description: "Number to multiply", type: "number" }],
+    output: { description: "Product of all values", type: "number" }
+})
+class Product extends AggregateFunction {
+    constructor() {
+        super("product");
+        this._expectedParameterCount = 1;
+    }
+    
+    public reduce(element: ReducerElement): void {
+        element.value = this.firstChild().value();
+    }
+    
+    public element(): ReducerElement {
+        return new ProductElement();
+    }
+}
+```
+
+Usage:
+
+```cypher
+UNWIND [2, 3, 4] AS num RETURN product(num) AS result
+// Returns: [{ result: 24 }]
+```
+
+### Creating a Custom Async Data Provider
+
+Async providers allow you to create custom data sources that can be used with `LOAD JSON FROM`:
+
+```typescript
+import { FunctionDef } from 'flowquery/extensibility';
 
 @FunctionDef({
     description: "Provides example data for testing",
@@ -199,23 +291,35 @@ class GetExampleDataLoader {
 }
 ```
 
-The function name is derived from the class name by removing the `Loader` suffix (if present) and converting to camelCase. In this example, `GetExampleDataLoader` becomes `getExampleData`.
-
-Use the async provider in a FlowQuery statement:
+Usage:
 
 ```cypher
-LOAD JSON FROM getExampleData() AS data
-RETURN data.id AS id, data.name AS name
+LOAD JSON FROM getExampleData() AS data RETURN data.id AS id, data.name AS name
+// Returns: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }]
 ```
 
-The extensibility module (`flowquery/extensibility`) exports:
-- `Function` - Base class for scalar functions
-- `AggregateFunction` - Base class for aggregate functions (like `sum`, `avg`, `collect`)
-- `AsyncFunction` - Base class for async function calls
-- `PredicateFunction` - Base class for predicate functions (like list comprehensions)
-- `ReducerElement` - Helper class for aggregate function state
-- `FunctionDef` - Decorator for registering functions with metadata
-- `FunctionMetadata`, `FunctionDefOptions`, `ParameterSchema`, `OutputSchema`, `FunctionCategory` - TypeScript types for metadata definitions
+### Using Custom Functions with Expressions
+
+Custom functions integrate seamlessly with FlowQuery expressions and can be combined with other functions:
+
+```cypher
+// Using custom function with expressions
+WITH 5 * 3 AS num RETURN addhundred(num) + 1 AS result
+
+// Using multiple custom functions together
+WITH 2 AS num RETURN triple(num) AS tripled, square(num) AS squared
+```
+
+### Introspecting Registered Functions
+
+You can use the built-in `functions()` function to discover registered functions including your custom ones:
+
+```cypher
+WITH functions() AS funcs
+UNWIND funcs AS f
+WITH f WHERE f.name = 'double'
+RETURN f.name AS name, f.description AS description, f.category AS category
+```
 
 ## Contributing
 

@@ -24,18 +24,6 @@ npm install
 | `npm run build:bundle` | Create a webpack bundle |
 | `npm run watch` | Watch mode for TypeScript compilation |
 
-## Project Structure
-
-```
-RAG/
-├── src/
-│   └── index.ts      # Main entry point
-├── dist/             # Compiled output (generated)
-├── package.json
-├── tsconfig.json
-└── webpack.config.js
-```
-
 ## License
 
 MIT

@@ -9,10 +9,10 @@
  *   LOAD JSON FROM llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) AS response
  *   RETURN response.choices[0].message.content
  * 
- * This loader can also be used standalone outside of FlowQuery:
- *   import { LlmLoader } from './plugins/loaders/Llm';
- *   const loader = new LlmLoader();
- *   const response = await loader.complete('What is 2+2?');
+ * This class can also be used standalone outside of FlowQuery:
+ *   import { Llm } from './plugins/loaders/Llm';
+ *   const llmInstance = new Llm();
+ *   const response = await llmInstance.complete('What is 2+2?');
  *   console.log(response.choices[0].message.content);
  */
 
@@ -78,7 +78,7 @@ export interface LlmResponse {
 }
 
 /**
- * LLM Loader class - calls OpenAI-compatible APIs for chat completions.
+ * Llm class - calls OpenAI-compatible APIs for chat completions.
  */
 @FunctionDef({
     description: 'Calls OpenAI-compatible chat completion APIs. Supports GPT models and any OpenAI-compatible endpoint.',
@@ -132,7 +132,7 @@ export interface LlmResponse {
     ],
     notes: 'Requires API key configured in Settings or passed as apiKey option. Works with any OpenAI-compatible API by setting the apiUrl option.'
 })
-export class LlmLoader {
+export class Llm {
     private readonly defaultOptions: Partial<LlmOptions>;
 
     constructor(defaultOptions: Partial<LlmOptions> = {}) {
@@ -243,8 +243,8 @@ export class LlmLoader {
      * 
      * @example
      * ```typescript
-     * const loader = new LlmLoader();
-     * const response = await loader.complete('What is the capital of France?');
+     * const llmInstance = new Llm();
+     * const response = await llmInstance.complete('What is the capital of France?');
      * console.log(response.choices[0].message.content);
      * ```
      */
@@ -281,8 +281,8 @@ export class LlmLoader {
      * 
      * @example
      * ```typescript
-     * const loader = new LlmLoader();
-     * for await (const chunk of loader.stream('Tell me a story')) {
+     * const llmInstance = new Llm();
+     * for await (const chunk of llmInstance.stream('Tell me a story')) {
      *   if (chunk.choices?.[0]?.delta?.content) {
      *     process.stdout.write(chunk.choices[0].delta.content);
      *   }
@@ -396,7 +396,7 @@ export class LlmLoader {
  * ```
  */
 export async function llm(prompt: string, options?: LlmOptions): Promise<LlmResponse> {
-    return new LlmLoader().complete(prompt, options);
+    return new Llm().complete(prompt, options);
 }
 
 /**
@@ -419,7 +419,7 @@ export async function llm(prompt: string, options?: LlmOptions): Promise<LlmResp
  * ```
  */
 export async function* llmStream(prompt: string, options?: LlmOptions): AsyncGenerator<any, void, unknown> {
-    yield* new LlmLoader().stream(prompt, options);
+    yield* new Llm().stream(prompt, options);
 }
 
 /**
@@ -430,7 +430,7 @@ export async function* llmStream(prompt: string, options?: LlmOptions): AsyncGen
  * @returns The text content from the first choice
  */
 export function extractContent(response: LlmResponse): string {
-    return LlmLoader.extractContent(response);
+    return Llm.extractContent(response);
 }
 
-export default LlmLoader;
+export default Llm;

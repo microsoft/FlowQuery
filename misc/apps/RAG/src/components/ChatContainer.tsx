@@ -101,18 +101,45 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
 
                 let fullContent = '';
                 let adaptiveCardFromStream: Record<string, unknown> | undefined;
+                let currentMessageId = assistantMessageId;
                 
-                for await (const { chunk, done, adaptiveCard } of processQueryStream(content, {
+                for await (const { chunk, done, adaptiveCard, newMessage } of processQueryStream(content, {
                     systemPrompt: systemPrompt ?? 'You are a helpful assistant. Be concise and informative in your responses.',
                     llmOptions,
                     conversationHistory: conversationHistory.slice(0, -1),
                     showIntermediateSteps
                 })) {
+                    // If newMessage flag is set, finalize current message and start a new one
+                    if (newMessage) {
+                        // Mark current message as done streaming
+                        this.setState(prev => ({
+                            messages: prev.messages.map(msg => 
+                                msg.id === currentMessageId 
+                                    ? { ...msg, isStreaming: false }
+                                    : msg
+                            )
+                        }));
+                        
+                        // Create a new assistant message for the retry
+                        currentMessageId = this.generateMessageId();
+                        fullContent = '';
+                        const newAssistantMessage: Message = {
+                            id: currentMessageId,
+                            role: 'assistant',
+                            content: '',
+                            timestamp: new Date(),
+                            isStreaming: true
+                        };
+                        this.setState(prev => ({
+                            messages: [...prev.messages, newAssistantMessage]
+                        }));
+                    }
+                    
                     if (chunk) {
                         fullContent += chunk;
                         this.setState(prev => ({
                             messages: prev.messages.map(msg => 
-                                msg.id === assistantMessageId 
+                                msg.id === currentMessageId 
                                     ? { ...msg, content: fullContent }
                                     : msg
                             )
@@ -127,7 +154,7 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
                     if (done) {
                         this.setState(prev => ({
                             messages: prev.messages.map(msg => 
-                                msg.id === assistantMessageId 
+                                msg.id === currentMessageId 
                                     ? { ...msg, isStreaming: false, adaptiveCard: adaptiveCardFromStream }
                                     : msg
                             )

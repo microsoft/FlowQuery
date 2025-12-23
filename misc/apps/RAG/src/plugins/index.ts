@@ -10,13 +10,15 @@
 import FlowQuery from 'flowquery';
 import { FunctionMetadata } from 'flowquery/extensibility';
 
-// Import loader classes - the @FunctionDef decorator auto-registers them with FlowQuery
+// Import plugin classes - the @FunctionDef decorator auto-registers them with FlowQuery
+// This step is essential to ensure decorators are executed so that plugins are registered with FlowQuery
 import './loaders/FetchJson';
 import './loaders/CatFacts';
 import './loaders/MockData';
 import './loaders/Llm';
 import './loaders/Table';
 import './loaders/Form';
+import './loaders/Weather';
 
 /**
  * Initialize plugins.

@@ -9,7 +9,7 @@
 import { FunctionDef } from 'flowquery/extensibility';
 
 /**
- * MockUsers loader class - generates mock user data for testing.
+ * MockUsers class - generates mock user data for testing.
  */
 @FunctionDef({
     description: 'Generates mock user data for testing purposes',
@@ -39,7 +39,7 @@ import { FunctionDef } from 'flowquery/extensibility';
         "LOAD JSON FROM mockUsers(20) AS user RETURN user WHERE user.active = true"
     ]
 })
-export class MockUsersLoader {
+export class MockUsers {
     private readonly firstNames: string[];
     private readonly lastNames: string[];
     private readonly domains: string[];
@@ -77,7 +77,7 @@ export class MockUsersLoader {
 }
 
 /**
- * MockProducts loader class - generates mock product data for testing.
+ * MockProducts class - generates mock product data for testing.
  */
 @FunctionDef({
     description: 'Generates mock product data for testing purposes',
@@ -108,7 +108,7 @@ export class MockUsersLoader {
         "LOAD JSON FROM mockProducts(50) AS p RETURN p WHERE p.category = 'Electronics'"
     ]
 })
-export class MockProductsLoader {
+export class MockProducts {
     private readonly categories: string[];
     private readonly adjectives: string[];
     private readonly nouns: string[];
@@ -146,4 +146,4 @@ export class MockProductsLoader {
     }
 }
 
-export { MockUsersLoader as default };
+export { MockUsers as default };

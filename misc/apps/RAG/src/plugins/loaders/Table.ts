@@ -1,5 +1,5 @@
 /**
- * Table loader plugin - transforms tabular data into Adaptive Card format.
+ * Table plugin - transforms tabular data into Adaptive Card format.
  * 
  * Adaptive Cards are platform-agnostic UI snippets that can be rendered in
  * Microsoft Teams, Outlook, Windows, and other applications.
@@ -42,7 +42,7 @@ interface TableRow {
 }
 
 /**
- * Table loader - transforms tabular data into an Adaptive Card table format.
+ * Table class - transforms tabular data into an Adaptive Card table format.
  */
 @FunctionDef({
     description: 'Transforms tabular data into an Adaptive Card JSON format with a table layout',
@@ -90,7 +90,7 @@ interface TableRow {
         "LOAD JSON FROM mockProducts(10) AS p WITH collect(p) AS products LOAD JSON FROM table(products, 'Products', ['name', 'price', 'category']) AS card RETURN card"
     ]
 })
-export class TableLoader {
+export class Table {
     /**
      * Transforms data into an Adaptive Card with table layout.
      * 
@@ -268,4 +268,4 @@ export class TableLoader {
     }
 }
 
-export { TableLoader as default };
+export { Table as default };

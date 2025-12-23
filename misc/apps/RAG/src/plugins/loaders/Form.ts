@@ -1,10 +1,10 @@
 /**
- * Form loader plugin - transforms configuration into Adaptive Card form format.
+ * Form plugin - transforms configuration into Adaptive Card form format.
  * 
  * Adaptive Cards are platform-agnostic UI snippets that can be rendered in
  * Microsoft Teams, Outlook, Windows, and other applications.
  * 
- * This loader creates customizable forms with various input types including:
+ * This plugin creates customizable forms with various input types including:
  * - Text inputs (single and multi-line)
  * - Number inputs
  * - Date and time pickers
@@ -118,7 +118,7 @@ interface FormConfig {
 }
 
 /**
- * Form loader - creates customizable Adaptive Card forms.
+ * Form class - creates customizable Adaptive Card forms.
  */
 @FunctionDef({
     description: 'Creates a customizable Adaptive Card form with various input types',
@@ -159,7 +159,7 @@ interface FormConfig {
         "LOAD JSON FROM form('Survey', [{ id: 'rating', type: 'dropdown', label: 'Rating', choices: ['1', '2', '3', '4', '5'] }, { id: 'subscribe', type: 'toggle', label: 'Subscribe', toggleTitle: 'Yes, send me updates' }], { submitButton: { title: 'Submit Survey', style: 'positive' } }) AS form RETURN form"
     ]
 })
-export class FormLoader {
+export class Form {
     /**
      * Creates an Adaptive Card form with the specified fields and configuration.
      * 
@@ -575,4 +575,4 @@ export class FormLoader {
     }
 }
 
-export { FormLoader as default };
+export { Form as default };

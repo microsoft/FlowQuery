@@ -9,7 +9,7 @@
 import { FunctionDef } from 'flowquery/extensibility';
 
 /**
- * FetchJson loader class - fetches JSON data from a URL and yields items.
+ * FetchJson class - fetches JSON data from a URL and yields items.
  */
 @FunctionDef({
     description: 'Fetches JSON data from a URL. If the response is an array, yields each item individually.',
@@ -37,7 +37,7 @@ import { FunctionDef } from 'flowquery/extensibility';
         "LOAD JSON FROM fetchJson('https://api.example.com/data') AS item RETURN item WHERE item.active = true"
     ]
 })
-export class FetchJsonLoader {
+export class FetchJson {
     /**
      * Fetches JSON data from a URL and yields each item if array, or the object itself.
      * 
@@ -63,4 +63,4 @@ export class FetchJsonLoader {
     }
 }
 
-export default FetchJsonLoader;
+export default FetchJson;

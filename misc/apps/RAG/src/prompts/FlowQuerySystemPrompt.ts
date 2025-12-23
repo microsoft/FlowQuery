@@ -287,6 +287,10 @@ When the user asks a question that doesn't require data fetching (e.g., asking a
 - Use meaningful aliases in RETURN statements for better readability
 - Generate the simplest query that fulfills the user's request
 - If you cannot determine what the user needs, ask clarifying questions (with [NO_QUERY_NEEDED])
+- Do not use order by or coalesce
+- Do not use list comprehension [i for i in ...]
+- Do not use substring function
+- Do not use limit or skip
 
 ${FLOWQUERY_LANGUAGE_REFERENCE}
 

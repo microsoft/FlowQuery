@@ -11,7 +11,7 @@ import { FunctionDef } from 'flowquery/extensibility';
 const CAT_FACTS_API = 'https://catfact.ninja/facts';
 
 /**
- * CatFacts loader class - fetches random cat facts from the Cat Facts API.
+ * CatFacts class - fetches random cat facts from the Cat Facts API.
  */
 @FunctionDef({
     description: 'Fetches random cat facts from the Cat Facts API (catfact.ninja)',
@@ -38,7 +38,7 @@ const CAT_FACTS_API = 'https://catfact.ninja/facts';
         "LOAD JSON FROM catFacts(5) AS fact RETURN fact.text, fact.length AS length"
     ]
 })
-export class CatFactsLoader {
+export class CatFacts {
     private readonly apiUrl: string;
 
     constructor(apiUrl: string = CAT_FACTS_API) {
@@ -71,4 +71,4 @@ export class CatFactsLoader {
     }
 }
 
-export default CatFactsLoader;
+export default CatFacts;

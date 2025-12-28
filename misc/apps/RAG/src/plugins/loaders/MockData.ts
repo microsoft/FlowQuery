@@ -1,43 +1,41 @@
 /**
  * Example plugin: Generate mock data for testing.
- * 
+ *
  * Usage in FlowQuery:
- *   LOAD JSON FROM mockUsers(10) AS user
- *   RETURN user.name, user.email
+ *   CALL mockUsers(10) YIELD name, email
  */
-
-import { FunctionDef, AsyncFunction } from 'flowquery/extensibility';
+import { AsyncFunction, FunctionDef } from "flowquery/extensibility";
 
 /**
  * MockUsers class - generates mock user data for testing.
  */
 @FunctionDef({
-    description: 'Generates mock user data for testing purposes',
-    category: 'async',
+    description: "Generates mock user data for testing purposes",
+    category: "async",
     parameters: [
         {
-            name: 'count',
-            description: 'Number of mock users to generate',
-            type: 'number',
+            name: "count",
+            description: "Number of mock users to generate",
+            type: "number",
             required: false,
-            default: 5
-        }
+            default: 5,
+        },
     ],
     output: {
-        description: 'Mock user object',
-        type: 'object',
+        description: "Mock user object",
+        type: "object",
         properties: {
-            id: { description: 'User ID', type: 'number' },
-            name: { description: 'Full name', type: 'string' },
-            email: { description: 'Email address', type: 'string' },
-            age: { description: 'Age in years', type: 'number' },
-            active: { description: 'Whether user is active', type: 'boolean' }
-        }
+            id: { description: "User ID", type: "number" },
+            name: { description: "Full name", type: "string" },
+            email: { description: "Email address", type: "string" },
+            age: { description: "Age in years", type: "number" },
+            active: { description: "Whether user is active", type: "boolean" },
+        },
     },
     examples: [
-        "LOAD JSON FROM mockUsers(10) AS user RETURN user.name, user.email",
-        "LOAD JSON FROM mockUsers(20) AS user RETURN user WHERE user.active = true"
-    ]
+        "CALL mockUsers(10) YIELD name, email",
+        "CALL mockUsers(20) YIELD name, email, active WHERE active = true",
+    ],
 })
 export class MockUsers extends AsyncFunction {
     private readonly firstNames: string[];
@@ -45,9 +43,31 @@ export class MockUsers extends AsyncFunction {
     private readonly domains: string[];
 
     constructor(
-        firstNames: string[] = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Henry', 'Ivy', 'Jack'],
-        lastNames: string[] = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'],
-        domains: string[] = ['example.com', 'test.org', 'demo.net']
+        firstNames: string[] = [
+            "Alice",
+            "Bob",
+            "Charlie",
+            "Diana",
+            "Eve",
+            "Frank",
+            "Grace",
+            "Henry",
+            "Ivy",
+            "Jack",
+        ],
+        lastNames: string[] = [
+            "Smith",
+            "Johnson",
+            "Williams",
+            "Brown",
+            "Jones",
+            "Garcia",
+            "Miller",
+            "Davis",
+            "Rodriguez",
+            "Martinez",
+        ],
+        domains: string[] = ["example.com", "test.org", "demo.net"]
     ) {
         super();
         this.firstNames = firstNames;
@@ -57,7 +77,7 @@ export class MockUsers extends AsyncFunction {
 
     /**
      * Generates mock user data.
-     * 
+     *
      * @param count - Number of mock users to generate
      */
     async *generate(count: number = 5): AsyncGenerator<any, void, unknown> {
@@ -65,13 +85,13 @@ export class MockUsers extends AsyncFunction {
             const firstName = this.firstNames[Math.floor(Math.random() * this.firstNames.length)];
             const lastName = this.lastNames[Math.floor(Math.random() * this.lastNames.length)];
             const domain = this.domains[Math.floor(Math.random() * this.domains.length)];
-            
+
             yield {
                 id: i + 1,
                 name: `${firstName} ${lastName}`,
                 email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${domain}`,
                 age: Math.floor(Math.random() * 50) + 18,
-                active: Math.random() > 0.3
+                active: Math.random() > 0.3,
             };
         }
     }
@@ -81,33 +101,33 @@ export class MockUsers extends AsyncFunction {
  * MockProducts class - generates mock product data for testing.
  */
 @FunctionDef({
-    description: 'Generates mock product data for testing purposes',
-    category: 'async',
+    description: "Generates mock product data for testing purposes",
+    category: "async",
     parameters: [
         {
-            name: 'count',
-            description: 'Number of mock products to generate',
-            type: 'number',
+            name: "count",
+            description: "Number of mock products to generate",
+            type: "number",
             required: false,
-            default: 5
-        }
+            default: 5,
+        },
     ],
     output: {
-        description: 'Mock product object',
-        type: 'object',
+        description: "Mock product object",
+        type: "object",
         properties: {
-            id: { description: 'Product ID', type: 'number' },
-            name: { description: 'Product name', type: 'string' },
-            category: { description: 'Product category', type: 'string' },
-            price: { description: 'Price in dollars', type: 'number' },
-            inStock: { description: 'Whether product is in stock', type: 'boolean' },
-            rating: { description: 'Customer rating (0-5)', type: 'number' }
-        }
+            id: { description: "Product ID", type: "number" },
+            name: { description: "Product name", type: "string" },
+            category: { description: "Product category", type: "string" },
+            price: { description: "Price in dollars", type: "number" },
+            inStock: { description: "Whether product is in stock", type: "boolean" },
+            rating: { description: "Customer rating (0-5)", type: "number" },
+        },
     },
     examples: [
-        "LOAD JSON FROM mockProducts(10) AS p RETURN p.name, p.price",
-        "LOAD JSON FROM mockProducts(50) AS p RETURN p WHERE p.category = 'Electronics'"
-    ]
+        "CALL mockProducts(10) YIELD name, price",
+        "CALL mockProducts(50) YIELD name, price, category WHERE category = 'Electronics'",
+    ],
 })
 export class MockProducts extends AsyncFunction {
     private readonly categories: string[];
@@ -115,9 +135,9 @@ export class MockProducts extends AsyncFunction {
     private readonly nouns: string[];
 
     constructor(
-        categories: string[] = ['Electronics', 'Clothing', 'Books', 'Home', 'Sports'],
-        adjectives: string[] = ['Premium', 'Basic', 'Pro', 'Ultra', 'Classic'],
-        nouns: string[] = ['Widget', 'Gadget', 'Item', 'Product', 'Thing']
+        categories: string[] = ["Electronics", "Clothing", "Books", "Home", "Sports"],
+        adjectives: string[] = ["Premium", "Basic", "Pro", "Ultra", "Classic"],
+        nouns: string[] = ["Widget", "Gadget", "Item", "Product", "Thing"]
     ) {
         super();
         this.categories = categories;
@@ -127,7 +147,7 @@ export class MockProducts extends AsyncFunction {
 
     /**
      * Generates mock product data.
-     * 
+     *
      * @param count - Number of mock products to generate
      */
     async *generate(count: number = 5): AsyncGenerator<any, void, unknown> {
@@ -135,14 +155,14 @@ export class MockProducts extends AsyncFunction {
             const adj = this.adjectives[Math.floor(Math.random() * this.adjectives.length)];
             const noun = this.nouns[Math.floor(Math.random() * this.nouns.length)];
             const category = this.categories[Math.floor(Math.random() * this.categories.length)];
-            
+
             yield {
                 id: i + 1,
                 name: `${adj} ${noun} ${i + 1}`,
                 category,
                 price: Math.round(Math.random() * 1000 * 100) / 100,
                 inStock: Math.random() > 0.2,
-                rating: Math.round(Math.random() * 50) / 10
+                rating: Math.round(Math.random() * 50) / 10,
             };
         }
     }

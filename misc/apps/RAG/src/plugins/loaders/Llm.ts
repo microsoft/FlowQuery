@@ -1,27 +1,24 @@
 /**
  * OpenAI LLM Plugin: Call OpenAI-compatible APIs for chat completions.
- * 
+ *
  * Usage in FlowQuery:
- *   LOAD JSON FROM llm('What is the capital of France?') AS response
- *   RETURN response.choices[0].message.content
- * 
+ *   CALL llm('What is the capital of France?') YIELD choices
+ *
  * With custom options:
- *   LOAD JSON FROM llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) AS response
- *   RETURN response.choices[0].message.content
- * 
+ *   CALL llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) YIELD choices, usage
+ *
  * This class can also be used standalone outside of FlowQuery:
  *   import { Llm } from './plugins/loaders/Llm';
  *   const llmInstance = new Llm();
  *   const response = await llmInstance.complete('What is 2+2?');
  *   console.log(response.choices[0].message.content);
  */
-
-import { FunctionDef, AsyncFunction } from 'flowquery/extensibility';
+import { AsyncFunction, FunctionDef } from "flowquery/extensibility";
 
 // Default configuration - can be overridden via options
 const DEFAULT_CONFIG = {
-    apiUrl: 'https://api.openai.com/v1/chat/completions',
-    model: 'gpt-4o-mini',
+    apiUrl: "https://api.openai.com/v1/chat/completions",
+    model: "gpt-4o-mini",
     temperature: 0.7,
     maxTokens: undefined as number | undefined,
 };
@@ -43,7 +40,7 @@ export interface LlmOptions {
     /** System prompt to set context for the conversation. */
     systemPrompt?: string;
     /** Additional messages to include in the conversation. */
-    messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
     /** Organization ID for OpenAI API. */
     organizationId?: string;
     /** Additional headers to include in the request. */
@@ -81,56 +78,65 @@ export interface LlmResponse {
  * Llm class - calls OpenAI-compatible APIs for chat completions.
  */
 @FunctionDef({
-    description: 'Calls OpenAI-compatible chat completion APIs. Supports GPT models and any OpenAI-compatible endpoint.',
-    category: 'async',
+    description:
+        "Calls OpenAI-compatible chat completion APIs. Supports GPT models and any OpenAI-compatible endpoint.",
+    category: "async",
     parameters: [
         {
-            name: 'prompt',
-            description: 'The user prompt to send to the LLM',
-            type: 'string',
+            name: "prompt",
+            description: "The user prompt to send to the LLM",
+            type: "string",
             required: true,
-            example: 'What is the capital of France?'
+            example: "What is the capital of France?",
         },
         {
-            name: 'options',
-            description: 'Optional configuration for the LLM request',
-            type: 'object',
+            name: "options",
+            description: "Optional configuration for the LLM request",
+            type: "object",
             required: false,
             properties: {
-                apiKey: { description: 'OpenAI API key', type: 'string' },
-                apiUrl: { description: 'API endpoint URL (defaults to OpenAI chat completions)', type: 'string' },
-                model: { description: 'Model to use (defaults to gpt-4o-mini)', type: 'string' },
-                temperature: { description: 'Sampling temperature 0-2 (defaults to 0.7)', type: 'number' },
-                maxTokens: { description: 'Maximum tokens to generate', type: 'number' },
-                systemPrompt: { description: 'System prompt to set context', type: 'string' },
-                messages: { description: 'Additional conversation messages', type: 'array' },
-                organizationId: { description: 'OpenAI organization ID', type: 'string' },
-                headers: { description: 'Additional request headers', type: 'object' },
-                stream: { description: 'Enable streaming response', type: 'boolean' },
-                additionalParams: { description: 'Additional API parameters', type: 'object' }
-            }
-        }
+                apiKey: { description: "OpenAI API key", type: "string" },
+                apiUrl: {
+                    description: "API endpoint URL (defaults to OpenAI chat completions)",
+                    type: "string",
+                },
+                model: { description: "Model to use (defaults to gpt-4o-mini)", type: "string" },
+                temperature: {
+                    description: "Sampling temperature 0-2 (defaults to 0.7)",
+                    type: "number",
+                },
+                maxTokens: { description: "Maximum tokens to generate", type: "number" },
+                systemPrompt: { description: "System prompt to set context", type: "string" },
+                messages: { description: "Additional conversation messages", type: "array" },
+                organizationId: { description: "OpenAI organization ID", type: "string" },
+                headers: { description: "Additional request headers", type: "object" },
+                stream: { description: "Enable streaming response", type: "boolean" },
+                additionalParams: { description: "Additional API parameters", type: "object" },
+            },
+        },
     ],
     output: {
-        description: 'OpenAI chat completion response',
-        type: 'object',
+        description: "OpenAI chat completion response",
+        type: "object",
         properties: {
-            id: { description: 'Unique identifier for the completion', type: 'string' },
-            model: { description: 'Model used for completion', type: 'string' },
-            choices: { 
-                description: 'Array of completion choices', 
-                type: 'array',
-                example: [{ message: { role: 'assistant', content: 'Paris is the capital of France.' } }]
+            id: { description: "Unique identifier for the completion", type: "string" },
+            model: { description: "Model used for completion", type: "string" },
+            choices: {
+                description: "Array of completion choices",
+                type: "array",
+                example: [
+                    { message: { role: "assistant", content: "Paris is the capital of France." } },
+                ],
             },
-            usage: { description: 'Token usage statistics', type: 'object' }
-        }
+            usage: { description: "Token usage statistics", type: "object" },
+        },
     },
     examples: [
-        "LOAD JSON FROM llm('What is 2+2?') AS response RETURN response.choices[0].message.content",
-        "LOAD JSON FROM llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) AS response RETURN response.choices[0].message.content",
-        "LOAD JSON FROM llm('Write a haiku', { systemPrompt: 'You are a poet' }) AS response RETURN response.choices[0].message.content"
+        "CALL llm('What is 2+2?') YIELD choices",
+        "CALL llm('Translate to French: Hello', { model: 'gpt-4o', temperature: 0.3 }) YIELD choices, usage",
+        "CALL llm('Write a haiku', { systemPrompt: 'You are a poet' }) YIELD choices",
     ],
-    notes: 'Requires API key configured in Settings or passed as apiKey option. Works with any OpenAI-compatible API by setting the apiUrl option.'
+    notes: "Requires API key configured in Settings or passed as apiKey option. Works with any OpenAI-compatible API by setting the apiUrl option.",
 })
 export class Llm extends AsyncFunction {
     private readonly defaultOptions: Partial<LlmOptions>;
@@ -148,22 +154,22 @@ export class Llm extends AsyncFunction {
         if (options?.apiKey) {
             return options.apiKey;
         }
-        
+
         // Check default options
         if (this.defaultOptions.apiKey) {
             return this.defaultOptions.apiKey;
         }
-        
+
         // In browser, check localStorage
-        if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-            const storedKey = localStorage.getItem('flowquery_openai_api_key');
+        if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+            const storedKey = localStorage.getItem("flowquery_openai_api_key");
             if (storedKey) {
                 return storedKey;
             }
         }
-        
+
         throw new Error(
-            'OpenAI API key is required. Configure it in Settings or pass apiKey in options.'
+            "OpenAI API key is required. Configure it in Settings or pass apiKey in options."
         );
     }
 
@@ -171,13 +177,13 @@ export class Llm extends AsyncFunction {
      * Get stored configuration from localStorage (browser only).
      */
     private getStoredConfig(): Partial<LlmOptions> {
-        if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        if (typeof window === "undefined" || typeof localStorage === "undefined") {
             return {};
         }
-        
+
         return {
-            organizationId: localStorage.getItem('flowquery_openai_org_id') || undefined,
-            model: localStorage.getItem('flowquery_openai_model') || undefined,
+            organizationId: localStorage.getItem("flowquery_openai_org_id") || undefined,
+            model: localStorage.getItem("flowquery_openai_model") || undefined,
         };
     }
 
@@ -189,7 +195,7 @@ export class Llm extends AsyncFunction {
 
         // Add system prompt if provided
         if (options?.systemPrompt) {
-            messages.push({ role: 'system', content: options.systemPrompt });
+            messages.push({ role: "system", content: options.systemPrompt });
         }
 
         // Add any additional messages
@@ -198,17 +204,21 @@ export class Llm extends AsyncFunction {
         }
 
         // Add the user prompt
-        messages.push({ role: 'user', content: prompt });
+        messages.push({ role: "user", content: prompt });
 
         const body: Record<string, any> = {
             model: options?.model || this.defaultOptions.model || DEFAULT_CONFIG.model,
             messages,
-            temperature: options?.temperature ?? this.defaultOptions.temperature ?? DEFAULT_CONFIG.temperature,
+            temperature:
+                options?.temperature ??
+                this.defaultOptions.temperature ??
+                DEFAULT_CONFIG.temperature,
             ...(options?.additionalParams || {}),
         };
 
         if (options?.maxTokens || this.defaultOptions.maxTokens || DEFAULT_CONFIG.maxTokens) {
-            body.max_tokens = options?.maxTokens || this.defaultOptions.maxTokens || DEFAULT_CONFIG.maxTokens;
+            body.max_tokens =
+                options?.maxTokens || this.defaultOptions.maxTokens || DEFAULT_CONFIG.maxTokens;
         }
 
         if (options?.stream) {
@@ -223,13 +233,13 @@ export class Llm extends AsyncFunction {
      */
     private buildHeaders(apiKey: string, options?: LlmOptions): Record<string, string> {
         const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
             ...(options?.headers || {}),
         };
 
         if (options?.organizationId) {
-            headers['OpenAI-Organization'] = options.organizationId;
+            headers["OpenAI-Organization"] = options.organizationId;
         }
 
         return headers;
@@ -237,11 +247,11 @@ export class Llm extends AsyncFunction {
 
     /**
      * Call the OpenAI-compatible API and return the full response.
-     * 
+     *
      * @param prompt - The user prompt to send to the LLM
      * @param options - Optional configuration for the request
      * @returns The full API response
-     * 
+     *
      * @example
      * ```typescript
      * const llmInstance = new Llm();
@@ -253,14 +263,14 @@ export class Llm extends AsyncFunction {
         // Merge stored config with provided options (options take precedence)
         const storedConfig = this.getStoredConfig();
         const mergedOptions = { ...this.defaultOptions, ...storedConfig, ...options };
-        
+
         const apiKey = this.getApiKey(mergedOptions);
         const apiUrl = mergedOptions?.apiUrl || DEFAULT_CONFIG.apiUrl;
         const headers = this.buildHeaders(apiKey, mergedOptions);
         const body = this.buildRequestBody(prompt, mergedOptions);
 
         const response = await fetch(apiUrl, {
-            method: 'POST',
+            method: "POST",
             headers,
             body: JSON.stringify(body),
         });
@@ -275,11 +285,11 @@ export class Llm extends AsyncFunction {
 
     /**
      * Call the OpenAI-compatible API with streaming and yield each chunk.
-     * 
+     *
      * @param prompt - The user prompt to send to the LLM
      * @param options - Optional configuration for the request
      * @yields Parsed SSE data chunks from the stream
-     * 
+     *
      * @example
      * ```typescript
      * const llmInstance = new Llm();
@@ -294,14 +304,14 @@ export class Llm extends AsyncFunction {
         // Merge stored config with provided options (options take precedence)
         const storedConfig = this.getStoredConfig();
         const mergedOptions = { ...this.defaultOptions, ...storedConfig, ...options };
-        
+
         const apiKey = this.getApiKey(mergedOptions);
         const apiUrl = mergedOptions?.apiUrl || DEFAULT_CONFIG.apiUrl;
         const headers = this.buildHeaders(apiKey, mergedOptions);
         const body = this.buildRequestBody(prompt, { ...mergedOptions, stream: true });
 
         const response = await fetch(apiUrl, {
-            method: 'POST',
+            method: "POST",
             headers,
             body: JSON.stringify(body),
         });
@@ -312,12 +322,12 @@ export class Llm extends AsyncFunction {
         }
 
         if (!response.body) {
-            throw new Error('Response body is null');
+            throw new Error("Response body is null");
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
+        let buffer = "";
 
         try {
             while (true) {
@@ -325,14 +335,14 @@ export class Llm extends AsyncFunction {
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
 
                 for (const line of lines) {
                     const trimmed = line.trim();
-                    if (trimmed.startsWith('data: ')) {
+                    if (trimmed.startsWith("data: ")) {
                         const data = trimmed.slice(6);
-                        if (data === '[DONE]') {
+                        if (data === "[DONE]") {
                             return;
                         }
                         try {
@@ -363,31 +373,31 @@ export class Llm extends AsyncFunction {
     /**
      * Extract just the text content from an LLM response.
      * Convenience method for common use case.
-     * 
+     *
      * @param response - The LLM response object
      * @returns The text content from the first choice
      */
     static extractContent(response: LlmResponse): string {
-        return response.choices?.[0]?.message?.content || '';
+        return response.choices?.[0]?.message?.content || "";
     }
 }
 
 /**
  * Call the OpenAI-compatible API and return the full response.
  * This function can be used standalone outside of FlowQuery.
- * 
+ *
  * @param prompt - The user prompt to send to the LLM
  * @param options - Optional configuration for the request
  * @returns The full API response
- * 
+ *
  * @example
  * ```typescript
  * import { llm } from './plugins/loaders/Llm';
- * 
+ *
  * // Simple usage
  * const response = await llm('What is the capital of France?');
  * console.log(response.choices[0].message.content);
- * 
+ *
  * // With options
  * const response = await llm('Translate to Spanish: Hello', {
  *   model: 'gpt-4o',
@@ -403,15 +413,15 @@ export async function llm(prompt: string, options?: LlmOptions): Promise<LlmResp
 /**
  * Call the OpenAI-compatible API with streaming and yield each chunk.
  * This function can be used standalone outside of FlowQuery.
- * 
+ *
  * @param prompt - The user prompt to send to the LLM
  * @param options - Optional configuration for the request
  * @yields Parsed SSE data chunks from the stream
- * 
+ *
  * @example
  * ```typescript
  * import { llmStream } from './plugins/loaders/Llm';
- * 
+ *
  * for await (const chunk of llmStream('Tell me a story')) {
  *   if (chunk.choices?.[0]?.delta?.content) {
  *     process.stdout.write(chunk.choices[0].delta.content);
@@ -419,14 +429,17 @@ export async function llm(prompt: string, options?: LlmOptions): Promise<LlmResp
  * }
  * ```
  */
-export async function* llmStream(prompt: string, options?: LlmOptions): AsyncGenerator<any, void, unknown> {
+export async function* llmStream(
+    prompt: string,
+    options?: LlmOptions
+): AsyncGenerator<any, void, unknown> {
     yield* new Llm().stream(prompt, options);
 }
 
 /**
  * Extract just the text content from an LLM response.
  * Convenience function for common use case.
- * 
+ *
  * @param response - The LLM response object
  * @returns The text content from the first choice
  */

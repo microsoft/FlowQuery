@@ -1,15 +1,15 @@
 /**
  * FlowQuery System Prompt Generator
- * 
+ *
  * Generates a system prompt that instructs the LLM to create FlowQuery statements
  * based on natural language queries, with awareness of available loader plugins.
- * 
+ *
  * Uses FlowQuery's built-in functions() introspection to dynamically discover
  * available async data loaders and their metadata.
  */
+import { FunctionMetadata, OutputSchema, ParameterSchema } from "flowquery/extensibility";
 
-import { FunctionMetadata, ParameterSchema, OutputSchema } from 'flowquery/extensibility';
-import { getAllPluginMetadata, getAvailableLoaders } from '../plugins';
+import { getAllPluginMetadata, getAvailableLoaders } from "../plugins";
 
 /**
  * FlowQuery language reference documentation.
@@ -28,25 +28,29 @@ FlowQuery is a declarative query language for data processing pipelines. It uses
    WITH expression1 AS var1, expression2 AS var2
    \`\`\`
 
-2. **LOAD JSON FROM** - Load data from a URL or async data provider
+2. **LOAD JSON FROM** - Load data from a URL
    \`\`\`
    LOAD JSON FROM 'https://api.example.com/data' AS item
-   LOAD JSON FROM myFunction(arg1, arg2) AS item
-   \`\`\`
-   
-   **IMPORTANT**: Async data providers (functions used after LOAD JSON FROM) cannot be nested inside other function calls. If you need to pass data from one async provider to another, first load the data into a variable using collect(), then pass that variable:
-   \`\`\`
-   // WRONG - async providers cannot be nested:
-   // LOAD JSON FROM table(mockProducts(5), 'Products') AS card
-   
-   // CORRECT - collect data first, then pass to next provider:
-   LOAD JSON FROM mockProducts(5) AS p
-   WITH collect(p) AS products
-   LOAD JSON FROM table(products, 'Products') AS card
-   RETURN card
    \`\`\`
 
-3. **LOAD JSON FROM ... HEADERS ... POST** - Make HTTP requests with headers and body
+3. **CALL ... YIELD** - Call an async data provider function and yield its fields
+   \`\`\`
+   CALL myFunction(arg1, arg2) YIELD field1, field2, field3
+   \`\`\`
+   
+   **IMPORTANT**: Async data providers (functions used with CALL) cannot be nested inside other function calls. If you need to pass data from one async provider to another, first load the data into a variable using collect(), then pass that variable:
+   \`\`\`
+   // WRONG - async providers cannot be nested:
+   // CALL table(mockProducts(5), 'Products') YIELD html
+   
+   // CORRECT - collect data first, then pass to next provider:
+   CALL mockProducts(5) YIELD id, name, price
+   WITH collect({ id: id, name: name, price: price }) AS products
+   CALL table(products, 'Products') YIELD html
+   RETURN html
+   \`\`\`
+
+4. **LOAD JSON FROM ... HEADERS ... POST** - Make HTTP requests with headers and body
    \`\`\`
    LOAD JSON FROM 'https://api.example.com/data'
    HEADERS {
@@ -59,40 +63,24 @@ FlowQuery is a declarative query language for data processing pipelines. It uses
    } AS response
    \`\`\`
 
-4. **UNWIND** - Expand arrays into individual rows
+5. **UNWIND** - Expand arrays into individual rows
    \`\`\`
    UNWIND [1, 2, 3] AS number
    UNWIND myArray AS item
    UNWIND range(0, 10) AS index
    \`\`\`
 
-5. **WHERE** - Filter results
+6. **WHERE** - Filter results
    \`\`\`
    WHERE item.active = true
    WHERE user.age > 18 AND user.name CONTAINS 'John'
    \`\`\`
 
-6. **RETURN** - Specify output columns
+7. **RETURN** - Specify output columns
    \`\`\`
    RETURN item.name, item.value
    RETURN item.name AS Name, item.price AS Price
    RETURN *  -- Return all fields
-   \`\`\`
-
-7. **ORDER BY** - Sort results
-   \`\`\`
-   ORDER BY item.name ASC
-   ORDER BY item.price DESC, item.name ASC
-   \`\`\`
-
-8. **LIMIT** - Limit number of results
-   \`\`\`
-   LIMIT 10
-   \`\`\`
-
-9. **SKIP** - Skip a number of results
-   \`\`\`
-   SKIP 5
    \`\`\`
 
 ### Built-in Functions
@@ -154,9 +142,12 @@ export class FlowQuerySystemPrompt {
      * Format a parameter schema into a readable string.
      */
     private static formatParameter(param: ParameterSchema): string {
-        const required = param.required ? ' (required)' : ' (optional)';
-        const defaultVal = param.default !== undefined ? `, default: ${JSON.stringify(param.default)}` : '';
-        const enumVals = param.enum ? `, values: [${param.enum.map(v => JSON.stringify(v)).join(', ')}]` : '';
+        const required = param.required ? " (required)" : " (optional)";
+        const defaultVal =
+            param.default !== undefined ? `, default: ${JSON.stringify(param.default)}` : "";
+        const enumVals = param.enum
+            ? `, values: [${param.enum.map((v) => JSON.stringify(v)).join(", ")}]`
+            : "";
         return `  - \`${param.name}\`: ${param.type}${required}${defaultVal}${enumVals} - ${param.description}`;
     }
 
@@ -165,18 +156,18 @@ export class FlowQuerySystemPrompt {
      */
     private static formatOutput(output: OutputSchema): string {
         let result = `  Returns: ${output.type} - ${output.description}`;
-        
+
         if (output.properties) {
-            result += '\n  Output properties:';
+            result += "\n  Output properties:";
             for (const [key, prop] of Object.entries(output.properties)) {
                 result += `\n    - \`${key}\`: ${prop.type} - ${prop.description}`;
             }
         }
-        
+
         if (output.example) {
             result += `\n  Example output: ${JSON.stringify(output.example, null, 2)}`;
         }
-        
+
         return result;
     }
 
@@ -185,38 +176,38 @@ export class FlowQuerySystemPrompt {
      */
     private static formatPluginDocumentation(plugin: FunctionMetadata): string {
         const lines: string[] = [];
-        
+
         lines.push(`### \`${plugin.name}\``);
         lines.push(`**Description**: ${plugin.description}`);
-        
+
         if (plugin.category) {
             lines.push(`**Category**: ${plugin.category}`);
         }
-        
+
         if (plugin.parameters.length > 0) {
-            lines.push('\n**Parameters**:');
+            lines.push("\n**Parameters**:");
             for (const param of plugin.parameters) {
                 lines.push(this.formatParameter(param));
             }
         } else {
-            lines.push('\n**Parameters**: None');
+            lines.push("\n**Parameters**: None");
         }
-        
-        lines.push('\n**Output**:');
+
+        lines.push("\n**Output**:");
         lines.push(this.formatOutput(plugin.output));
-        
+
         if (plugin.examples && plugin.examples.length > 0) {
-            lines.push('\n**Usage Examples**:');
+            lines.push("\n**Usage Examples**:");
             for (const example of plugin.examples) {
                 lines.push(`\`\`\`\n${example}\n\`\`\``);
             }
         }
-        
+
         if (plugin.notes) {
             lines.push(`\n**Notes**: ${plugin.notes}`);
         }
-        
-        return lines.join('\n');
+
+        return lines.join("\n");
     }
 
     /**
@@ -224,33 +215,37 @@ export class FlowQuerySystemPrompt {
      */
     private static generatePluginDocumentation(plugins: FunctionMetadata[]): string {
         if (plugins.length === 0) {
-            return 'No data loader plugins are currently available.';
+            return "No data loader plugins are currently available.";
         }
-        
+
         const sections: string[] = [];
-        
+
         // Group plugins by category
         const byCategory = new Map<string, FunctionMetadata[]>();
         for (const plugin of plugins) {
-            const category = plugin.category || 'general';
+            const category = plugin.category || "general";
             if (!byCategory.has(category)) {
                 byCategory.set(category, []);
             }
             byCategory.get(category)!.push(plugin);
         }
-        
-        sections.push('## Available Data Loader Plugins\n');
-        sections.push('The following async data loader functions are available for use with `LOAD JSON FROM`:\n');
-        
+
+        sections.push("## Available Data Loader Plugins\n");
+        sections.push(
+            "The following async data loader functions are available for use with `CALL ... YIELD`:\n"
+        );
+
         for (const [category, categoryPlugins] of byCategory) {
-            sections.push(`\n### Category: ${category.charAt(0).toUpperCase() + category.slice(1)}\n`);
+            sections.push(
+                `\n### Category: ${category.charAt(0).toUpperCase() + category.slice(1)}\n`
+            );
             for (const plugin of categoryPlugins) {
                 sections.push(this.formatPluginDocumentation(plugin));
-                sections.push('---');
+                sections.push("---");
             }
         }
-        
-        return sections.join('\n');
+
+        return sections.join("\n");
     }
 
     /**
@@ -296,15 +291,15 @@ ${FLOWQUERY_LANGUAGE_REFERENCE}
 
 ${pluginDocs}
 
-${additionalContext ? `## Additional Context\n\n${additionalContext}` : ''}
+${additionalContext ? `## Additional Context\n\n${additionalContext}` : ""}
 
 ## Example Response Format
 
 **When a query is needed**:
 \`\`\`flowquery
-LOAD JSON FROM pluginName(args) AS item
-WHERE item.field = 'value'
-RETURN item.name AS Name, item.value AS Value
+CALL pluginName(args) YIELD field1, field2, field3
+WHERE field1 = 'value'
+RETURN field1 AS Name, field2 AS Value
 \`\`\`
 
 **When no query is needed** (e.g., general questions about FlowQuery):
@@ -317,7 +312,7 @@ Now help the user with their request.`;
     /**
      * Generate the complete FlowQuery system prompt.
      * Uses FlowQuery's introspection via functions() as the single source of truth.
-     * 
+     *
      * @param additionalContext - Optional additional context to include in the prompt
      * @returns The complete system prompt string
      */
@@ -325,14 +320,14 @@ Now help the user with their request.`;
         // Uses FlowQuery's introspection to get available async providers
         const plugins = getAllPluginMetadata();
         const pluginDocs = this.generatePluginDocumentation(plugins);
-        
+
         return this.buildSystemPrompt(pluginDocs, additionalContext);
     }
 
     /**
      * Generate a system prompt for the interpretation phase.
      * Used after FlowQuery execution to interpret results.
-     * 
+     *
      * @returns The interpretation system prompt string
      */
     public static generateInterpretationPrompt(): string {
@@ -363,8 +358,8 @@ You are now receiving the execution results. Your job is to:
      */
     public static getMinimalPrompt(): string {
         const plugins = getAllPluginMetadata();
-        const pluginList = plugins.map(p => `- \`${p.name}\`: ${p.description}`).join('\n');
-        
+        const pluginList = plugins.map((p) => `- \`${p.name}\`: ${p.description}`).join("\n");
+
         return `You are a FlowQuery assistant. Generate FlowQuery statements based on user requests.
 
 Available data loader plugins:
@@ -379,7 +374,7 @@ Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
     /**
      * Generate the FlowQuery system prompt asynchronously using functions() introspection.
      * This is the preferred method that uses FlowQuery's built-in introspection.
-     * 
+     *
      * @param additionalContext - Optional additional context to include in the prompt
      * @returns Promise resolving to the complete system prompt string
      */
@@ -387,15 +382,19 @@ Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
         // Use FlowQuery's functions() introspection to discover available loaders
         const plugins = await getAvailableLoaders();
         const pluginDocs = this.generatePluginDocumentation(plugins);
-        
+
         return this.buildSystemPrompt(pluginDocs, additionalContext);
     }
 }
 
 // Export functions for backward compatibility
-export const generateFlowQuerySystemPrompt = FlowQuerySystemPrompt.generate.bind(FlowQuerySystemPrompt);
-export const generateInterpretationPrompt = FlowQuerySystemPrompt.generateInterpretationPrompt.bind(FlowQuerySystemPrompt);
-export const getMinimalFlowQueryPrompt = FlowQuerySystemPrompt.getMinimalPrompt.bind(FlowQuerySystemPrompt);
-export const generateFlowQuerySystemPromptAsync = FlowQuerySystemPrompt.generateAsync.bind(FlowQuerySystemPrompt);
+export const generateFlowQuerySystemPrompt =
+    FlowQuerySystemPrompt.generate.bind(FlowQuerySystemPrompt);
+export const generateInterpretationPrompt =
+    FlowQuerySystemPrompt.generateInterpretationPrompt.bind(FlowQuerySystemPrompt);
+export const getMinimalFlowQueryPrompt =
+    FlowQuerySystemPrompt.getMinimalPrompt.bind(FlowQuerySystemPrompt);
+export const generateFlowQuerySystemPromptAsync =
+    FlowQuerySystemPrompt.generateAsync.bind(FlowQuerySystemPrompt);
 
 export default FlowQuerySystemPrompt;

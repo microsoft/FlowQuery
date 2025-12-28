@@ -69,6 +69,18 @@ FlowQuery is a declarative query language for data processing pipelines. It uses
    UNWIND myArray AS item
    UNWIND range(0, 10) AS index
    \`\`\`
+   
+   **IMPORTANT**: An UNWIND statement cannot be followed directly by a WHERE statement. If you need to filter after unwinding, use a WITH clause in between:
+   \`\`\`
+   // WRONG - UNWIND cannot be directly followed by WHERE:
+   // UNWIND items AS item
+   // WHERE item.active = true
+   
+   // CORRECT - use WITH between UNWIND and WHERE:
+   UNWIND items AS item
+   WITH item
+   WHERE item.active = true
+   \`\`\`
 
 6. **WHERE** - Filter results
    \`\`\`

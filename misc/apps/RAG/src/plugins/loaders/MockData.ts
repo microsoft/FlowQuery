@@ -1,171 +1,101 @@
-/**
- * Example plugin: Generate mock data for testing.
- *
- * Usage in FlowQuery:
- *   CALL mockUsers(10) YIELD name, email
- */
 import { AsyncFunction, FunctionDef } from "flowquery/extensibility";
 
-/**
- * MockUsers class - generates mock user data for testing.
- */
+const usersData = [
+    { id: 1, name: "Alice Johnson", email: "alice@example.com", age: 28 },
+    { id: 2, name: "Bob Smith", email: "bob@example.com", age: 34 },
+    { id: 3, name: "Charlie Brown", email: "charlie@example.com", age: 22 },
+    { id: 4, name: "Diana Ross", email: "diana@example.com", age: 45 },
+    { id: 5, name: "Eve Wilson", email: "eve@example.com", age: 31 },
+];
+
+const productsData = [
+    { id: 101, name: "Laptop", price: 999.99, category: "Electronics", stock: 50 },
+    { id: 102, name: "Headphones", price: 149.99, category: "Electronics", stock: 200 },
+    { id: 103, name: "Coffee Mug", price: 12.99, category: "Kitchen", stock: 500 },
+    { id: 104, name: "Notebook", price: 8.99, category: "Office", stock: 300 },
+    { id: 105, name: "Backpack", price: 59.99, category: "Accessories", stock: 75 },
+];
+
+const ordersData = [
+    { id: 1001, userId: 1, productId: 101, quantity: 1, total: 999.99, date: "2025-12-01" },
+    { id: 1002, userId: 2, productId: 102, quantity: 2, total: 299.98, date: "2025-12-05" },
+    { id: 1003, userId: 1, productId: 103, quantity: 4, total: 51.96, date: "2025-12-10" },
+    { id: 1004, userId: 3, productId: 104, quantity: 10, total: 89.9, date: "2025-12-15" },
+    { id: 1005, userId: 4, productId: 105, quantity: 1, total: 59.99, date: "2025-12-20" },
+    { id: 1006, userId: 5, productId: 101, quantity: 1, total: 999.99, date: "2025-12-25" },
+];
+
 @FunctionDef({
-    description: "Generates mock user data for testing purposes",
+    description: "Returns mock user data",
     category: "async",
-    parameters: [
-        {
-            name: "count",
-            description: "Number of mock users to generate",
-            type: "number",
-            required: false,
-            default: 5,
-        },
-    ],
+    parameters: [],
     output: {
-        description: "Mock user object",
+        description: "User object",
         type: "object",
         properties: {
             id: { description: "User ID", type: "number" },
-            name: { description: "Full name", type: "string" },
-            email: { description: "Email address", type: "string" },
-            age: { description: "Age in years", type: "number" },
-            active: { description: "Whether user is active", type: "boolean" },
+            name: { description: "User name", type: "string" },
+            email: { description: "User email", type: "string" },
+            age: { description: "User age", type: "number" },
         },
     },
-    examples: [
-        "CALL mockUsers(10) YIELD name, email",
-        "CALL mockUsers(20) YIELD name, email, active WHERE active = true",
-    ],
+    examples: ["CALL users() YIELD id, name, email, age"],
 })
-export class MockUsers extends AsyncFunction {
-    private readonly firstNames: string[];
-    private readonly lastNames: string[];
-    private readonly domains: string[];
-
-    constructor(
-        firstNames: string[] = [
-            "Alice",
-            "Bob",
-            "Charlie",
-            "Diana",
-            "Eve",
-            "Frank",
-            "Grace",
-            "Henry",
-            "Ivy",
-            "Jack",
-        ],
-        lastNames: string[] = [
-            "Smith",
-            "Johnson",
-            "Williams",
-            "Brown",
-            "Jones",
-            "Garcia",
-            "Miller",
-            "Davis",
-            "Rodriguez",
-            "Martinez",
-        ],
-        domains: string[] = ["example.com", "test.org", "demo.net"]
-    ) {
-        super();
-        this.firstNames = firstNames;
-        this.lastNames = lastNames;
-        this.domains = domains;
-    }
-
-    /**
-     * Generates mock user data.
-     *
-     * @param count - Number of mock users to generate
-     */
-    async *generate(count: number = 5): AsyncGenerator<any, void, unknown> {
-        for (let i = 0; i < count; i++) {
-            const firstName = this.firstNames[Math.floor(Math.random() * this.firstNames.length)];
-            const lastName = this.lastNames[Math.floor(Math.random() * this.lastNames.length)];
-            const domain = this.domains[Math.floor(Math.random() * this.domains.length)];
-
-            yield {
-                id: i + 1,
-                name: `${firstName} ${lastName}`,
-                email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${domain}`,
-                age: Math.floor(Math.random() * 50) + 18,
-                active: Math.random() > 0.3,
-            };
+export class Users extends AsyncFunction {
+    async *generate(): AsyncGenerator<any, void, unknown> {
+        for (const user of usersData) {
+            yield user;
         }
     }
 }
 
-/**
- * MockProducts class - generates mock product data for testing.
- */
 @FunctionDef({
-    description: "Generates mock product data for testing purposes",
+    description: "Returns mock product data",
     category: "async",
-    parameters: [
-        {
-            name: "count",
-            description: "Number of mock products to generate",
-            type: "number",
-            required: false,
-            default: 5,
-        },
-    ],
+    parameters: [],
     output: {
-        description: "Mock product object",
+        description: "Product object",
         type: "object",
         properties: {
             id: { description: "Product ID", type: "number" },
             name: { description: "Product name", type: "string" },
+            price: { description: "Product price", type: "number" },
             category: { description: "Product category", type: "string" },
-            price: { description: "Price in dollars", type: "number" },
-            inStock: { description: "Whether product is in stock", type: "boolean" },
-            rating: { description: "Customer rating (0-5)", type: "number" },
+            stock: { description: "Stock quantity", type: "number" },
         },
     },
-    examples: [
-        "CALL mockProducts(10) YIELD name, price",
-        "CALL mockProducts(50) YIELD name, price, category WHERE category = 'Electronics'",
-    ],
+    examples: ["CALL products() YIELD id, name, price, category, stock"],
 })
-export class MockProducts extends AsyncFunction {
-    private readonly categories: string[];
-    private readonly adjectives: string[];
-    private readonly nouns: string[];
-
-    constructor(
-        categories: string[] = ["Electronics", "Clothing", "Books", "Home", "Sports"],
-        adjectives: string[] = ["Premium", "Basic", "Pro", "Ultra", "Classic"],
-        nouns: string[] = ["Widget", "Gadget", "Item", "Product", "Thing"]
-    ) {
-        super();
-        this.categories = categories;
-        this.adjectives = adjectives;
-        this.nouns = nouns;
-    }
-
-    /**
-     * Generates mock product data.
-     *
-     * @param count - Number of mock products to generate
-     */
-    async *generate(count: number = 5): AsyncGenerator<any, void, unknown> {
-        for (let i = 0; i < count; i++) {
-            const adj = this.adjectives[Math.floor(Math.random() * this.adjectives.length)];
-            const noun = this.nouns[Math.floor(Math.random() * this.nouns.length)];
-            const category = this.categories[Math.floor(Math.random() * this.categories.length)];
-
-            yield {
-                id: i + 1,
-                name: `${adj} ${noun} ${i + 1}`,
-                category,
-                price: Math.round(Math.random() * 1000 * 100) / 100,
-                inStock: Math.random() > 0.2,
-                rating: Math.round(Math.random() * 50) / 10,
-            };
+export class Products extends AsyncFunction {
+    async *generate(): AsyncGenerator<any, void, unknown> {
+        for (const product of productsData) {
+            yield product;
         }
     }
 }
 
-export { MockUsers as default };
+@FunctionDef({
+    description: "Returns mock order data",
+    category: "async",
+    parameters: [],
+    output: {
+        description: "Order object",
+        type: "object",
+        properties: {
+            id: { description: "Order ID", type: "number" },
+            userId: { description: "User ID who placed the order", type: "number" },
+            productId: { description: "Product ID ordered", type: "number" },
+            quantity: { description: "Quantity ordered", type: "number" },
+            total: { description: "Order total", type: "number" },
+            date: { description: "Order date", type: "string" },
+        },
+    },
+    examples: ["CALL orders() YIELD id, userId, productId, quantity, total, date"],
+})
+export class Orders extends AsyncFunction {
+    async *generate(): AsyncGenerator<any, void, unknown> {
+        for (const order of ordersData) {
+            yield order;
+        }
+    }
+}

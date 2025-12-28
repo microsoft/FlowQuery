@@ -235,10 +235,16 @@ export class AdaptiveCardRenderer extends React.Component<AdaptiveCardRendererPr
         this.containerRef.current.innerHTML = '';
         
         try {
+            // Normalize the card to standard Adaptive Card format
+            let cardPayload = normalizeAdaptiveCard(card);
+            
+            if (!cardPayload) {
+                throw new Error('Invalid Adaptive Card format');
+            }
+            
             // Apply data binding if data is provided
-            let cardPayload = card;
             if (data) {
-                const template = new ACData.Template(card);
+                const template = new ACData.Template(cardPayload);
                 cardPayload = template.expand({
                     $root: data
                 });
@@ -299,14 +305,76 @@ export class AdaptiveCardRenderer extends React.Component<AdaptiveCardRendererPr
 }
 
 /**
- * Helper function to check if an object looks like an Adaptive Card
+ * Helper function to check if an object looks like an Adaptive Card.
+ * Supports both standard format (type: 'AdaptiveCard') and alternative format (cardType: 'AdaptiveCard').
  */
 export function isAdaptiveCard(obj: unknown): obj is Record<string, unknown> {
-    return (
-        typeof obj === 'object' &&
-        obj !== null &&
-        (obj as Record<string, unknown>).type === 'AdaptiveCard'
-    );
+    if (typeof obj !== 'object' || obj === null) {
+        return false;
+    }
+    
+    const card = obj as Record<string, unknown>;
+    
+    // Standard Adaptive Card format
+    if (card.type === 'AdaptiveCard') {
+        return true;
+    }
+    
+    // Alternative format with cardType/cardBody
+    if (card.cardType === 'AdaptiveCard') {
+        return true;
+    }
+    
+    // Check if it's an array containing Adaptive Cards
+    if (Array.isArray(obj) && obj.length > 0) {
+        return obj.some(item => isAdaptiveCard(item));
+    }
+    
+    return false;
+}
+
+/**
+ * Normalizes a card payload to the standard Adaptive Card format.
+ * Handles:
+ * - Arrays of cards (returns the first card)
+ * - Alternative format with cardType/cardBody properties
+ * - Standard format (passed through unchanged)
+ */
+export function normalizeAdaptiveCard(obj: unknown): Record<string, unknown> | null {
+    if (typeof obj !== 'object' || obj === null) {
+        return null;
+    }
+    
+    // Handle arrays - extract the first valid card
+    if (Array.isArray(obj)) {
+        for (const item of obj) {
+            const normalized = normalizeAdaptiveCard(item);
+            if (normalized) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+    
+    const card = obj as Record<string, unknown>;
+    
+    // Standard format - return as-is
+    if (card.type === 'AdaptiveCard') {
+        return card;
+    }
+    
+    // Alternative format - convert to standard format
+    if (card.cardType === 'AdaptiveCard') {
+        return {
+            type: 'AdaptiveCard',
+            $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+            version: (card.version as string) || '1.5',
+            body: card.cardBody || card.body || [],
+            actions: card.actions || []
+        };
+    }
+    
+    return null;
 }
 
 export default AdaptiveCardRenderer;

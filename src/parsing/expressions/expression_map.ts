@@ -5,6 +5,9 @@ class ExpressionMap {
     public get(alias: string): Expression | undefined {
         return this._map.get(alias);
     }
+    public has(alias: string): boolean {
+        return this._map.has(alias);
+    }
     public set map(expressions: Expression[]) {
         this._map.clear();
         for (const expr of expressions) {

@@ -50,7 +50,9 @@ class Call extends Projection {
                 const record: Map<string, any> = new Map();
                 if (typeof item == "object" && !Array.isArray(item)) {
                     for (const [key, value] of Object.entries(item)) {
-                        record.set(key, value);
+                        if (this._map.has(key) || !this.hasYield) {
+                            record.set(key, value);
+                        }
                     }
                 } else {
                     record.set(DEFAULT_VARIABLE_NAME, item);

@@ -1,8 +1,5 @@
 import AsyncFunction from "../../src/parsing/functions/async_function";
-import {
-    FunctionDef,
-    getRegisteredFunctionFactory,
-} from "../../src/parsing/functions/function_metadata";
+import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import Parser from "../../src/parsing/parser";
 
 // Test class for CALL operation parsing test - defined at module level for Prettier compatibility
@@ -12,7 +9,7 @@ import Parser from "../../src/parsing/parser";
     parameters: [],
     output: { description: "Yields test values", type: "any" },
 })
-class CallParserTestFunction extends AsyncFunction {
+class Test extends AsyncFunction {
     constructor() {
         super();
         this._expectedParameterCount = 0;
@@ -473,7 +470,7 @@ test("Test return -2", () => {
 
 test("Test call operation", () => {
     const parser = new Parser();
-    const ast = parser.parse("CALL callparsertestfunction() YIELD result RETURN result");
+    const ast = parser.parse("CALL test() YIELD result RETURN result");
     expect(ast.print()).toBe(
         "ASTNode\n" +
             "- Call\n" +

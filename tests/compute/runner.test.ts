@@ -15,9 +15,9 @@ class CallTestFunction extends AsyncFunction {
         this._expectedParameterCount = 0;
     }
     public async *generate(): AsyncGenerator<any> {
-        yield { result: 1 };
-        yield { result: 2 };
-        yield { result: 3 };
+        yield { result: 1, dummy: "a" };
+        yield { result: 2, dummy: "b" };
+        yield { result: 3, dummy: "c" };
     }
 }
 
@@ -616,9 +616,9 @@ test("Test call operation as last operation", async () => {
     await runner.run();
     const results = runner.results;
     expect(results.length).toBe(3);
-    expect(results[0]).toEqual({ result: 1 });
-    expect(results[1]).toEqual({ result: 2 });
-    expect(results[2]).toEqual({ result: 3 });
+    expect(results[0]).toEqual({ result: 1, dummy: "a" });
+    expect(results[1]).toEqual({ result: 2, dummy: "b" });
+    expect(results[2]).toEqual({ result: 3, dummy: "c" });
 });
 
 test("Test call operation as last operation with yield", async () => {

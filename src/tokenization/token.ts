@@ -511,6 +511,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.CREATE;
     }
 
+    public static get VIRTUAL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.VIRTUAL);
+    }
+
+    public isVirtual(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.VIRTUAL;
+    }
+
     public static get DELETE(): Token {
         return new Token(TokenType.KEYWORD, Keyword.DELETE);
     }

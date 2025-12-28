@@ -1,3 +1,4 @@
+import Runner from "../compute/runner";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -25,6 +26,7 @@ import AsyncFunction from "./functions/async_function";
 import Function from "./functions/function";
 import FunctionFactory from "./functions/function_factory";
 import PredicateFunction from "./functions/predicate_function";
+import GraphNode from "./graph/graph_node";
 import Case from "./logic/case";
 import Else from "./logic/else";
 import Then from "./logic/then";
@@ -32,6 +34,7 @@ import When from "./logic/when";
 import AggregatedReturn from "./operations/aggregated_return";
 import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
+import Create from "./operations/create";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Operation from "./operations/operation";
@@ -72,6 +75,10 @@ class Parser extends BaseParser {
      */
     public parse(statement: string): ASTNode {
         this.tokenize(statement);
+        return this._parseTokenized();
+    }
+
+    private _parseTokenized(): ASTNode {
         const root: ASTNode = new ASTNode();
         let previous: Operation | null = null;
         let operation: Operation | null = null;
@@ -126,7 +133,8 @@ class Parser extends BaseParser {
             this.parseUnwind() ||
             this.parseReturn() ||
             this.parseLoad() ||
-            this.parseCall()
+            this.parseCall() ||
+            this.parseCreate()
         );
     }
 
@@ -305,6 +313,71 @@ class Parser extends BaseParser {
             call.yielded = expressions;
         }
         return call;
+    }
+
+    private parseCreate(): Create | null {
+        if (!this.token.isCreate()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: GraphNode | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isAs()) {
+            throw new Error("Expected AS");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        // Placeholder for CREATE operation parsing logic
+        // Implement the parsing logic for CREATE operation as needed
+        throw new Error("CREATE operation parsing not yet implemented");
+    }
+
+    private parseNode(): GraphNode | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        this.skipWhitespaceAndComments();
+        if (!this.token.isColon()) {
+            throw new Error("Expected ':' for node label");
+        }
+        this.setNextToken();
+        if (!this.token.isIdentifier()) {
+            throw new Error("Expected node label identifier");
+        }
+        const node = new GraphNode(this.token.value || "");
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (!this.token.isRightParenthesis()) {
+            throw new Error("Expected closing parenthesis for node definition");
+        }
+        this.setNextToken();
+        return node;
+    }
+
+    private parseSubQuery(): ASTNode | null {
+        if (!this.token.isOpeningBrace()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const tokens: Token[] = Array.from(this.getTokensUntil(Token.CLOSING_BRACE));
+        const parser = new Parser(tokens);
+        const query: ASTNode = parser._parseTokenized();
+        this.skipWhitespaceAndComments();
+        if (!this.token.isClosingBrace()) {
+            throw new Error("Expected closing brace for sub-query");
+        }
+        this.setNextToken();
+        return query;
     }
 
     private parseLimit(): Limit | null {

@@ -65,3 +65,45 @@ test("Test range with function", () => {
     expect(tokens).toBeDefined();
     expect(tokens.length).toBeGreaterThan(0);
 });
+
+test("Test create virtual node", () => {
+    const tokenizer = new Tokenizer(`
+        CREATE VIRTUAL (:Person) AS {
+            call users() YIELD id, name
+        }
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test create virtual relationship", () => {
+    const tokenizer = new Tokenizer(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]->(:Person) AS {
+            call friendships() YIELD user1_id, user2_id
+        }
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Match based on virtual node", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)
+        RETURN a.name
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Match based on virtual nodes and relationships", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)-[r:KNOWS]->(b:Person)
+        RETURN a.name, b.name
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});

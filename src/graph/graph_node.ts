@@ -1,4 +1,5 @@
-import ASTNode from "../ast_node";
+import Runner from "../compute/runner";
+import ASTNode from "../parsing/ast_node";
 
 class GraphNode {
     private _label: string | null = null;
@@ -14,6 +15,14 @@ class GraphNode {
     }
     public get label(): string | null {
         return this._label;
+    }
+    public async data(): Promise<Record<string, any>[]> {
+        if (this._statement === null) {
+            throw new Error("Statement is null");
+        }
+        const runner = new Runner(null, this._statement);
+        await runner.run();
+        return runner.results;
     }
 }
 

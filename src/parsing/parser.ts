@@ -1,4 +1,5 @@
 import Runner from "../compute/runner";
+import GraphNode from "../graph/graph_node";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -26,7 +27,6 @@ import AsyncFunction from "./functions/async_function";
 import Function from "./functions/function";
 import FunctionFactory from "./functions/function_factory";
 import PredicateFunction from "./functions/predicate_function";
-import GraphNode from "./graph/graph_node";
 import Case from "./logic/case";
 import Else from "./logic/else";
 import Then from "./logic/then";

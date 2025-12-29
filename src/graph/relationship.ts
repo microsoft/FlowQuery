@@ -1,4 +1,4 @@
-import ASTNode from "../ast_node";
+import ASTNode from "../parsing/ast_node";
 
 class Relationship {
     private _from: string | null = null; // label of the starting node

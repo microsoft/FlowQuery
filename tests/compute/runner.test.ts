@@ -1,4 +1,5 @@
 import Runner from "../../src/compute/runner";
+import Database from "../../src/graph/database";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 
@@ -635,4 +636,18 @@ test("Test call operation with no yielded expressions", async () => {
     expect(() => {
         const runner = new Runner("CALL calltestfunctionnoobject() RETURN 1");
     }).toThrow("CALL operations must have a YIELD clause unless they are the last operation");
+});
+
+test("Test create node operation", async () => {
+    const db = Database.getInstance();
+    const runner = new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            with 1 as x
+            RETURN x
+        }    
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+    expect(db.getNode("Person")).not.toBeNull();
 });

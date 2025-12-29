@@ -1,6 +1,6 @@
+import Database from "../../graph/database";
+import GraphNode from "../../graph/graph_node";
 import ASTNode from "../ast_node";
-import Database from "../graph/database";
-import GraphNode from "../graph/graph_node";
 import Operation from "./operation";
 
 class CreateNode extends Operation {
@@ -25,6 +25,9 @@ class CreateNode extends Operation {
                 reject(error);
             }
         });
+    }
+    public get results(): Record<string, any>[] {
+        return [];
     }
 }
 

@@ -1,9 +1,9 @@
-import Node from "./graph_node";
+import GraphNode from "./graph_node";
 import Relationship from "./relationship";
 
 class Database {
     private static instance: Database;
-    private static nodes: Map<string, Node> = new Map();
+    private static nodes: Map<string, GraphNode> = new Map();
     private static relationships: Map<string, Relationship> = new Map();
 
     public static getInstance(): Database {
@@ -12,13 +12,13 @@ class Database {
         }
         return Database.instance;
     }
-    public addNode(node: Node): void {
+    public addNode(node: GraphNode): void {
         if (node.label === null) {
             throw new Error("Node label is null");
         }
         Database.nodes.set(node.label, node);
     }
-    public getNode(label: string): Node | null {
+    public getNode(label: string): GraphNode | null {
         return Database.nodes.get(label) || null;
     }
     public addRelationship(relationship: Relationship): void {

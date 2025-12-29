@@ -37,6 +37,7 @@ import Call from "./operations/call";
 import CreateNode from "./operations/create_node";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
+import Match from "./operations/match";
 import Operation from "./operations/operation";
 import Return from "./operations/return";
 import Unwind from "./operations/unwind";
@@ -140,7 +141,8 @@ class Parser extends BaseParser {
             this.parseReturn() ||
             this.parseLoad() ||
             this.parseCall() ||
-            this.parseCreateNode()
+            this.parseCreateNode() ||
+            this.parseMatch()
         );
     }
 
@@ -351,22 +353,49 @@ class Parser extends BaseParser {
         return create;
     }
 
+    private parseMatch(): Match | null {
+        if (!this.token.isMatch()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: GraphNode | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        return new Match(node);
+    }
+
     private parseNode(): GraphNode | null {
         if (!this.token.isLeftParenthesis()) {
             return null;
         }
         this.setNextToken();
         this.skipWhitespaceAndComments();
-        if (!this.token.isColon()) {
+        let identifier: string | null = null;
+        if (this.token.isIdentifier()) {
+            identifier = this.token.value || "";
+            this.setNextToken();
+        }
+        this.skipWhitespaceAndComments();
+        let label: string | null = null;
+        if (!this.token.isColon() && this.peek()?.isIdentifier()) {
             throw new Error("Expected ':' for node label");
         }
-        this.setNextToken();
-        if (!this.token.isIdentifier()) {
+        if (this.token.isColon() && !this.peek()?.isIdentifier()) {
             throw new Error("Expected node label identifier");
         }
-        const node = new GraphNode(this.token.value || "");
-        this.setNextToken();
+        if (this.token.isColon() && this.peek()?.isIdentifier()) {
+            this.setNextToken();
+            label = this.token.value || "";
+            this.setNextToken();
+        }
         this.skipWhitespaceAndComments();
+        const node = new GraphNode(label);
+        if (identifier !== null) {
+            node.identifier = identifier;
+            this.variables.set(identifier, node);
+        }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
         }

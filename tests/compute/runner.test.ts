@@ -651,3 +651,26 @@ test("Test create node operation", async () => {
     expect(results.length).toBe(0);
     expect(db.getNode("Person")).not.toBeNull();
 });
+
+test("Test create node and match operations", async () => {
+    const create = new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `);
+    await create.run();
+    const match = new Runner("MATCH (n:Person) RETURN n");
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0].n).toBeDefined();
+    expect(results[0].n.id).toBe(1);
+    expect(results[0].n.name).toBe("Person 1");
+    expect(results[1].n).toBeDefined();
+    expect(results[1].n.id).toBe(2);
+    expect(results[1].n.name).toBe("Person 2");
+});

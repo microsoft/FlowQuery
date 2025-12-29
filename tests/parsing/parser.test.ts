@@ -1,6 +1,7 @@
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import CreateNode from "../../src/parsing/operations/create_node";
+import Match from "../../src/parsing/operations/match";
 import Parser from "../../src/parsing/parser";
 
 // Test class for CALL operation parsing test - defined at module level for Prettier compatibility
@@ -509,7 +510,11 @@ test("Test create node operation", () => {
             return id, f'Person {id}' AS name
         }
     `);
-    expect(ast.print()).toBe("ASTNode\n" + "- CreateNode");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- CreateNode"
+    );
     const create: CreateNode = ast.firstChild() as CreateNode;
     expect(create.node).not.toBeNull();
     expect(create.node!.label).toBe("Person");
@@ -532,4 +537,21 @@ test("Test create node operation", () => {
             "----- Reference (id)\n" +
             "---- String ()"
     );
+});
+
+test("Test match operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (n:Person) RETURN n");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Match\n" +
+        "- Return\n" +
+        "-- Expression (n)\n" +
+        "--- Reference (n)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.node).not.toBeNull();
+    expect(match.node.label).toBe("Person");
+    expect(match.node.identifier).toBe("n");
 });

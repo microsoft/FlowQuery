@@ -28,6 +28,13 @@ test("Test f-string", () => {
     expect(tokens.length).toBeGreaterThan(0);
 });
 
+test("Test another f-string", () => {
+    const tokenizer = new Tokenizer("RETURN f`Value is: {value}`");
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
 test("Test", () => {
     const tokenizer = new Tokenizer("WITH 1 AS n RETURN n");
     const tokens = tokenizer.tokenize();

@@ -93,13 +93,6 @@ class BaseParser {
         }
         return this.tokens[this.tokenIndex - 1];
     }
-
-    protected *getTokensUntil(token: Token): Generator<Token> {
-        while (this.tokenIndex < this.tokens.length && !this.token.equals(token)) {
-            yield this.token;
-            this.setNextToken();
-        }
-    }
 }
 
 export default BaseParser;

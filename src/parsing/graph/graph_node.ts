@@ -1,15 +1,15 @@
-import Runner from "../../compute/runner";
+import ASTNode from "../ast_node";
 
 class GraphNode {
     private _label: string | null = null;
-    private _statement: Runner | null = null;
+    private _statement: ASTNode | null = null;
     constructor(label: string) {
         this._label = label;
     }
-    public set statement(statement: Runner | null) {
+    public set statement(statement: ASTNode | null) {
         this._statement = statement;
     }
-    public get statement(): Runner | null {
+    public get statement(): ASTNode | null {
         return this._statement;
     }
     public get label(): string | null {

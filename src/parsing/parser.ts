@@ -34,7 +34,7 @@ import When from "./logic/when";
 import AggregatedReturn from "./operations/aggregated_return";
 import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
-import Create from "./operations/create";
+import CreateNode from "./operations/create_node";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Operation from "./operations/operation";
@@ -78,7 +78,7 @@ class Parser extends BaseParser {
         return this._parseTokenized();
     }
 
-    private _parseTokenized(): ASTNode {
+    private _parseTokenized(isSubQuery: boolean = false): ASTNode {
         const root: ASTNode = new ASTNode();
         let previous: Operation | null = null;
         let operation: Operation | null = null;
@@ -89,8 +89,10 @@ class Parser extends BaseParser {
                 this.skipWhitespaceAndComments();
             }
             operation = this.parseOperation();
-            if (operation === null) {
+            if (operation === null && !isSubQuery) {
                 throw new Error("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL");
+            } else if (operation === null && isSubQuery) {
+                return root;
             }
             if (this._returns > 1) {
                 throw new Error("Only one RETURN statement is allowed");
@@ -101,28 +103,32 @@ class Parser extends BaseParser {
                 );
             }
             if (previous !== null) {
-                previous.addSibling(operation);
+                previous.addSibling(operation!);
             } else {
-                root.addChild(operation);
+                root.addChild(operation!);
             }
             const where = this.parseWhere();
             if (where !== null) {
                 if (operation instanceof Return) {
                     (operation as Return).where = where;
                 } else {
-                    operation.addSibling(where);
+                    operation!.addSibling(where);
                     operation = where;
                 }
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                operation.addSibling(limit);
+                operation!.addSibling(limit);
                 operation = limit;
             }
             previous = operation;
         }
-        if (!(operation instanceof Return) && !(operation instanceof Call)) {
-            throw new Error("Last statement must be a RETURN, WHERE, or a CALL statement");
+        if (
+            !(operation instanceof Return) &&
+            !(operation instanceof Call) &&
+            !(operation instanceof CreateNode)
+        ) {
+            throw new Error("Last statement must be a RETURN, WHERE, CALL, or CREATE statement");
         }
         return root;
     }
@@ -134,7 +140,7 @@ class Parser extends BaseParser {
             this.parseReturn() ||
             this.parseLoad() ||
             this.parseCall() ||
-            this.parseCreate()
+            this.parseCreateNode()
         );
     }
 
@@ -315,7 +321,7 @@ class Parser extends BaseParser {
         return call;
     }
 
-    private parseCreate(): Create | null {
+    private parseCreateNode(): CreateNode | null {
         if (!this.token.isCreate()) {
             return null;
         }
@@ -336,15 +342,20 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        // Placeholder for CREATE operation parsing logic
-        // Implement the parsing logic for CREATE operation as needed
-        throw new Error("CREATE operation parsing not yet implemented");
+        const query: ASTNode | null = this.parseSubQuery();
+        if (query === null) {
+            throw new Error("Expected sub-query");
+        }
+        node.statement = query;
+        const create = new CreateNode(node);
+        return create;
     }
 
     private parseNode(): GraphNode | null {
         if (!this.token.isLeftParenthesis()) {
             return null;
         }
+        this.setNextToken();
         this.skipWhitespaceAndComments();
         if (!this.token.isColon()) {
             throw new Error("Expected ':' for node label");
@@ -369,9 +380,7 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        const tokens: Token[] = Array.from(this.getTokensUntil(Token.CLOSING_BRACE));
-        const parser = new Parser(tokens);
-        const query: ASTNode = parser._parseTokenized();
+        const query: ASTNode = this._parseTokenized(true);
         this.skipWhitespaceAndComments();
         if (!this.token.isClosingBrace()) {
             throw new Error("Expected closing brace for sub-query");

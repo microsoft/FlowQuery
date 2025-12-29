@@ -1,5 +1,6 @@
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
+import CreateNode from "../../src/parsing/operations/create_node";
 import Parser from "../../src/parsing/parser";
 
 // Test class for CALL operation parsing test - defined at module level for Prettier compatibility
@@ -424,7 +425,7 @@ test("Test non-well formed statements", () => {
         "Only one RETURN statement is allowed"
     );
     expect(() => new Parser().parse("return 1 with 1 as n")).toThrow(
-        "Last statement must be a RETURN, WHERE, or a CALL statement"
+        "Last statement must be a RETURN, WHERE, CALL, or CREATE statement"
     );
 });
 
@@ -479,5 +480,56 @@ test("Test call operation", () => {
             "- Return\n" +
             "-- Expression (result)\n" +
             "--- Reference (result)"
+    );
+});
+
+test("Test f-string", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 1 as value RETURN f'Value is: {value}.'");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- With\n" +
+            "-- Expression (value)\n" +
+            "--- Number (1)\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- FString\n" +
+            "---- String (Value is: )\n" +
+            "---- Expression\n" +
+            "----- Reference (value)\n" +
+            "---- String (.)"
+    );
+});
+
+test("Test create node operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind range(1, 3) AS id
+            return id, f'Person {id}' AS name
+        }
+    `);
+    expect(ast.print()).toBe("ASTNode\n" + "- CreateNode");
+    const create: CreateNode = ast.firstChild() as CreateNode;
+    expect(create.node).not.toBeNull();
+    expect(create.node!.label).toBe("Person");
+    expect(create.node!.statement!.print()).toBe(
+        "ASTNode\n" +
+            "- Unwind\n" +
+            "-- Expression (id)\n" +
+            "--- Function (range)\n" +
+            "---- Expression\n" +
+            "----- Number (1)\n" +
+            "---- Expression\n" +
+            "----- Number (3)\n" +
+            "- Return\n" +
+            "-- Expression (id)\n" +
+            "--- Reference (id)\n" +
+            "-- Expression (name)\n" +
+            "--- FString\n" +
+            "---- String (Person )\n" +
+            "---- Expression\n" +
+            "----- Reference (id)\n" +
+            "---- String ()"
     );
 });

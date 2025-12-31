@@ -450,8 +450,54 @@ class Parser extends BaseParser {
         if (node === null) {
             throw new Error("Expected node definition");
         }
+        let relationship: Relationship | null = null;
+        while (true) {
+            const source: string = relationship === null ? node.label! : relationship.to!;
+            relationship = this.parseRelationship();
+            if (relationship === null) {
+                break;
+            }
+            relationship.from = source;
+            pattern.addElement(relationship);
+        }
         pattern.addElement(node);
         return pattern;
+    }
+
+    private parseRelationship(): Relationship | null {
+        if (!this.token.isSubtract()) {
+            return null;
+        }
+        this.setNextToken();
+        if (!this.token.isOpeningBracket()) {
+            return null;
+        }
+        this.setNextToken();
+        if (!this.token.isColon()) {
+            throw new Error("Expected ':' for relationship type");
+        }
+        this.setNextToken();
+        if (!this.token.isIdentifier()) {
+            throw new Error("Expected relationship type identifier");
+        }
+        const type: string = this.token.value || "";
+        this.setNextToken();
+        if (!this.token.isClosingBracket()) {
+            throw new Error("Expected closing bracket for relationship definition");
+        }
+        this.setNextToken();
+        if (!this.token.isSubtract()) {
+            throw new Error("Expected '-' for relationship definition");
+        }
+        this.setNextToken();
+        const target: Node | null = this.parseNode();
+        if (target === null) {
+            throw new Error("Expected target node definition");
+        }
+        const relationship = new Relationship();
+        relationship.type = type;
+        relationship.to = target.label;
+        return relationship;
     }
 
     private parseSubQuery(): ASTNode | null {

@@ -624,3 +624,31 @@ test("Test create relationship operation", () => {
             "---- Reference (pair)"
     );
 });
+
+test("Match with graph pattern including relationships", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[:KNOWS]-(b:Person) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.pattern.chain.length).toBe(3);
+    /*const startNode = match.pattern.elements[0];
+    const relationship = match.pattern.elements[1];
+    const endNode = match.pattern.elements[2];
+    expect(startNode.identifier).toBe("a");
+    expect(startNode.label).toBe("Person");
+    expect(relationship.type).toBe("KNOWS");
+    expect(relationship.direction).toBe("->");
+    expect(relationship.from).toBe("a");
+    expect(relationship.to).toBe("b");
+    expect(endNode.identifier).toBe("b");
+    expect(endNode.label).toBe("Person");*/
+});

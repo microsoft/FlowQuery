@@ -1,14 +1,13 @@
 import Runner from "../../src/compute/runner";
 import Database from "../../src/graph/database";
-import GraphNode from "../../src/graph/graph_node";
+import PhysicalNode from "../../src/graph/physical_node";
 import CreateNode from "../../src/parsing/operations/create_node";
 import Parser from "../../src/parsing/parser";
 
 test("Test CreateNode and match operations", async () => {
-    const node = new GraphNode("Person");
+    const node = new PhysicalNode(null, "Person");
     expect(node.label).toBe("Person");
     expect(node.statement).toBeNull();
-    const op = new CreateNode(node);
     const parser = new Parser();
     const statement = parser.parse(`
         unwind [
@@ -17,7 +16,7 @@ test("Test CreateNode and match operations", async () => {
         ] as record
         RETURN record.id as id, record.name as name
     `);
-    node.statement = statement;
+    const op = new CreateNode(node, statement);
     await op.run();
     const runner = new Runner("match (n:Person) RETURN n");
     await runner.run();

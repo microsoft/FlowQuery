@@ -1,6 +1,7 @@
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import CreateNode from "../../src/parsing/operations/create_node";
+import CreateRelationship from "../../src/parsing/operations/create_relationship";
 import Match from "../../src/parsing/operations/match";
 import Parser from "../../src/parsing/parser";
 
@@ -518,7 +519,7 @@ test("Test create node operation", () => {
     const create: CreateNode = ast.firstChild() as CreateNode;
     expect(create.node).not.toBeNull();
     expect(create.node!.label).toBe("Person");
-    expect(create.node!.statement!.print()).toBe(
+    expect(create.statement!.print()).toBe(
         "ASTNode\n" +
             "- Unwind\n" +
             "-- Expression (id)\n" +
@@ -554,4 +555,72 @@ test("Test match operation", () => {
     expect(match.node).not.toBeNull();
     expect(match.node.label).toBe("Person");
     expect(match.node.identifier).toBe("n");
+});
+
+test("Test create relationship operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {from_id: 1, to_id: 2, since: '2020-01-01'},
+                {from_id: 2, to_id: 3, since: '2021-01-01'}
+            ] AS pair
+            return pair.from_id AS from, pair.to_id AS to, pair.since AS since
+        }
+    `);
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- CreateRelationship"
+    );
+    const create = ast.firstChild() as CreateRelationship;
+    expect(create.relationship).not.toBeNull();
+    expect(create.relationship!.type).toBe("KNOWS");
+    expect(create.statement!.print()).toBe(
+        "ASTNode\n" +
+            "- Unwind\n" +
+            "-- Expression (pair)\n" +
+            "--- JSONArray\n" +
+            "---- Expression\n" +
+            "----- AssociativeArray\n" +
+            "------ KeyValuePair\n" +
+            "------- String (from_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (1)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (to_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (2)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (since)\n" +
+            "------- Expression\n" +
+            "-------- String (2020-01-01)\n" +
+            "---- Expression\n" +
+            "----- AssociativeArray\n" +
+            "------ KeyValuePair\n" +
+            "------- String (from_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (2)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (to_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (3)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (since)\n" +
+            "------- Expression\n" +
+            "-------- String (2021-01-01)\n" +
+            "- Return\n" +
+            "-- Expression (from)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (from_id)\n" +
+            "---- Reference (pair)\n" +
+            "-- Expression (to)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (to_id)\n" +
+            "---- Reference (pair)\n" +
+            "-- Expression (since)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (since)\n" +
+            "---- Reference (pair)"
+    );
 });

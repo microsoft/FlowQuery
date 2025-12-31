@@ -1,20 +1,21 @@
 import Database from "../../graph/database";
-import GraphNode from "../../graph/graph_node";
+import Node from "../../graph/node";
+import PhysicalNode from "../../graph/physical_node";
 import Operation from "./operation";
 
 class Match extends Operation {
-    private _node: GraphNode;
+    private _node: Node;
 
-    constructor(node: GraphNode) {
+    constructor(node: Node) {
         super();
         this._node = node;
     }
-    public get node(): GraphNode {
+    public get node(): Node {
         return this._node;
     }
     public async run(): Promise<void> {
         const db = Database.getInstance();
-        const found: GraphNode | null = db.getNode(this._node.label || "");
+        const found: PhysicalNode | null = db.getNode(this._node);
         if (found === null) {
             return;
         }

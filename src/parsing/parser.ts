@@ -1,5 +1,5 @@
-import Runner from "../compute/runner";
-import GraphNode from "../graph/graph_node";
+import Node from "../graph/node";
+import Relationship from "../graph/relationship";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -35,6 +35,7 @@ import AggregatedReturn from "./operations/aggregated_return";
 import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
 import CreateNode from "./operations/create_node";
+import CreateRelationship from "./operations/create_relationship";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
@@ -127,7 +128,8 @@ class Parser extends BaseParser {
         if (
             !(operation instanceof Return) &&
             !(operation instanceof Call) &&
-            !(operation instanceof CreateNode)
+            !(operation instanceof CreateNode) &&
+            !(operation instanceof CreateRelationship)
         ) {
             throw new Error("Last statement must be a RETURN, WHERE, CALL, or CREATE statement");
         }
@@ -141,7 +143,7 @@ class Parser extends BaseParser {
             this.parseReturn() ||
             this.parseLoad() ||
             this.parseCall() ||
-            this.parseCreateNode() ||
+            this.parseCreate() ||
             this.parseMatch()
         );
     }
@@ -323,7 +325,7 @@ class Parser extends BaseParser {
         return call;
     }
 
-    private parseCreateNode(): CreateNode | null {
+    private parseCreate(): CreateNode | CreateRelationship | null {
         if (!this.token.isCreate()) {
             return null;
         }
@@ -334,9 +336,39 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        const node: GraphNode | null = this.parseNode();
+        const node: Node | null = this.parseNode();
         if (node === null) {
             throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifier()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+            relationship.from = node.label;
+            relationship.to = target.label;
         }
         this.expectAndSkipWhitespaceAndComments();
         if (!this.token.isAs()) {
@@ -348,8 +380,12 @@ class Parser extends BaseParser {
         if (query === null) {
             throw new Error("Expected sub-query");
         }
-        node.statement = query;
-        const create = new CreateNode(node);
+        let create: CreateNode | CreateRelationship;
+        if (relationship !== null) {
+            create = new CreateRelationship(relationship, query);
+        } else {
+            create = new CreateNode(node, query);
+        }
         return create;
     }
 
@@ -359,14 +395,14 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        const node: GraphNode | null = this.parseNode();
+        const node: Node | null = this.parseNode();
         if (node === null) {
             throw new Error("Expected node definition");
         }
         return new Match(node);
     }
 
-    private parseNode(): GraphNode | null {
+    private parseNode(): Node | null {
         if (!this.token.isLeftParenthesis()) {
             return null;
         }
@@ -391,7 +427,8 @@ class Parser extends BaseParser {
             this.setNextToken();
         }
         this.skipWhitespaceAndComments();
-        const node = new GraphNode(label);
+        const node = new Node();
+        node.label = label!;
         if (identifier !== null) {
             node.identifier = identifier;
             this.variables.set(identifier, node);

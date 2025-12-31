@@ -1,5 +1,6 @@
 import Runner from "../../src/compute/runner";
 import Database from "../../src/graph/database";
+import Node from "../../src/graph/node";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 
@@ -649,7 +650,7 @@ test("Test create node operation", async () => {
     await runner.run();
     const results = runner.results;
     expect(results.length).toBe(0);
-    expect(db.getNode("Person")).not.toBeNull();
+    expect(db.getNode(new Node(null, "Person"))).not.toBeNull();
 });
 
 test("Test create node and match operations", async () => {

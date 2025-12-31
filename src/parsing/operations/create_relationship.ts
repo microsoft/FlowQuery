@@ -1,18 +1,18 @@
 import Database from "../../graph/database";
-import Node from "../../graph/node";
+import Relationship from "../../graph/relationship";
 import ASTNode from "../ast_node";
 import Operation from "./operation";
 
-class CreateNode extends Operation {
-    private _node: Node | null = null;
+class CreateRelationship extends Operation {
+    private _relationship: Relationship | null = null;
     private _statement: ASTNode | null = null;
-    constructor(node: Node, statement: ASTNode) {
+    constructor(relationship: Relationship, statement: ASTNode) {
         super();
-        this._node = node;
+        this._relationship = relationship;
         this._statement = statement;
     }
-    public get node(): Node | null {
-        return this._node;
+    public get relationship(): Relationship | null {
+        return this._relationship;
     }
     public get statement(): ASTNode | null {
         return this._statement;
@@ -20,11 +20,11 @@ class CreateNode extends Operation {
     public run(): Promise<void> {
         return new Promise(async (resolve, reject) => {
             try {
-                if (this._node === null) {
-                    throw new Error("Node is null");
+                if (this._relationship === null) {
+                    throw new Error("Relationship is null");
                 }
-                const db: Database = Database.getInstance();
-                db.addNode(this._node, this._statement!);
+                const db = Database.getInstance();
+                db.addRelationship(this._relationship, this._statement!);
                 resolve();
             } catch (error) {
                 reject(error);
@@ -35,5 +35,4 @@ class CreateNode extends Operation {
         return [];
     }
 }
-
-export default CreateNode;
+export default CreateRelationship;

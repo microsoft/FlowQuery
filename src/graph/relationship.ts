@@ -1,11 +1,39 @@
 import ASTNode from "../parsing/ast_node";
+import Expression from "../parsing/expressions/expression";
 
-class Relationship {
+class Hops {
+    private _min: number = 1;
+    private _max: number = Number.MAX_SAFE_INTEGER;
+
+    public set min(min: number) {
+        this._min = min;
+    }
+    public get min(): number {
+        return this._min;
+    }
+    public set max(max: number) {
+        this._max = max;
+    }
+    public get max(): number {
+        return this._max;
+    }
+}
+
+class Relationship extends ASTNode {
+    // Labels of the nodes this relationship connects
     private _from: string | null = null; // label of the starting node
     private _to: string | null = null; // label of the ending node
+
+    private _identifier: string | null = null;
     private _type: string | null = null;
-    private _statement: ASTNode | null = null;
-    public set type(type: string | null) {
+    private _properties: Map<string, Expression> = new Map();
+    private _hops: Hops = new Hops();
+
+    private _value: any = null;
+
+    constructor(identifier: string | null = null, type: string | null = null) {
+        super();
+        this._identifier = identifier;
         this._type = type;
     }
     public set from(from: string | null) {
@@ -20,14 +48,32 @@ class Relationship {
     public get to(): string | null {
         return this._to;
     }
+    public set identifier(identifier: string) {
+        this._identifier = identifier;
+    }
+    public get identifier(): string | null {
+        return this._identifier;
+    }
+    public set type(type: string) {
+        this._type = type;
+    }
     public get type(): string | null {
         return this._type;
     }
-    public set statement(statement: ASTNode | null) {
-        this._statement = statement;
+    public setProperty(key: string, value: Expression): void {
+        this._properties.set(key, value);
     }
-    public get statement(): ASTNode | null {
-        return this._statement;
+    public getProperty(key: string): Expression | null {
+        return this._properties.get(key) || null;
+    }
+    public get hops(): Hops {
+        return this._hops;
+    }
+    public setValue(value: any): void {
+        this._value = value;
+    }
+    public value(): any {
+        return this._value;
     }
 }
 

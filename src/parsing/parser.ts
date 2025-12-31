@@ -1,4 +1,5 @@
 import Node from "../graph/node";
+import Pattern from "../graph/pattern";
 import Relationship from "../graph/relationship";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
@@ -395,11 +396,11 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        const node: Node | null = this.parseNode();
-        if (node === null) {
-            throw new Error("Expected node definition");
+        const pattern: Pattern | null = this.parsePattern();
+        if (pattern === null) {
+            throw new Error("Expected graph pattern");
         }
-        return new Match(node);
+        return new Match(pattern);
     }
 
     private parseNode(): Node | null {
@@ -438,6 +439,19 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         return node;
+    }
+
+    private parsePattern(): Pattern | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        const pattern = new Pattern();
+        const node = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        pattern.addElement(node);
+        return pattern;
     }
 
     private parseSubQuery(): ASTNode | null {

@@ -552,9 +552,9 @@ test("Test match operation", () => {
         "--- Reference (n)"
     );
     const match = ast.firstChild() as Match;
-    expect(match.node).not.toBeNull();
-    expect(match.node.label).toBe("Person");
-    expect(match.node.identifier).toBe("n");
+    expect(match.pattern.startNode).not.toBeNull();
+    expect(match.pattern.startNode!.label).toBe("Person");
+    expect(match.pattern.startNode!.identifier).toBe("n");
 });
 
 test("Test create relationship operation", () => {

@@ -16,11 +16,11 @@ test("Test CreateNode operation", async () => {
     const db = Database.getInstance();
     const found = db.getNode(node);
     expect(found!.label).toBe(node.label);
-    //const data = await node.data();
-    //expect(data).toEqual([{ x: 1 }]);
+    const data = await found!.data();
+    expect(data).toEqual([{ x: 1 }]);
 });
 
-/*test("Test CreateRelationship operation", async () => {
+test("Test CreateRelationship operation", async () => {
     const relationship = new PhysicalRelationship();
     relationship.from = "Person";
     relationship.to = "Person";
@@ -30,11 +30,9 @@ test("Test CreateNode operation", async () => {
     const parser = new Parser();
     const statement = parser.parse("WITH 1 as x RETURN x");
     const op = new CreateRelationship(relationship, statement);
-    expect(relationship.statement).toBe(statement);
     await op.run();
     const db = Database.getInstance();
-    const found = db.getRelationship("KNOWS");
-    expect(found).toBe(relationship);
+    const found = db.getRelationship(relationship);
     const data = await found!.data();
     expect(data).toEqual([{ x: 1 }]);
-});*/
+});

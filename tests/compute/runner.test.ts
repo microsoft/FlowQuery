@@ -675,3 +675,82 @@ test("Test create node and match operations", async () => {
     expect(results[1].n.id).toBe(2);
     expect(results[1].n.name).toBe("Person 2");
 });
+
+test("Test complex match operation", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1', age: 30},
+                {id: 2, name: 'Person 2', age: 25},
+                {id: 3, name: 'Person 3', age: 35}
+            ] as record
+            RETURN record.id as id, record.name as name, record.age as age
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        WHERE n.age > 28
+        RETURN n.name AS name, n.age AS age
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1", age: 30 });
+    expect(results[1]).toEqual({ name: "Person 3", age: 35 });
+});
+
+test("Test match with nested join", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE a.id <> b.id
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 1" });
+});
+
+test("Test match with graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:User) AS {
+            UNWIND [
+                {id: 1, name: 'User 1', manager_id: null},
+                {id: 2, name: 'User 2', manager_id: 1},
+                {id: 3, name: 'User 3', manager_id: 1},
+                {id: 4, name: 'User 4', manager_id: 2}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.manager_id AS manager_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:MANAGES]-(:User) AS {
+            UNWIND [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 1},
+                {left_id: 4, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (subordinate:User)-[r:MANAGES]-(manager:User)
+        RETURN manager.name AS manager, subordinate.name AS subordinate
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ manager: "User 1", subordinate: "User 2" });
+    expect(results[1]).toEqual({ manager: "User 1", subordinate: "User 3" });
+    expect(results[2]).toEqual({ manager: "User 2", subordinate: "User 4" });
+});

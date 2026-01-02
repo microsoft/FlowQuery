@@ -1,5 +1,7 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
+import Node from "./node";
+import RelationshipData from "./relationship_data";
 
 class Hops {
     private _min: number = 1;
@@ -30,6 +32,11 @@ class Relationship extends ASTNode {
     private _hops: Hops = new Hops();
 
     private _value: any = null;
+
+    private _source: Node | null = null;
+    private _target: Node | null = null;
+
+    private _data: RelationshipData | null = null;
 
     constructor(identifier: string | null = null, type: string | null = null) {
         super();
@@ -72,8 +79,29 @@ class Relationship extends ASTNode {
     public setValue(value: any): void {
         this._value = value;
     }
+    public set source(node: Node | null) {
+        this._source = node;
+    }
+    public get source(): Node | null {
+        return this._source;
+    }
+    public set target(node: Node | null) {
+        this._target = node;
+    }
+    public get target(): Node | null {
+        return this._target;
+    }
     public value(): any {
         return this._value;
+    }
+    public setData(data: RelationshipData | null): void {
+        this._data = data;
+    }
+    public async find(left_id: string): Promise<void> {
+        while (this._data?.find(left_id)) {
+            this.setValue(this._data?.current());
+            await this._target?.find(this._value.right_id);
+        }
     }
 }
 

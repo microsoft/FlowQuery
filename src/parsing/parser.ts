@@ -396,11 +396,11 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        const pattern: Pattern | null = this.parsePattern();
-        if (pattern === null) {
+        const patterns: Pattern[] = Array.from(this.parsePatterns());
+        if (patterns.length === 0) {
             throw new Error("Expected graph pattern");
         }
-        return new Match(pattern);
+        return new Match(patterns);
     }
 
     private parseNode(): Node | null {
@@ -441,26 +441,48 @@ class Parser extends BaseParser {
         return node;
     }
 
+    private *parsePatterns(): IterableIterator<Pattern> {
+        while (true) {
+            const pattern: Pattern | null = this.parsePattern();
+            if (pattern !== null) {
+                yield pattern;
+            } else {
+                break;
+            }
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+    }
+
     private parsePattern(): Pattern | null {
         if (!this.token.isLeftParenthesis()) {
             return null;
         }
         const pattern = new Pattern();
-        const node = this.parseNode();
+        let node = this.parseNode();
         if (node === null) {
             throw new Error("Expected node definition");
         }
+        pattern.addElement(node);
         let relationship: Relationship | null = null;
         while (true) {
-            const source: string = relationship === null ? node.label! : relationship.to!;
             relationship = this.parseRelationship();
             if (relationship === null) {
                 break;
             }
-            relationship.from = source;
+            relationship.from = node.label;
             pattern.addElement(relationship);
+            node = this.parseNode();
+            if (node === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship.to = node.label;
+            pattern.addElement(node);
         }
-        pattern.addElement(node);
         return pattern;
     }
 
@@ -473,6 +495,11 @@ class Parser extends BaseParser {
             return null;
         }
         this.setNextToken();
+        let variable: string | null = null;
+        if (this.token.isIdentifier()) {
+            variable = this.token.value || "";
+            this.setNextToken();
+        }
         if (!this.token.isColon()) {
             throw new Error("Expected ':' for relationship type");
         }
@@ -490,13 +517,12 @@ class Parser extends BaseParser {
             throw new Error("Expected '-' for relationship definition");
         }
         this.setNextToken();
-        const target: Node | null = this.parseNode();
-        if (target === null) {
-            throw new Error("Expected target node definition");
-        }
         const relationship = new Relationship();
+        if (variable !== null) {
+            relationship.identifier = variable;
+            this.variables.set(variable, relationship);
+        }
         relationship.type = type;
-        relationship.to = target.label;
         return relationship;
     }
 

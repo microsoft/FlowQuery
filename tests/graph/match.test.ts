@@ -1,5 +1,4 @@
 import Runner from "../../src/compute/runner";
-import Database from "../../src/graph/database";
 import PhysicalNode from "../../src/graph/physical_node";
 import CreateNode from "../../src/parsing/operations/create_node";
 import Parser from "../../src/parsing/parser";

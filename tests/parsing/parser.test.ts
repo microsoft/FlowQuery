@@ -1,3 +1,5 @@
+import Node from "../../src/graph/node";
+import Relationship from "../../src/graph/relationship";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import CreateNode from "../../src/parsing/operations/create_node";
@@ -468,7 +470,13 @@ test("Test limit", () => {
 test("Test return -2", () => {
     const parser = new Parser();
     const ast = parser.parse("return -2");
-    expect(ast.print()).toBe("ASTNode\n" + "- Return\n" + "-- Expression\n" + "--- Number (-2)");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Number (-2)"
+    );
 });
 
 test("Test call operation", () => {
@@ -552,9 +560,9 @@ test("Test match operation", () => {
         "--- Reference (n)"
     );
     const match = ast.firstChild() as Match;
-    expect(match.pattern.startNode).not.toBeNull();
-    expect(match.pattern.startNode!.label).toBe("Person");
-    expect(match.pattern.startNode!.identifier).toBe("n");
+    expect(match.patterns[0].startNode).not.toBeNull();
+    expect(match.patterns[0].startNode!.label).toBe("Person");
+    expect(match.patterns[0].startNode!.identifier).toBe("n");
 });
 
 test("Test create relationship operation", () => {
@@ -639,16 +647,15 @@ test("Match with graph pattern including relationships", () => {
             "--- Reference (b)"
     );
     const match = ast.firstChild() as Match;
-    expect(match.pattern.chain.length).toBe(3);
-    /*const startNode = match.pattern.elements[0];
-    const relationship = match.pattern.elements[1];
-    const endNode = match.pattern.elements[2];
-    expect(startNode.identifier).toBe("a");
-    expect(startNode.label).toBe("Person");
+    expect(match.patterns[0].chain.length).toBe(3);
+    const source = match.patterns[0].chain[0] as Node;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    const target = match.patterns[0].chain[2] as Node;
+    expect(source.identifier).toBe("a");
+    expect(source.label).toBe("Person");
     expect(relationship.type).toBe("KNOWS");
-    expect(relationship.direction).toBe("->");
-    expect(relationship.from).toBe("a");
-    expect(relationship.to).toBe("b");
-    expect(endNode.identifier).toBe("b");
-    expect(endNode.label).toBe("Person");*/
+    expect(relationship.from).toBe("Person");
+    expect(relationship.to).toBe("Person");
+    expect(target.identifier).toBe("b");
+    expect(target.label).toBe("Person");
 });

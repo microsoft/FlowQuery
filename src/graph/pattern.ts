@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import Database from "./database";
 import Node from "./node";
 import Relationship from "./relationship";
 
@@ -15,11 +16,22 @@ class Pattern extends ASTNode {
     public addElement(element: Relationship | Node): void {
         if (
             this._chain.length > 0 &&
-            typeof this._chain[this._chain.length - 1] === typeof element
+            this._chain[this._chain.length - 1].constructor === element.constructor
         ) {
             throw new Error(
                 "Cannot add two consecutive elements of the same type to the graph pattern"
             );
+        }
+        if (this._chain.length > 0) {
+            const last = this._chain[this._chain.length - 1];
+            if (last.constructor === Node && element.constructor === Relationship) {
+                last.outgoing = element as Relationship;
+                element.source = last as Node;
+            }
+            if (last.constructor === Relationship && element.constructor === Node) {
+                last.target = element as Node;
+                element.incoming = last as Relationship;
+            }
         }
         this._chain.push(element);
     }
@@ -36,11 +48,28 @@ class Pattern extends ASTNode {
         }
         throw new Error("Pattern does not start with a node");
     }
+    public get endNode(): Node {
+        if (this._chain.length === 0) {
+            throw new Error("Pattern is empty");
+        }
+        const last = this._chain[this._chain.length - 1];
+        if (last instanceof Node) {
+            return last;
+        }
+        throw new Error("Pattern does not end with a node");
+    }
     public setValue(value: any): void {
         this._value = value;
     }
     public value(): any {
         return this._value;
+    }
+    public async fetchData(): Promise<void> {
+        const db: Database = Database.getInstance();
+        for (const element of this._chain) {
+            const data = await db.getData(element);
+            element.setData(data);
+        }
     }
 }
 export default Pattern;

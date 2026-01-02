@@ -1,31 +1,31 @@
-import Database from "../../graph/database";
-import Node from "../../graph/node";
 import Pattern from "../../graph/pattern";
-import PhysicalNode from "../../graph/physical_node";
 import Operation from "./operation";
 
 class Match extends Operation {
-    private _pattern: Pattern;
+    private _patterns: Pattern[] = [];
 
-    constructor(pattern: Pattern) {
+    constructor(patterns: Pattern[]) {
         super();
-        this._pattern = pattern;
+        this._patterns = patterns;
     }
-    public get pattern(): Pattern {
-        return this._pattern;
+    public get patterns(): Pattern[] {
+        return this._patterns;
     }
     public async run(): Promise<void> {
-        const db = Database.getInstance();
-        const node = this.pattern.startNode;
-        const found: PhysicalNode | null = db.getNode(node);
-        if (found === null) {
-            return;
+        let previous: Pattern | null = null;
+        for (const pattern of this._patterns) {
+            await pattern.fetchData();
+            if (previous !== null) {
+                previous.endNode.setCallback(async () => {
+                    await pattern.startNode.next();
+                });
+            }
+            previous = pattern;
         }
-        const data = await found.data();
-        for (const record of data) {
-            node.setValue(record);
+        this._patterns[this._patterns.length - 1].endNode.setCallback(async () => {
             await this.next?.run();
-        }
+        });
+        await this._patterns[0].startNode.next();
     }
 }
 

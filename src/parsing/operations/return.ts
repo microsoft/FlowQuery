@@ -3,10 +3,10 @@ import Where from "./where";
 
 /**
  * Represents a RETURN operation that produces the final query results.
- * 
+ *
  * The RETURN operation evaluates expressions and collects them into result records.
  * It can optionally have a WHERE clause to filter results.
- * 
+ *
  * @example
  * ```typescript
  * // RETURN x, y WHERE x > 0
@@ -19,21 +19,24 @@ class Return extends Projection {
         this._where = where;
     }
     public get where(): boolean {
-        if(this._where === null) {
+        if (this._where === null) {
             return true;
         }
         return this._where.value();
     }
     public async run(): Promise<void> {
-        if(!this.where) {
+        if (!this.where) {
             return;
         }
         const record: Map<string, any> = new Map();
-        for(const [expression, alias] of this.expressions()) {
+        for (const [expression, alias] of this.expressions()) {
             const value: any = expression.value();
             record.set(alias, value);
         }
         this._results.push(Object.fromEntries(record));
+    }
+    public async initialize(): Promise<void> {
+        this._results = [];
     }
     public get results(): Record<string, any>[] {
         return this._results;

@@ -19,6 +19,7 @@ import {
     Modulo,
     Multiply,
     Not,
+    NotEquals,
     Or,
     Power,
     Subtract,
@@ -61,6 +62,8 @@ class TokenToNode {
                 return new Power();
             } else if (token.isEquals()) {
                 return new Equals();
+            } else if (token.isNotEquals()) {
+                return new NotEquals();
             } else if (token.isLessThan()) {
                 return new LessThan();
             } else if (token.isGreaterThan()) {

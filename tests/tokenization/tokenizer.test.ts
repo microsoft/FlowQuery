@@ -114,3 +114,14 @@ test("Match based on virtual nodes and relationships", () => {
     expect(tokens).toBeDefined();
     expect(tokens.length).toBeGreaterThan(0);
 });
+
+test("Test not equal operator", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (n:Person)
+        WHERE n.age <> 30
+        RETURN n.name AS name, n.age AS age
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});

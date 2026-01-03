@@ -11,6 +11,9 @@ class IndexEntry {
     public get position(): number {
         return this._positions[this._index];
     }
+    public reset(): void {
+        this._index = -1;
+    }
     public next(): boolean {
         if (this._index < this._positions.length - 1) {
             this._index++;
@@ -52,6 +55,12 @@ class Data {
             }
             this._current = entry.position;
             return true;
+        }
+    }
+    public reset(): void {
+        this._current = -1;
+        for (const entry of this._index.values()) {
+            entry.reset();
         }
     }
     public next(): boolean {

@@ -98,6 +98,7 @@ class Relationship extends ASTNode {
         this._data = data;
     }
     public async find(left_id: string): Promise<void> {
+        this._data?.reset();
         while (this._data?.find(left_id)) {
             this.setValue(this._data?.current());
             await this._target?.find(this._value.right_id);

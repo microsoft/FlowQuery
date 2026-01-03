@@ -67,6 +67,7 @@ class Runner {
     public async run(): Promise<void> {
         return new Promise<void>(async (resolve, reject) => {
             try {
+                await this.first.initialize();
                 await this.first.run();
                 await this.first.finish();
                 resolve();

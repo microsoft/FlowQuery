@@ -689,7 +689,7 @@ test("Test complex match operation", async () => {
     `).run();
     const match = new Runner(`
         MATCH (n:Person)
-        WHERE n.age > 28
+        WHERE n.age > 29
         RETURN n.name AS name, n.age AS age
     `);
     await match.run();
@@ -697,6 +697,27 @@ test("Test complex match operation", async () => {
     expect(results.length).toBe(2);
     expect(results[0]).toEqual({ name: "Person 1", age: 30 });
     expect(results[1]).toEqual({ name: "Person 3", age: 35 });
+});
+
+test("Test match", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN n.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1" });
+    expect(results[1]).toEqual({ name: "Person 2" });
 });
 
 test("Test match with nested join", async () => {
@@ -734,23 +755,24 @@ test("Test match with graph pattern", async () => {
         }
     `).run();
     await new Runner(`
-        CREATE VIRTUAL (:User)-[:MANAGES]-(:User) AS {
+        CREATE VIRTUAL (:User)-[:MANAGED_BY]-(:User) AS {
             UNWIND [
-                {left_id: 2, right_id: 1},
-                {left_id: 3, right_id: 1},
-                {left_id: 4, right_id: 2}
+                {id: 1, manager_id: null},
+                {id: 2, manager_id: 1},
+                {id: 3, manager_id: 1},
+                {id: 4, manager_id: 2}
             ] AS record
-            RETURN record.left_id AS left_id, record.right_id AS right_id
+            RETURN record.id AS left_id, record.manager_id AS right_id
         }    
     `).run();
     const match = new Runner(`
-        MATCH (subordinate:User)-[r:MANAGES]-(manager:User)
-        RETURN manager.name AS manager, subordinate.name AS subordinate
+        MATCH (user:User)-[r:MANAGED_BY]-(manager:User)
+        RETURN user.name AS user, manager.name AS manager
     `);
     await match.run();
     const results = match.results;
     expect(results.length).toBe(3);
-    expect(results[0]).toEqual({ manager: "User 1", subordinate: "User 2" });
-    expect(results[1]).toEqual({ manager: "User 1", subordinate: "User 3" });
-    expect(results[2]).toEqual({ manager: "User 2", subordinate: "User 4" });
+    expect(results[0]).toEqual({ user: "User 2", manager: "User 1" });
+    expect(results[1]).toEqual({ user: "User 3", manager: "User 1" });
+    expect(results[2]).toEqual({ user: "User 4", manager: "User 2" });
 });

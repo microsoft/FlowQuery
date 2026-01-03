@@ -659,3 +659,16 @@ test("Match with graph pattern including relationships", () => {
     expect(target.identifier).toBe("b");
     expect(target.label).toBe("Person");
 });
+
+test("Test not equal operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN 1 <> 2");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- NotEquals\n" +
+            "---- Number (1)\n" +
+            "---- Number (2)"
+    );
+});

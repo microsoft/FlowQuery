@@ -61,6 +61,7 @@ class Node extends ASTNode {
         this._data = data;
     }
     public async next(): Promise<void> {
+        this._data?.reset();
         while (this._data?.next()) {
             this.setValue(this._data?.current());
             await this._outgoing?.find(this._value.id);
@@ -68,6 +69,7 @@ class Node extends ASTNode {
         }
     }
     public async find(id: string): Promise<void> {
+        this._data?.reset();
         while (this._data?.find(id)) {
             this.setValue(this._data?.current());
             await this._outgoing?.find(this._value.id);

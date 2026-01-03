@@ -776,3 +776,36 @@ test("Test match with graph pattern", async () => {
     expect(results[1]).toEqual({ user: "User 3", manager: "User 1" });
     expect(results[2]).toEqual({ user: "User 4", manager: "User 2" });
 });
+
+test("Test match with multiple hop graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*]->(c:Person)
+        RETURN a.name AS name1, c.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 3" });
+});

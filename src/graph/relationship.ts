@@ -4,8 +4,8 @@ import Node from "./node";
 import RelationshipData from "./relationship_data";
 
 class Hops {
-    private _min: number = 1;
-    private _max: number = Number.MAX_SAFE_INTEGER;
+    private _min: number = 0;
+    private _max: number = 1;
 
     public set min(min: number) {
         this._min = min;
@@ -73,7 +73,10 @@ class Relationship extends ASTNode {
     public getProperty(key: string): Expression | null {
         return this._properties.get(key) || null;
     }
-    public get hops(): Hops {
+    public set hops(hops: Hops) {
+        this._hops = hops;
+    }
+    public get hops(): Hops | null {
         return this._hops;
     }
     public setValue(value: any): void {
@@ -97,13 +100,22 @@ class Relationship extends ASTNode {
     public setData(data: RelationshipData | null): void {
         this._data = data;
     }
-    public async find(left_id: string): Promise<void> {
-        this._data?.reset();
-        while (this._data?.find(left_id)) {
-            this.setValue(this._data?.current());
-            await this._target?.find(this._value.right_id);
+    public async find(left_id: string, hop: number = 0): Promise<void> {
+        if (hop === 0) {
+            this._data?.reset();
+        }
+        while (this._data?.find(left_id, hop)) {
+            if (hop >= this.hops!.min) {
+                this.setValue(this._data?.current(hop));
+                await this._target?.find(this._value.right_id, hop);
+            }
+            if (hop + 1 < this.hops!.max) {
+                await this.find(this._value.right_id, hop + 1);
+            }
         }
     }
 }
 
 export default Relationship;
+
+export { Relationship, Hops };

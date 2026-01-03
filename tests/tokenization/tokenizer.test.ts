@@ -125,3 +125,13 @@ test("Test not equal operator", () => {
     expect(tokens).toBeDefined();
     expect(tokens.length).toBeGreaterThan(0);
 });
+
+test("Test relationship with hops", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)-[r:KNOWS*1..3]->(b:Person)
+        RETURN a.name, b.name
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});

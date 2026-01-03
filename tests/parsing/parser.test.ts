@@ -672,3 +672,29 @@ test("Test not equal operator", () => {
             "---- Number (2)"
     );
 });
+
+test("Parse relationship with hops", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].chain.length).toBe(3);
+    const source = match.patterns[0].chain[0] as Node;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    const target = match.patterns[0].chain[2] as Node;
+    expect(source.identifier).toBe("a");
+    expect(relationship.type).toBe("KNOWS");
+    expect(relationship.hops).not.toBeNull();
+    expect(relationship.hops!.min).toBe(1);
+    expect(relationship.hops!.max).toBe(3);
+    expect(target.identifier).toBe("b");
+});

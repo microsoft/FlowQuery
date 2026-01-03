@@ -5,8 +5,8 @@ class RelationshipData extends Data {
         super(records);
         super._buildIndex("left_id");
     }
-    public find(left_id: string): boolean {
-        return super._find(left_id);
+    public find(left_id: string, hop: number = 0): boolean {
+        return super._find(left_id, hop);
     }
 }
 

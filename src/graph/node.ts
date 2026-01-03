@@ -14,7 +14,12 @@ class Node extends ASTNode {
 
     private _data: NodeData | null = null;
 
-    private _callback: (() => Promise<void>) | null = null;
+    // Function to be called after each 'next' and 'find' operation
+    // It is used to chain operations in a traversal
+    // For example, after matching on a graph pattern, we may want to
+    // continue to the next node or relationship in the pattern, or
+    // perform the next operation in a statement.
+    private _todoNext: (() => Promise<void>) | null = null;
 
     constructor(identifier: string | null = null, label: string | null = null) {
         super();
@@ -61,23 +66,29 @@ class Node extends ASTNode {
         this._data = data;
     }
     public async next(): Promise<void> {
-        this._data?.reset();
+        this._data?.reset(0);
         while (this._data?.next()) {
             this.setValue(this._data?.current());
             await this._outgoing?.find(this._value.id);
-            await this._callback?.();
+            await this.runTodoNext();
         }
     }
-    public async find(id: string): Promise<void> {
-        this._data?.reset();
-        while (this._data?.find(id)) {
-            this.setValue(this._data?.current());
-            await this._outgoing?.find(this._value.id);
-            await this._callback?.();
+    public async find(id: string, hop: number = 0): Promise<void> {
+        this._data?.reset(0);
+        while (this._data?.find(id, hop)) {
+            this.setValue(this._data?.current(hop));
+            await this._outgoing?.find(this._value.id, hop);
+            await this.runTodoNext();
         }
     }
-    public setCallback(callback: () => Promise<void>): void {
-        this._callback = callback;
+    // For setting a function to be called after each 'next' and 'find' operation
+    public set todoNext(func: (() => Promise<void>) | null) {
+        this._todoNext = func;
+    }
+    public async runTodoNext(): Promise<void> {
+        if (this._todoNext) {
+            await this._todoNext();
+        }
     }
 }
 

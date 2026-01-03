@@ -5,8 +5,8 @@ class NodeData extends Data {
         super(records);
         super._buildIndex("id");
     }
-    public find(id: string): boolean {
-        return super._find(id);
+    public find(id: string, hop: number = 0): boolean {
+        return super._find(id, hop);
     }
 }
 

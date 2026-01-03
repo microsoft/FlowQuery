@@ -23,56 +23,80 @@ class IndexEntry {
     }
 }
 
+class Layer {
+    private _index: Map<string, IndexEntry> = new Map();
+    private _current: number = -1;
+    constructor(index: Map<string, IndexEntry>) {
+        this._index = index;
+    }
+    public get index(): Map<string, IndexEntry> {
+        return this._index;
+    }
+    public get current(): number {
+        return this._current;
+    }
+    public set current(value: number) {
+        this._current = value;
+    }
+}
+
 class Data {
     protected _records: Record<string, any>[] = [];
-    protected _index: Map<string, IndexEntry> = new Map();
-    protected _current: number = -1;
+    private _layers: Map<number, Layer> = new Map();
 
     constructor(records: Record<string, any>[] = []) {
         this._records = records;
+        this._layers.set(0, new Layer(new Map()));
     }
-    protected _buildIndex(key: string): void {
-        this._index.clear();
+    protected _buildIndex(key: string, level: number = 0): void {
+        this.layer(level).index.clear();
         this._records.forEach((record, idx) => {
             if (record.hasOwnProperty(key)) {
-                if (!this._index.has(record[key])) {
-                    this._index.set(record[key], new IndexEntry());
+                if (!this.layer(level).index.has(record[key])) {
+                    this.layer(level).index.set(record[key], new IndexEntry());
                 }
-                this._index.get(record[key])!.add(idx);
+                this.layer(level).index.get(record[key])!.add(idx);
             }
         });
     }
-    protected _find(key: string): boolean {
-        if (!this._index.has(key)) {
-            this._current = this._records.length; // Move to end
+    public layer(level: number = 0): Layer {
+        if (!this._layers.has(level)) {
+            const first = this._layers.get(0)!;
+            this._layers.set(level, new Layer(new Map(first.index)));
+        }
+        return this._layers.get(level)!;
+    }
+    protected _find(key: string, level: number = 0): boolean {
+        if (!this.layer(level).index.has(key)) {
+            this.layer(level).current = this._records.length; // Move to end
             return false;
         } else {
-            const entry = this._index.get(key)!;
+            const entry = this.layer(level).index.get(key)!;
             const more = entry.next();
             if (!more) {
-                this._current = this._records.length; // Move to end
+                this.layer(level).current = this._records.length; // Move to end
                 return false;
             }
-            this._current = entry.position;
+            this.layer(level).current = entry.position;
             return true;
         }
     }
-    public reset(): void {
-        this._current = -1;
-        for (const entry of this._index.values()) {
+    public reset(level: number = 0): void {
+        this.layer(level).current = -1;
+        for (const entry of this.layer(level).index.values()) {
             entry.reset();
         }
     }
-    public next(): boolean {
-        if (this._current < this._records.length - 1) {
-            this._current++;
+    public next(level: number = 0): boolean {
+        if (this.layer(level).current < this._records.length - 1) {
+            this.layer(level).current++;
             return true;
         }
         return false;
     }
-    public current(): Record<string, any> | null {
-        if (this._current < this._records.length) {
-            return this._records[this._current];
+    public current(level: number = 0): Record<string, any> | null {
+        if (this.layer(level).current < this._records.length) {
+            return this._records[this.layer(level).current];
         }
         return null;
     }

@@ -1,6 +1,6 @@
 import Node from "../graph/node";
 import Pattern from "../graph/pattern";
-import Relationship from "../graph/relationship";
+import { Hops, Relationship } from "../graph/relationship";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -487,10 +487,14 @@ class Parser extends BaseParser {
     }
 
     private parseRelationship(): Relationship | null {
-        if (!this.token.isSubtract()) {
+        if (this.token.isLessThan() && this.peek()?.isSubtract()) {
+            this.setNextToken();
+            this.setNextToken();
+        } else if (this.token.isSubtract()) {
+            this.setNextToken();
+        } else {
             return null;
         }
-        this.setNextToken();
         if (!this.token.isOpeningBracket()) {
             return null;
         }
@@ -509,6 +513,7 @@ class Parser extends BaseParser {
         }
         const type: string = this.token.value || "";
         this.setNextToken();
+        const hops: Hops | null = this.parseRelationshipHops();
         if (!this.token.isClosingBracket()) {
             throw new Error("Expected closing bracket for relationship definition");
         }
@@ -517,13 +522,47 @@ class Parser extends BaseParser {
             throw new Error("Expected '-' for relationship definition");
         }
         this.setNextToken();
+        if (this.token.isGreaterThan()) {
+            this.setNextToken();
+        }
         const relationship = new Relationship();
         if (variable !== null) {
             relationship.identifier = variable;
             this.variables.set(variable, relationship);
         }
+        if (hops !== null) {
+            relationship.hops = hops;
+        }
         relationship.type = type;
         return relationship;
+    }
+
+    private parseRelationshipHops(): Hops | null {
+        if (!this.token.isMultiply()) {
+            return null;
+        }
+        const hops = new Hops();
+        this.setNextToken();
+        if (this.token.isNumber()) {
+            hops.min = parseInt(this.token.value || "0");
+            this.setNextToken();
+            if (this.token.isDot()) {
+                this.setNextToken();
+                if (!this.token.isDot()) {
+                    throw new Error("Expected '..' for relationship hops");
+                }
+                this.setNextToken();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number for relationship hops");
+                }
+                hops.max = parseInt(this.token.value || "0");
+                this.setNextToken();
+            }
+        } else {
+            hops.min = 0;
+            hops.max = Number.MAX_SAFE_INTEGER;
+        }
+        return hops;
     }
 
     private parseSubQuery(): ASTNode | null {

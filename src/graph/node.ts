@@ -14,6 +14,8 @@ class Node extends ASTNode {
 
     private _data: NodeData | null = null;
 
+    private _reference: Node | null = null;
+
     // Function to be called after each 'next' and 'find' operation
     // It is used to chain operations in a traversal
     // For example, after matching on a graph pattern, we may want to
@@ -65,8 +67,20 @@ class Node extends ASTNode {
     public setData(data: NodeData | null): void {
         this._data = data;
     }
+    public set reference(node: Node | null) {
+        this._reference = node;
+    }
+    public get reference(): Node | null {
+        return this._reference;
+    }
     public async next(): Promise<void> {
-        this._data?.reset(0);
+        if (this.reference !== null) {
+            this.setValue(this.reference.value());
+            await this._outgoing?.find(this._value.id);
+            await this.runTodoNext();
+            return;
+        }
+        this._data?.reset();
         while (this._data?.next()) {
             this.setValue(this._data?.current());
             await this._outgoing?.find(this._value.id);
@@ -74,7 +88,13 @@ class Node extends ASTNode {
         }
     }
     public async find(id: string, hop: number = 0): Promise<void> {
-        this._data?.reset(0);
+        if (this.reference !== null) {
+            this.setValue(this.reference.value());
+            await this._outgoing?.find(this._value.id, hop);
+            await this.runTodoNext();
+            return;
+        }
+        this._data?.reset();
         while (this._data?.find(id, hop)) {
             this.setValue(this._data?.current(hop));
             await this._outgoing?.find(this._value.id, hop);

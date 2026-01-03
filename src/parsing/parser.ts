@@ -430,9 +430,15 @@ class Parser extends BaseParser {
         this.skipWhitespaceAndComments();
         const node = new Node();
         node.label = label!;
-        if (identifier !== null) {
+        if (label !== null && identifier !== null) {
             node.identifier = identifier;
             this.variables.set(identifier, node);
+        } else if (identifier !== null) {
+            const reference = this.variables.get(identifier);
+            if (reference === undefined || reference.constructor !== Node) {
+                throw new Error(`Undefined node reference: ${identifier}`);
+            }
+            node.reference = reference;
         }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
@@ -443,8 +449,23 @@ class Parser extends BaseParser {
 
     private *parsePatterns(): IterableIterator<Pattern> {
         while (true) {
+            let identifier: string | null = null;
+            if (this.token.isIdentifier()) {
+                identifier = this.token.value || "";
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+                if (!this.token.isEquals()) {
+                    throw new Error("Expected '=' for pattern assignment");
+                }
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            }
             const pattern: Pattern | null = this.parsePattern();
             if (pattern !== null) {
+                if (identifier !== null) {
+                    pattern.identifier = identifier;
+                    this.variables.set(identifier, pattern);
+                }
                 yield pattern;
             } else {
                 break;
@@ -526,9 +547,15 @@ class Parser extends BaseParser {
             this.setNextToken();
         }
         const relationship = new Relationship();
-        if (variable !== null) {
+        if (type !== null && variable !== null) {
             relationship.identifier = variable;
             this.variables.set(variable, relationship);
+        } else if (variable !== null) {
+            const reference = this.variables.get(variable);
+            if (reference === undefined || reference.constructor !== Relationship) {
+                throw new Error(`Undefined relationship reference: ${variable}`);
+            }
+            relationship.reference = reference;
         }
         if (hops !== null) {
             relationship.hops = hops;

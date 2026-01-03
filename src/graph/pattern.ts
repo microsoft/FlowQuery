@@ -62,11 +62,19 @@ class Pattern extends ASTNode {
         this._value = value;
     }
     public value(): any {
-        return this._value;
+        return Array.from(this.values());
+    }
+    public *values(): Generator<any> {
+        for (const element of this._chain) {
+            yield element.value();
+        }
     }
     public async fetchData(): Promise<void> {
         const db: Database = Database.getInstance();
         for (const element of this._chain) {
+            if (element.reference! !== null) {
+                continue;
+            }
             const data = await db.getData(element);
             element.setData(data);
         }

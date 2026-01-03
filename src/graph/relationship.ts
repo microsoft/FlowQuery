@@ -38,6 +38,8 @@ class Relationship extends ASTNode {
 
     private _data: RelationshipData | null = null;
 
+    private _reference: Relationship | null = null;
+
     constructor(identifier: string | null = null, type: string | null = null) {
         super();
         this._identifier = identifier;
@@ -100,7 +102,18 @@ class Relationship extends ASTNode {
     public setData(data: RelationshipData | null): void {
         this._data = data;
     }
+    public set reference(relationship: Relationship | null) {
+        this._reference = relationship;
+    }
+    public get reference(): Relationship | null {
+        return this._reference;
+    }
     public async find(left_id: string, hop: number = 0): Promise<void> {
+        if (this.reference !== null) {
+            this.setValue(this.reference.value());
+            await this._target?.find(this._value.right_id, hop);
+            return;
+        }
         if (hop === 0) {
             this._data?.reset();
         }

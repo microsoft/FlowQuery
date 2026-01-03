@@ -81,9 +81,9 @@ class Data {
             return true;
         }
     }
-    public reset(level: number = 0): void {
-        this.layer(level).current = -1;
-        for (const entry of this.layer(level).index.values()) {
+    public reset(): void {
+        this.layer(0).current = -1;
+        for (const entry of this.layer(0).index.values()) {
             entry.reset();
         }
     }

@@ -675,7 +675,7 @@ test("Test not equal operator", () => {
 
 test("Parse relationship with hops", () => {
     const parser = new Parser();
-    const ast = parser.parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b");
+    const ast = parser.parse("MATCH (a:Test)-[:KNOWS*1..3]->(b:Test) RETURN a, b");
     // prettier-ignore
     expect(ast.print()).toBe(
         "ASTNode\n" +

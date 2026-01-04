@@ -1,10 +1,10 @@
 import ASTNode from "../parsing/ast_node";
 import Node from "./node";
-import NodeData from "./node_data";
+import NodeData, { NodeRecord } from "./node_data";
 import PhysicalNode from "./physical_node";
 import PhysicalRelationship from "./physical_relationship";
 import Relationship from "./relationship";
-import RelationshipData from "./relationship_data";
+import RelationshipData, { RelationshipRecord } from "./relationship_data";
 
 class Database {
     private static instance: Database;
@@ -43,19 +43,19 @@ class Database {
     }
     public async getData(element: Node | Relationship): Promise<NodeData | RelationshipData> {
         if (element instanceof Node) {
-            const physicalNode = this.getNode(element);
-            if (physicalNode === null) {
+            const node = this.getNode(element);
+            if (node === null) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const data = await physicalNode.data();
-            return new NodeData(data);
+            const data = await node.data();
+            return new NodeData(data as NodeRecord[]);
         } else if (element instanceof Relationship) {
-            const physicalRel = this.getRelationship(element);
-            if (physicalRel === null) {
+            const relationship = this.getRelationship(element);
+            if (relationship === null) {
                 throw new Error(`Physical relationship not found for type ${element.type}`);
             }
-            const data = await physicalRel.data();
-            return new RelationshipData(data);
+            const data = await relationship.data();
+            return new RelationshipData(data as RelationshipRecord[]);
         } else {
             throw new Error("Element is neither Node nor Relationship");
         }

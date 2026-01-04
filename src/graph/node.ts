@@ -1,13 +1,13 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
-import NodeData from "./node_data";
+import NodeData, { NodeRecord } from "./node_data";
 import Relationship from "./relationship";
 
 class Node extends ASTNode {
     private _identifier: string | null = null;
     private _label: string | null = null;
     private _properties: Map<string, Expression> = new Map();
-    private _value: any = null;
+    private _value: NodeRecord | null = null;
 
     private _incoming: Relationship | null = null;
     private _outgoing: Relationship | null = null;
@@ -46,10 +46,10 @@ class Node extends ASTNode {
     public getProperty(key: string): Expression | null {
         return this._properties.get(key) || null;
     }
-    public setValue(value: any): void {
+    public setValue(value: NodeRecord): void {
         this._value = value;
     }
-    public value(): any {
+    public value(): NodeRecord | null {
         return this._value;
     }
     public set outgoing(relationship: Relationship | null) {
@@ -75,29 +75,29 @@ class Node extends ASTNode {
     }
     public async next(): Promise<void> {
         if (this.reference !== null) {
-            this.setValue(this.reference.value());
-            await this._outgoing?.find(this._value.id);
+            this.setValue(this.reference.value() as NodeRecord);
+            await this._outgoing?.find(this._value!.id);
             await this.runTodoNext();
             return;
         }
         this._data?.reset();
         while (this._data?.next()) {
-            this.setValue(this._data?.current());
-            await this._outgoing?.find(this._value.id);
+            this.setValue(this._data?.current() as NodeRecord);
+            await this._outgoing?.find(this._value!.id);
             await this.runTodoNext();
         }
     }
     public async find(id: string, hop: number = 0): Promise<void> {
         if (this.reference !== null) {
-            this.setValue(this.reference.value());
-            await this._outgoing?.find(this._value.id, hop);
+            this.setValue(this.reference.value() as NodeRecord);
+            await this._outgoing?.find(this._value!.id, hop);
             await this.runTodoNext();
             return;
         }
         this._data?.reset();
         while (this._data?.find(id, hop)) {
-            this.setValue(this._data?.current(hop));
-            await this._outgoing?.find(this._value.id, hop);
+            this.setValue(this._data?.current(hop) as NodeRecord);
+            await this._outgoing?.find(this._value!.id, hop);
             await this.runTodoNext();
         }
     }

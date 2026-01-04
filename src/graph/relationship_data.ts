@@ -1,7 +1,9 @@
 import Data from "./data";
 
+export type RelationshipRecord = { left_id: string; right_id: string } & Record<string, any>;
+
 class RelationshipData extends Data {
-    constructor(records: Record<string, any>[] = []) {
+    constructor(records: RelationshipRecord[] = []) {
         super(records);
         super._buildIndex("left_id");
     }

@@ -1,6 +1,7 @@
+import Hops from "../graph/hops";
 import Node from "../graph/node";
 import Pattern from "../graph/pattern";
-import { Hops, Relationship } from "../graph/relationship";
+import Relationship from "../graph/relationship";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";

@@ -1,7 +1,9 @@
 import Data from "./data";
 
+export type NodeRecord = { id: string } & Record<string, any>;
+
 class NodeData extends Data {
-    constructor(records: Record<string, any>[] = []) {
+    constructor(records: NodeRecord[] = []) {
         super(records);
         super._buildIndex("id");
     }

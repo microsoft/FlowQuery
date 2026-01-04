@@ -1,25 +1,8 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
+import Hops from "./hops";
 import Node from "./node";
-import RelationshipData from "./relationship_data";
-
-class Hops {
-    private _min: number = 0;
-    private _max: number = 1;
-
-    public set min(min: number) {
-        this._min = min;
-    }
-    public get min(): number {
-        return this._min;
-    }
-    public set max(max: number) {
-        this._max = max;
-    }
-    public get max(): number {
-        return this._max;
-    }
-}
+import RelationshipData, { RelationshipRecord } from "./relationship_data";
 
 class Relationship extends ASTNode {
     // Labels of the nodes this relationship connects
@@ -31,7 +14,7 @@ class Relationship extends ASTNode {
     private _properties: Map<string, Expression> = new Map();
     private _hops: Hops = new Hops();
 
-    private _value: any = null;
+    private _value: RelationshipRecord | null = null;
 
     private _source: Node | null = null;
     private _target: Node | null = null;
@@ -81,7 +64,7 @@ class Relationship extends ASTNode {
     public get hops(): Hops | null {
         return this._hops;
     }
-    public setValue(value: any): void {
+    public setValue(value: RelationshipRecord): void {
         this._value = value;
     }
     public set source(node: Node | null) {
@@ -96,7 +79,7 @@ class Relationship extends ASTNode {
     public get target(): Node | null {
         return this._target;
     }
-    public value(): any {
+    public value(): RelationshipRecord | null {
         return this._value;
     }
     public setData(data: RelationshipData | null): void {
@@ -110,8 +93,8 @@ class Relationship extends ASTNode {
     }
     public async find(left_id: string, hop: number = 0): Promise<void> {
         if (this.reference !== null) {
-            this.setValue(this.reference.value());
-            await this._target?.find(this._value.right_id, hop);
+            this.setValue(this.reference.value() as RelationshipRecord);
+            await this._target?.find(this._value!.right_id, hop);
             return;
         }
         if (hop === 0) {
@@ -119,16 +102,14 @@ class Relationship extends ASTNode {
         }
         while (this._data?.find(left_id, hop)) {
             if (hop >= this.hops!.min) {
-                this.setValue(this._data?.current(hop));
-                await this._target?.find(this._value.right_id, hop);
+                this.setValue(this._data?.current(hop) as RelationshipRecord);
+                await this._target?.find(this._value!.right_id, hop);
             }
             if (hop + 1 < this.hops!.max) {
-                await this.find(this._value.right_id, hop + 1);
+                await this.find(this._value!.right_id, hop + 1);
             }
         }
     }
 }
 
 export default Relationship;
-
-export { Relationship, Hops };

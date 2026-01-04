@@ -3,6 +3,7 @@ import Expression from "../parsing/expressions/expression";
 import Hops from "./hops";
 import Node from "./node";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
+import RelationshipMatchCollector from "./relationship_match_collector";
 
 class Relationship extends ASTNode {
     // Labels of the nodes this relationship connects
@@ -15,6 +16,7 @@ class Relationship extends ASTNode {
     protected _hops: Hops = new Hops();
 
     protected _value: RelationshipRecord | null = null;
+    protected _matches: RelationshipMatchCollector = new RelationshipMatchCollector();
 
     protected _source: Node | null = null;
     protected _target: Node | null = null;

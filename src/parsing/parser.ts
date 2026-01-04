@@ -1,7 +1,9 @@
 import Hops from "../graph/hops";
 import Node from "../graph/node";
+import NodeReference from "../graph/node_reference";
 import Pattern from "../graph/pattern";
 import Relationship from "../graph/relationship";
+import RelationshipReference from "../graph/relationship_reference";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -429,7 +431,7 @@ class Parser extends BaseParser {
             this.setNextToken();
         }
         this.skipWhitespaceAndComments();
-        const node = new Node();
+        let node = new Node();
         node.label = label!;
         if (label !== null && identifier !== null) {
             node.identifier = identifier;
@@ -439,7 +441,7 @@ class Parser extends BaseParser {
             if (reference === undefined || reference.constructor !== Node) {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }
-            node.reference = reference;
+            node = new NodeReference(node, reference);
         }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
@@ -547,7 +549,7 @@ class Parser extends BaseParser {
         if (this.token.isGreaterThan()) {
             this.setNextToken();
         }
-        const relationship = new Relationship();
+        let relationship = new Relationship();
         if (type !== null && variable !== null) {
             relationship.identifier = variable;
             this.variables.set(variable, relationship);
@@ -556,7 +558,7 @@ class Parser extends BaseParser {
             if (reference === undefined || reference.constructor !== Relationship) {
                 throw new Error(`Undefined relationship reference: ${variable}`);
             }
-            relationship.reference = reference;
+            relationship = new RelationshipReference(relationship, reference);
         }
         if (hops !== null) {
             relationship.hops = hops;

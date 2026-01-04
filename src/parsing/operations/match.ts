@@ -1,15 +1,16 @@
 import Pattern from "../../graph/pattern";
+import Patterns from "../../graph/patterns";
 import Operation from "./operation";
 
 class Match extends Operation {
-    private _patterns: Pattern[] = [];
+    private _patterns: Patterns | null = null;
 
-    constructor(patterns: Pattern[]) {
+    constructor(patterns: Pattern[] = []) {
         super();
-        this._patterns = patterns;
+        this._patterns = new Patterns(patterns);
     }
     public get patterns(): Pattern[] {
-        return this._patterns;
+        return this._patterns ? this._patterns.patterns : [];
     }
     /**
      * Executes the match operation by chaining the patterns together.
@@ -17,23 +18,13 @@ class Match extends Operation {
      * @return Promise<void>
      */
     public async run(): Promise<void> {
-        let previous: Pattern | null = null;
-        for (const pattern of this._patterns) {
-            await pattern.fetchData(); // Ensure data is loaded
-            if (previous !== null) {
-                // Chain the patterns together
-                previous.endNode.todoNext = async () => {
-                    await pattern.startNode.next();
-                };
-            }
-            previous = pattern;
-        }
-        // After each complete pattern match, continue to the next operation
-        this._patterns[this._patterns.length - 1].endNode.todoNext = async () => {
+        await this._patterns!.initialize();
+        this._patterns!.toDoNext = async () => {
+            // Continue to the next operation after all patterns are matched
             await this.next?.run();
         };
-        // Kick off the matching with the first pattern's start node
-        await this._patterns[0].startNode.next();
+        // Kick off the graph pattern traversal
+        await this._patterns!.traverse();
     }
 }
 

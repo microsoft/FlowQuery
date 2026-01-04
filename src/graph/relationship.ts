@@ -6,22 +6,20 @@ import RelationshipData, { RelationshipRecord } from "./relationship_data";
 
 class Relationship extends ASTNode {
     // Labels of the nodes this relationship connects
-    private _from: string | null = null; // label of the starting node
-    private _to: string | null = null; // label of the ending node
+    protected _from: string | null = null; // label of the starting node
+    protected _to: string | null = null; // label of the ending node
 
-    private _identifier: string | null = null;
-    private _type: string | null = null;
-    private _properties: Map<string, Expression> = new Map();
-    private _hops: Hops = new Hops();
+    protected _identifier: string | null = null;
+    protected _type: string | null = null;
+    protected _properties: Map<string, Expression> = new Map();
+    protected _hops: Hops = new Hops();
 
-    private _value: RelationshipRecord | null = null;
+    protected _value: RelationshipRecord | null = null;
 
-    private _source: Node | null = null;
-    private _target: Node | null = null;
+    protected _source: Node | null = null;
+    protected _target: Node | null = null;
 
     private _data: RelationshipData | null = null;
-
-    private _reference: Relationship | null = null;
 
     constructor(identifier: string | null = null, type: string | null = null) {
         super();
@@ -51,6 +49,9 @@ class Relationship extends ASTNode {
     }
     public get type(): string | null {
         return this._type;
+    }
+    public get properties(): Map<string, Expression> {
+        return this._properties;
     }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
@@ -85,18 +86,7 @@ class Relationship extends ASTNode {
     public setData(data: RelationshipData | null): void {
         this._data = data;
     }
-    public set reference(relationship: Relationship | null) {
-        this._reference = relationship;
-    }
-    public get reference(): Relationship | null {
-        return this._reference;
-    }
     public async find(left_id: string, hop: number = 0): Promise<void> {
-        if (this.reference !== null) {
-            this.setValue(this.reference.value() as RelationshipRecord);
-            await this._target?.find(this._value!.right_id, hop);
-            return;
-        }
         if (hop === 0) {
             this._data?.reset();
         }

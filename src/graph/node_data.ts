@@ -10,6 +10,9 @@ class NodeData extends Data {
     public find(id: string, hop: number = 0): boolean {
         return super._find(id, hop);
     }
+    public current(hop: number = 0): NodeRecord | null {
+        return super.current(hop) as NodeRecord | null;
+    }
 }
 
 export default NodeData;

@@ -4,17 +4,15 @@ import NodeData, { NodeRecord } from "./node_data";
 import Relationship from "./relationship";
 
 class Node extends ASTNode {
-    private _identifier: string | null = null;
-    private _label: string | null = null;
-    private _properties: Map<string, Expression> = new Map();
-    private _value: NodeRecord | null = null;
+    protected _identifier: string | null = null;
+    protected _label: string | null = null;
+    protected _properties: Map<string, Expression> = new Map();
+    protected _value: NodeRecord | null = null;
 
-    private _incoming: Relationship | null = null;
-    private _outgoing: Relationship | null = null;
+    protected _incoming: Relationship | null = null;
+    protected _outgoing: Relationship | null = null;
 
     private _data: NodeData | null = null;
-
-    private _reference: Node | null = null;
 
     // Function to be called after each 'next' and 'find' operation
     // It is used to chain operations in a traversal
@@ -39,6 +37,9 @@ class Node extends ASTNode {
     }
     public get label(): string | null {
         return this._label;
+    }
+    public get properties(): Map<string, Expression> {
+        return this._properties;
     }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
@@ -67,33 +68,15 @@ class Node extends ASTNode {
     public setData(data: NodeData | null): void {
         this._data = data;
     }
-    public set reference(node: Node | null) {
-        this._reference = node;
-    }
-    public get reference(): Node | null {
-        return this._reference;
-    }
     public async next(): Promise<void> {
-        if (this.reference !== null) {
-            this.setValue(this.reference.value() as NodeRecord);
-            await this._outgoing?.find(this._value!.id);
-            await this.runTodoNext();
-            return;
-        }
         this._data?.reset();
         while (this._data?.next()) {
-            this.setValue(this._data?.current() as NodeRecord);
+            this.setValue(this._data?.current()!);
             await this._outgoing?.find(this._value!.id);
             await this.runTodoNext();
         }
     }
     public async find(id: string, hop: number = 0): Promise<void> {
-        if (this.reference !== null) {
-            this.setValue(this.reference.value() as NodeRecord);
-            await this._outgoing?.find(this._value!.id, hop);
-            await this.runTodoNext();
-            return;
-        }
         this._data?.reset();
         while (this._data?.find(id, hop)) {
             this.setValue(this._data?.current(hop) as NodeRecord);

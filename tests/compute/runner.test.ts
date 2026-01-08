@@ -969,30 +969,29 @@ test("Test circular graph pattern", async () => {
     expect(results[0].pattern[4].id).toBe(1);
 });
 
-/*test("Test circular graph pattern with variable length should throw error", async () => {
-    expect(async () => {
-        await new Runner(`
-            CREATE VIRTUAL (:Person) AS {
-                unwind [
-                    {id: 1, name: 'Person 1'},
-                    {id: 2, name: 'Person 2'}
-                ] as record
-                RETURN record.id as id, record.name as name
-            }    
-        `).run();
-        await new Runner(`
-            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
-                unwind [
-                    {left_id: 1, right_id: 2},
-                    {left_id: 2, right_id: 1}
-                ] as record
-                RETURN record.left_id as left_id, record.right_id as right_id
-            }    
-        `).run();
-        const match = new Runner(`
-            MATCH p=(:Person)-[:KNOWS*]-(:Person)
-            RETURN p AS pattern
-        `);
-        await match.run();
-    }).toThrow("Variable length patterns that can produce cyclic paths are not supported");
-});*/
+test("Test circular graph pattern with variable length should throw error", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:Person)-[:KNOWS*]-(:Person)
+        RETURN p AS pattern
+    `);
+    await match.run();
+    const results = match.results;
+});

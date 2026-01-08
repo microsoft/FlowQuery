@@ -9,6 +9,7 @@ export type RelationshipMatchRecord = {
 
 class RelationshipMatchCollector {
     private _matches: RelationshipMatchRecord[] = [];
+    private _nodeIds: Array<string> = [];
 
     public push(relationship: Relationship): RelationshipMatchRecord {
         const match: RelationshipMatchRecord = {
@@ -18,6 +19,7 @@ class RelationshipMatchCollector {
             properties: relationship.properties,
         };
         this._matches.push(match);
+        this._nodeIds.push(match.startNode.id);
         return match;
     }
     public set endNode(node: any) {
@@ -26,6 +28,7 @@ class RelationshipMatchCollector {
         }
     }
     public pop(): RelationshipMatchRecord | undefined {
+        this._nodeIds.pop();
         return this._matches.pop();
     }
     public value(): RelationshipMatchRecord | RelationshipMatchRecord[] | null {
@@ -39,29 +42,20 @@ class RelationshipMatchCollector {
     }
     /*
      ** Checks if the collected relationships form a circular pattern
-     ** meaning the same node id occur more than once in the pattern
+     ** meaning the same node id occur more than 2 times in the collected matches
      */
     public isCircular(): boolean {
-        if (this._matches.length < 2) {
+        if (this._nodeIds.length < 3) {
             return false;
         }
-        const ids: Array<string> = Array.from(this.nodeIds());
-        const unique: Set<string> = new Set();
-        for (const id of ids) {
-            if (unique.has(id)) {
+        const counts: Record<string, number> = {};
+        for (const id of this._nodeIds) {
+            counts[id] = (counts[id] || 0) + 1;
+            if (counts[id] > 2) {
                 return true;
             }
-            unique.add(id);
         }
         return false;
-    }
-    private *nodeIds(): Generator<string> {
-        for (let i = 0; i < this._matches.length; i++) {
-            const match = this._matches[i];
-            if (match.startNode && match.startNode.id) {
-                yield match.startNode.id;
-            }
-        }
     }
 }
 

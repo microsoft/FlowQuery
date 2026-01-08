@@ -21,6 +21,9 @@ class IndexEntry {
         }
         return false;
     }
+    public clone(): IndexEntry {
+        return new IndexEntry([...this._positions]);
+    }
 }
 
 class Layer {
@@ -62,7 +65,11 @@ class Data {
     public layer(level: number = 0): Layer {
         if (!this._layers.has(level)) {
             const first = this._layers.get(0)!;
-            this._layers.set(level, new Layer(new Map(first.index)));
+            const cloned = new Map<string, IndexEntry>();
+            for (const [key, entry] of first.index) {
+                cloned.set(key, entry.clone());
+            }
+            this._layers.set(level, new Layer(cloned));
         }
         return this._layers.get(level)!;
     }

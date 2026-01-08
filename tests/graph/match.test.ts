@@ -1,6 +1,15 @@
 import Runner from "../../src/compute/runner";
+import Database from "../../src/graph/database";
+import Hops from "../../src/graph/hops";
+import Node from "../../src/graph/node";
+import Pattern from "../../src/graph/pattern";
+import Patterns from "../../src/graph/patterns";
 import PhysicalNode from "../../src/graph/physical_node";
+import Relationship from "../../src/graph/relationship";
+import { RelationshipMatchRecord } from "../../src/graph/relationship_match_collector";
 import CreateNode from "../../src/parsing/operations/create_node";
+import Match from "../../src/parsing/operations/match";
+import Operation from "../../src/parsing/operations/operation";
 import Parser from "../../src/parsing/parser";
 
 test("Test CreateNode and match operations", async () => {

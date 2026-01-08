@@ -1,4 +1,5 @@
 import Relationship from "./relationship";
+import { RelationshipRecord } from "./relationship_data";
 
 class RelationshipReference extends Relationship {
     private _reference: Relationship | null = null;
@@ -15,7 +16,10 @@ class RelationshipReference extends Relationship {
     }
     public async find(left_id: string, hop: number = 0): Promise<void> {
         this.setValue(this._reference!);
-        await this._target?.find(this._value!.endNode!.id, hop);
+        const data: RelationshipRecord = this._reference!.getData()?.current(
+            hop
+        ) as RelationshipRecord;
+        await this._target?.find(data.right_id, hop);
     }
 }
 

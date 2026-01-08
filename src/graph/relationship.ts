@@ -17,7 +17,7 @@ class Relationship extends ASTNode {
     protected _properties: Map<string, Expression> = new Map();
     protected _hops: Hops = new Hops();
 
-    protected _value: RelationshipMatchRecord | null = null;
+    protected _value: RelationshipMatchRecord | RelationshipMatchRecord[] | null = null;
     protected _matches: RelationshipMatchCollector = new RelationshipMatchCollector();
 
     protected _source: Node | null = null;
@@ -71,7 +71,7 @@ class Relationship extends ASTNode {
     }
     public setValue(relationship: Relationship): void {
         const match: RelationshipMatchRecord = this._matches.push(relationship);
-        this._value = match;
+        this._value = this._matches.value();
     }
     public set source(node: Node | null) {
         this._source = node;
@@ -85,11 +85,14 @@ class Relationship extends ASTNode {
     public get target(): Node | null {
         return this._target;
     }
-    public value(): RelationshipMatchRecord | null {
+    public value(): RelationshipMatchRecord | RelationshipMatchRecord[] | null {
         return this._value;
     }
     public setData(data: RelationshipData | null): void {
         this._data = data;
+    }
+    public getData(): RelationshipData | null {
+        return this._data;
     }
     public setEndNode(node: Node): void {
         this._matches.endNode = node;
@@ -103,6 +106,9 @@ class Relationship extends ASTNode {
             if (hop >= this.hops!.min) {
                 this.setValue(this);
                 await this._target?.find(data.right_id, hop);
+                if (this._matches.isCircular()) {
+                    throw new Error("Circular relationship detected");
+                }
                 if (hop + 1 < this.hops!.max) {
                     await this.find(data.right_id, hop + 1);
                 }

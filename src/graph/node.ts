@@ -80,6 +80,7 @@ class Node extends ASTNode {
         this._data?.reset();
         while (this._data?.find(id, hop)) {
             this.setValue(this._data?.current(hop) as NodeRecord);
+            this._incoming?.setEndNode(this);
             await this._outgoing?.find(this._value!.id, hop);
             await this.runTodoNext();
         }

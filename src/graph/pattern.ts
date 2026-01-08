@@ -10,7 +10,6 @@ import RelationshipReference from "./relationship_reference";
 class Pattern extends ASTNode {
     private _identifier: string | null = null;
     private _chain: (Node | Relationship)[] = [];
-    private _value: any = null;
     public set identifier(id: string | null) {
         this._identifier = id;
     }
@@ -61,9 +60,6 @@ class Pattern extends ASTNode {
             return last;
         }
         throw new Error("Pattern does not end with a node");
-    }
-    public setValue(value: any): void {
-        this._value = value;
     }
     public value(): any {
         return Array.from(this.values());

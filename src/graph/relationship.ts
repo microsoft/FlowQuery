@@ -3,7 +3,9 @@ import Expression from "../parsing/expressions/expression";
 import Hops from "./hops";
 import Node from "./node";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
-import RelationshipMatchCollector from "./relationship_match_collector";
+import RelationshipMatchCollector, {
+    RelationshipMatchRecord,
+} from "./relationship_match_collector";
 
 class Relationship extends ASTNode {
     // Labels of the nodes this relationship connects
@@ -15,7 +17,7 @@ class Relationship extends ASTNode {
     protected _properties: Map<string, Expression> = new Map();
     protected _hops: Hops = new Hops();
 
-    protected _value: RelationshipRecord | null = null;
+    protected _value: RelationshipMatchRecord | null = null;
     protected _matches: RelationshipMatchCollector = new RelationshipMatchCollector();
 
     protected _source: Node | null = null;
@@ -52,8 +54,8 @@ class Relationship extends ASTNode {
     public get type(): string | null {
         return this._type;
     }
-    public get properties(): Map<string, Expression> {
-        return this._properties;
+    public get properties(): Record<string, any> {
+        return this._data?.properties() || {};
     }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
@@ -67,8 +69,9 @@ class Relationship extends ASTNode {
     public get hops(): Hops | null {
         return this._hops;
     }
-    public setValue(value: RelationshipRecord): void {
-        this._value = value;
+    public setValue(relationship: Relationship): void {
+        const match: RelationshipMatchRecord = this._matches.push(relationship);
+        this._value = match;
     }
     public set source(node: Node | null) {
         this._source = node;
@@ -82,23 +85,28 @@ class Relationship extends ASTNode {
     public get target(): Node | null {
         return this._target;
     }
-    public value(): RelationshipRecord | null {
+    public value(): RelationshipMatchRecord | null {
         return this._value;
     }
     public setData(data: RelationshipData | null): void {
         this._data = data;
+    }
+    public setEndNode(node: Node): void {
+        this._matches.endNode = node;
     }
     public async find(left_id: string, hop: number = 0): Promise<void> {
         if (hop === 0) {
             this._data?.reset();
         }
         while (this._data?.find(left_id, hop)) {
+            const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
             if (hop >= this.hops!.min) {
-                this.setValue(this._data?.current(hop) as RelationshipRecord);
-                await this._target?.find(this._value!.right_id, hop);
-            }
-            if (hop + 1 < this.hops!.max) {
-                await this.find(this._value!.right_id, hop + 1);
+                this.setValue(this);
+                await this._target?.find(data.right_id, hop);
+                if (hop + 1 < this.hops!.max) {
+                    await this.find(data.right_id, hop + 1);
+                }
+                this._matches.pop();
             }
         }
     }

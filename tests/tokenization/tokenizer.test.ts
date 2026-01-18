@@ -126,6 +126,26 @@ test("Test not equal operator", () => {
     expect(tokens.length).toBeGreaterThan(0);
 });
 
+test("Test equal operator", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (n:Person)
+        WHERE n.age = 30
+        RETURN n.name AS name, n.age AS age
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test boolean operators", () => {
+    const tokenizer = new Tokenizer(`
+        return true AND false OR true NOT false
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
 test("Test relationship with hops", () => {
     const tokenizer = new Tokenizer(`
         MATCH (a:Person)-[r:KNOWS*1..3]->(b:Person)

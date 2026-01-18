@@ -1,4 +1,5 @@
 import Node from "../../src/graph/node";
+import NodeReference from "../../src/graph/node_reference";
 import Relationship from "../../src/graph/relationship";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
@@ -671,6 +672,33 @@ test("Test not equal operator", () => {
     );
 });
 
+test("Test equal operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN 1 = 2");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- Equals\n" +
+            "---- Number (1)\n" +
+            "---- Number (2)"
+    );
+});
+
+test("Test not operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN NOT true");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Not\n" +
+        "---- Expression\n" +
+        "----- Boolean"
+    );
+});
+
 test("Parse relationship with hops", () => {
     const parser = new Parser();
     const ast = parser.parse("MATCH (a:Test)-[:KNOWS*1..3]->(b:Test) RETURN a, b");
@@ -695,4 +723,32 @@ test("Parse relationship with hops", () => {
     expect(relationship.hops!.min).toBe(1);
     expect(relationship.hops!.max).toBe(3);
     expect(target.identifier).toBe("b");
+});
+
+test("Parse statement with graph pattern in where clause", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person) WHERE (a)-[:KNOWS]->(:Person) RETURN a");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Where\n" +
+            "-- Expression\n" +
+            "--- PatternExpression\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].startNode).not.toBeNull();
+    expect(match.patterns[0].startNode!.identifier).toBe("a");
+    const where = match.next as any;
+    const pattern = where.firstChild().firstChild() as any;
+    expect(pattern.chain.length).toBe(3);
+    const source = pattern.chain[0] as NodeReference;
+    const relationship = pattern.chain[1] as Relationship;
+    const target = pattern.chain[2] as Node;
+    expect(source.reference?.identifier).toBe("a");
+    expect(relationship.type).toBe("KNOWS");
+    expect(target.label).toBe("Person");
 });

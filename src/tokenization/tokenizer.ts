@@ -75,6 +75,7 @@ class Tokenizer {
             this.whitespace() ||
             this.lookup(this.keywords) ||
             this.lookup(this.operators, last, this.skipMinus) ||
+            this.boolean() ||
             this.identifier() ||
             this.string() ||
             this.number() ||
@@ -87,6 +88,17 @@ class Tokenizer {
         if (this.walker.checkForSingleComment() || this.walker.checkForMultiLineComment()) {
             const uncommented = StringUtils.uncomment(this.walker.getString(startPosition));
             return Token.COMMENT(uncommented);
+        }
+        return null;
+    }
+
+    private boolean(): Token | null {
+        const startPosition = this.walker.position;
+        if (this.walker.checkForString("TRUE")) {
+            return Token.BOOLEAN(this.walker.getString(startPosition).toUpperCase());
+        }
+        if (this.walker.checkForString("FALSE")) {
+            return Token.BOOLEAN(this.walker.getString(startPosition).toUpperCase());
         }
         return null;
     }

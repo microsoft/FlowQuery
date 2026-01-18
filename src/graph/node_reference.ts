@@ -11,13 +11,20 @@ class NodeReference extends Node {
         this._incoming = base.incoming;
         this._reference = reference;
     }
+    public get reference(): Node | null {
+        return this._reference;
+    }
     public async next(): Promise<void> {
         this.setValue(this._reference!.value()!);
         await this._outgoing?.find(this._value!.id);
         await this.runTodoNext();
     }
     public async find(id: string, hop: number = 0): Promise<void> {
-        this.setValue(this._reference!.value()!);
+        const referenced = this._reference?.value();
+        if (id !== referenced?.id) {
+            return;
+        }
+        this.setValue(referenced!);
         await this._outgoing?.find(this._value!.id, hop);
         await this.runTodoNext();
     }

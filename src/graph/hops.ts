@@ -14,6 +14,9 @@ class Hops {
     public get max(): number {
         return this._max;
     }
+    public multi(): boolean {
+        return this._max > 1 || this._max === -1;
+    }
 }
 
 export default Hops;

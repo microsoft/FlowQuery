@@ -2,6 +2,7 @@ import Hops from "../graph/hops";
 import Node from "../graph/node";
 import NodeReference from "../graph/node_reference";
 import Pattern from "../graph/pattern";
+import PatternExpression from "../graph/pattern_expression";
 import Relationship from "../graph/relationship";
 import RelationshipReference from "../graph/relationship_reference";
 import Token from "../tokenization/token";
@@ -506,6 +507,38 @@ class Parser extends BaseParser {
         return pattern;
     }
 
+    private parsePatternExpression(): PatternExpression | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        const pattern = new PatternExpression();
+        let node = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        if (!(node instanceof NodeReference)) {
+            throw new Error("PatternExpression must start with a NodeReference");
+        }
+        pattern.addElement(node);
+        let relationship: Relationship | null = null;
+        while (true) {
+            relationship = this.parseRelationship();
+            if (relationship === null) {
+                break;
+            }
+            if (relationship.hops?.multi()) {
+                throw new Error("PatternExpression does not support variable-length relationships");
+            }
+            pattern.addElement(relationship);
+            node = this.parseNode();
+            if (node === null) {
+                throw new Error("Expected target node definition");
+            }
+            pattern.addElement(node);
+        }
+        return pattern;
+    }
+
     private parseRelationship(): Relationship | null {
         if (this.token.isLessThan() && this.peek()?.isSubtract()) {
             this.setNextToken();
@@ -675,6 +708,12 @@ class Parser extends BaseParser {
                 if (func !== null) {
                     const lookup = this.parseLookup(func);
                     expression.addNode(lookup);
+                }
+            } else if (this.token.isLeftParenthesis() && this.peek()?.isIdentifier()) {
+                // Possible graph pattern expression
+                const pattern = this.parsePatternExpression();
+                if (pattern !== null) {
+                    expression.addNode(pattern);
                 }
             } else if (this.token.isOperand()) {
                 expression.addNode(this.token.node);

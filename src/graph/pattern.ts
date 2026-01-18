@@ -2,16 +2,14 @@ import ASTNode from "../parsing/ast_node";
 import Database from "./database";
 import Node from "./node";
 import NodeData from "./node_data";
-import NodeRecord from "./node_data";
 import NodeReference from "./node_reference";
 import Relationship from "./relationship";
 import RelationshipData from "./relationship_data";
-import RelationshipRecord from "./relationship_data";
 import RelationshipReference from "./relationship_reference";
 
 class Pattern extends ASTNode {
     private _identifier: string | null = null;
-    private _chain: (Node | Relationship)[] = [];
+    protected _chain: (Node | Relationship)[] = [];
     public set identifier(id: string | null) {
         this._identifier = id;
     }

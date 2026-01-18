@@ -4,6 +4,7 @@ import CSV from "./components/csv";
 import JSON from "./components/json";
 import Null from "./components/null";
 import Text from "./components/text";
+import Boolean from "./expressions/boolean";
 import Identifier from "./expressions/identifier";
 import Number from "./expressions/number";
 import {
@@ -101,6 +102,8 @@ class TokenToNode {
             } else if (token.isNull()) {
                 return new Null();
             }
+        } else if (token.isBoolean()) {
+            return new Boolean(token.value!);
         } else {
             throw new Error("Unknown token");
         }

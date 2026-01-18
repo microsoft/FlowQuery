@@ -1150,3 +1150,143 @@ test("Test return match pattern with variable length relationships", async () =>
     expect(results[5].pattern[1].endNode.id).toBe(4);
     expect(results[5].pattern[2].id).toBe(4);
 });
+
+test("Test statement with graph pattern in where clause", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    // Test positive match
+    const match = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE (a)-[:KNOWS]->(b)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 3", name2: "Person 4" });
+
+    // Test negative match
+    const nomatch = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE (a)-[:KNOWS]->(b) <> true
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await nomatch.run();
+    const noresults = nomatch.results;
+    expect(noresults.length).toBe(13);
+    expect(noresults[0]).toEqual({ name1: "Person 1", name2: "Person 1" });
+    expect(noresults[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(noresults[2]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(noresults[3]).toEqual({ name1: "Person 2", name2: "Person 1" });
+    expect(noresults[4]).toEqual({ name1: "Person 2", name2: "Person 2" });
+    expect(noresults[5]).toEqual({ name1: "Person 2", name2: "Person 4" });
+    expect(noresults[6]).toEqual({ name1: "Person 3", name2: "Person 1" });
+    expect(noresults[7]).toEqual({ name1: "Person 3", name2: "Person 2" });
+    expect(noresults[8]).toEqual({ name1: "Person 3", name2: "Person 3" });
+    expect(noresults[9]).toEqual({ name1: "Person 4", name2: "Person 1" });
+    expect(noresults[10]).toEqual({ name1: "Person 4", name2: "Person 2" });
+    expect(noresults[11]).toEqual({ name1: "Person 4", name2: "Person 3" });
+    expect(noresults[12]).toEqual({ name1: "Person 4", name2: "Person 4" });
+});
+
+test("Test person who does not know anyone", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)
+        WHERE NOT (a)-[:KNOWS]->(:Person)
+        RETURN a.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Person 3" });
+});
+
+test("Test manager chain", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Employee) AS {
+            unwind [
+                {id: 1, name: 'Employee 1'},
+                {id: 2, name: 'Employee 2'},
+                {id: 3, name: 'Employee 3'},
+                {id: 4, name: 'Employee 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Employee)-[:MANAGED_BY]-(:Employee) AS {
+            unwind [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 2},
+                {left_id: 4, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(e:Employee)-[:MANAGED_BY*]->(m:Employee)
+        WHERE NOT (m)-[:MANAGED_BY]->(:Employee)
+        RETURN p
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+});
+
+test("Test equality comparison", async () => {
+    const runner = new Runner(`
+        unwind range(1,10) as i
+        return i=5 as \`isEqual\`, i<>5 as \`isNotEqual\`
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(10);
+    for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        if (index + 1 === 5) {
+            expect(result).toEqual({ isEqual: 1, isNotEqual: 0 });
+        } else {
+            expect(result).toEqual({ isEqual: 0, isNotEqual: 1 });
+        }
+    }
+});

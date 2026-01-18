@@ -22,8 +22,6 @@ test("Test CreateNode operation", async () => {
 
 test("Test CreateRelationship operation", async () => {
     const relationship = new PhysicalRelationship();
-    relationship.from = "Person";
-    relationship.to = "Person";
     relationship.type = "KNOWS";
     expect(relationship.type).toBe("KNOWS");
     expect(relationship.statement).toBeNull();

@@ -30,7 +30,8 @@ class Return extends Projection {
         }
         const record: Map<string, any> = new Map();
         for (const [expression, alias] of this.expressions()) {
-            const value: any = expression.value();
+            const raw = expression.value();
+            const value: any = typeof raw === "object" && raw !== null ? structuredClone(raw) : raw;
             record.set(alias, value);
         }
         this._results.push(Object.fromEntries(record));

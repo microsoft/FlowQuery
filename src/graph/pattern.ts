@@ -2,9 +2,11 @@ import ASTNode from "../parsing/ast_node";
 import Database from "./database";
 import Node from "./node";
 import NodeData from "./node_data";
+import NodeRecord from "./node_data";
 import NodeReference from "./node_reference";
 import Relationship from "./relationship";
 import RelationshipData from "./relationship_data";
+import RelationshipRecord from "./relationship_data";
 import RelationshipReference from "./relationship_reference";
 
 class Pattern extends ASTNode {
@@ -66,7 +68,18 @@ class Pattern extends ASTNode {
     }
     public *values(): Generator<any> {
         for (const element of this._chain) {
-            yield element.value();
+            if (element instanceof Node) {
+                yield element.value();
+            } else if (element instanceof Relationship) {
+                let i = 0;
+                for (const match of element.matches) {
+                    yield match;
+                    if (i < element.matches.length - 1) {
+                        yield match.endNode;
+                    }
+                    i++;
+                }
+            }
         }
     }
     public async fetchData(): Promise<void> {

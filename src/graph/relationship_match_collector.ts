@@ -35,27 +35,23 @@ class RelationshipMatchCollector {
         if (this._matches.length === 0) {
             return null;
         } else if (this._matches.length === 1) {
-            return this._matches[0];
+            const _match = this._matches[0];
+            return _match;
         } else {
-            return this._matches;
+            const _matches = this._matches;
+            return _matches;
         }
+    }
+    public get matches(): RelationshipMatchRecord[] {
+        return this._matches;
     }
     /*
      ** Checks if the collected relationships form a circular pattern
      ** meaning the same node id occur more than 2 times in the collected matches
      */
     public isCircular(): boolean {
-        if (this._nodeIds.length < 3) {
-            return false;
-        }
-        const counts: Record<string, number> = {};
-        for (const id of this._nodeIds) {
-            counts[id] = (counts[id] || 0) + 1;
-            if (counts[id] > 2) {
-                return true;
-            }
-        }
-        return false;
+        const seen = new Set(this._nodeIds);
+        return seen.size < this._nodeIds.length;
     }
 }
 

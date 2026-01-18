@@ -371,8 +371,6 @@ class Parser extends BaseParser {
             }
             relationship = new Relationship();
             relationship.type = type;
-            relationship.from = node.label;
-            relationship.to = target.label;
         }
         this.expectAndSkipWhitespaceAndComments();
         if (!this.token.isAs()) {
@@ -498,13 +496,11 @@ class Parser extends BaseParser {
             if (relationship === null) {
                 break;
             }
-            relationship.from = node.label;
             pattern.addElement(relationship);
             node = this.parseNode();
             if (node === null) {
                 throw new Error("Expected target node definition");
             }
-            relationship.to = node.label;
             pattern.addElement(node);
         }
         return pattern;

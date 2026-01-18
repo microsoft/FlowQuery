@@ -654,8 +654,6 @@ test("Match with graph pattern including relationships", () => {
     expect(source.identifier).toBe("a");
     expect(source.label).toBe("Person");
     expect(relationship.type).toBe("KNOWS");
-    expect(relationship.from).toBe("Person");
-    expect(relationship.to).toBe("Person");
     expect(target.identifier).toBe("b");
     expect(target.label).toBe("Person");
 });

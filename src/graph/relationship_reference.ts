@@ -5,8 +5,6 @@ class RelationshipReference extends Relationship {
     private _reference: Relationship | null = null;
     constructor(base: Relationship, reference: Relationship) {
         super();
-        this._from = base.from;
-        this._to = base.to;
         this._identifier = base.identifier;
         this._type = base.type;
         this._hops = base.hops!;

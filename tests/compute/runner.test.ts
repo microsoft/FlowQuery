@@ -996,3 +996,157 @@ test("Test circular graph pattern with variable length should throw error", asyn
         await match.run();
     }).rejects.toThrow("Circular relationship detected");
 });
+
+test("Test multi-hop match with variable length relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[r:KNOWS*0..3]->(b:Person)
+        RETURN a, r, b
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(6);
+
+    expect(results[0].a.id).toBe(1);
+    expect(results[0].b.id).toBe(2);
+    expect(results[0].r.length).toBe(undefined);
+    expect(results[0].r.startNode.id).toBe(1);
+    expect(results[0].r.endNode.id).toBe(2);
+
+    expect(results[1].a.id).toBe(1);
+    expect(results[1].b.id).toBe(3);
+    expect(results[1].r.length).toBe(2);
+    expect(results[1].r[0].startNode.id).toBe(1);
+    expect(results[1].r[0].endNode.id).toBe(2);
+    expect(results[1].r[1].startNode.id).toBe(2);
+    expect(results[1].r[1].endNode.id).toBe(3);
+
+    expect(results[2].a.id).toBe(1);
+    expect(results[2].b.id).toBe(4);
+    expect(results[2].r.length).toBe(3);
+    expect(results[2].r[0].startNode.id).toBe(1);
+    expect(results[2].r[0].endNode.id).toBe(2);
+    expect(results[2].r[1].startNode.id).toBe(2);
+    expect(results[2].r[1].endNode.id).toBe(3);
+    expect(results[2].r[2].startNode.id).toBe(3);
+    expect(results[2].r[2].endNode.id).toBe(4);
+
+    expect(results[3].a.id).toBe(2);
+    expect(results[3].b.id).toBe(3);
+    expect(results[3].r.length).toBe(undefined);
+    expect(results[3].r.startNode.id).toBe(2);
+    expect(results[3].r.endNode.id).toBe(3);
+
+    expect(results[4].a.id).toBe(2);
+    expect(results[4].b.id).toBe(4);
+    expect(results[4].r.length).toBe(2);
+    expect(results[4].r[0].startNode.id).toBe(2);
+    expect(results[4].r[0].endNode.id).toBe(3);
+    expect(results[4].r[1].startNode.id).toBe(3);
+    expect(results[4].r[1].endNode.id).toBe(4);
+
+    expect(results[5].a.id).toBe(3);
+    expect(results[5].b.id).toBe(4);
+    expect(results[5].r.length).toBe(undefined);
+    expect(results[5].r.startNode.id).toBe(3);
+    expect(results[5].r.endNode.id).toBe(4);
+});
+
+test("Test return match pattern with variable length relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(a:Person)-[:KNOWS*0..3]->(b:Person)
+        RETURN p AS pattern
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(6);
+
+    expect(results[0].pattern.length).toBe(3);
+    expect(results[0].pattern[0].id).toBe(1);
+    expect(results[0].pattern[1].startNode.id).toBe(1);
+    expect(results[0].pattern[1].endNode.id).toBe(2);
+    expect(results[0].pattern[2].id).toBe(2);
+
+    expect(results[1].pattern.length).toBe(5);
+    expect(results[1].pattern[0].id).toBe(1);
+    expect(results[1].pattern[1].startNode.id).toBe(1);
+    expect(results[1].pattern[1].endNode.id).toBe(2);
+    expect(results[1].pattern[2].id).toBe(2);
+    expect(results[1].pattern[3].startNode.id).toBe(2);
+    expect(results[1].pattern[3].endNode.id).toBe(3);
+    expect(results[1].pattern[4].id).toBe(3);
+
+    expect(results[2].pattern.length).toBe(7);
+    expect(results[2].pattern[0].id).toBe(1);
+    expect(results[2].pattern[1].startNode.id).toBe(1);
+    expect(results[2].pattern[1].endNode.id).toBe(2);
+    expect(results[2].pattern[2].id).toBe(2);
+    expect(results[2].pattern[3].startNode.id).toBe(2);
+    expect(results[2].pattern[3].endNode.id).toBe(3);
+    expect(results[2].pattern[4].id).toBe(3);
+    expect(results[2].pattern[5].startNode.id).toBe(3);
+    expect(results[2].pattern[5].endNode.id).toBe(4);
+    expect(results[2].pattern[6].id).toBe(4);
+
+    expect(results[3].pattern.length).toBe(3);
+    expect(results[3].pattern[0].id).toBe(2);
+    expect(results[3].pattern[1].startNode.id).toBe(2);
+    expect(results[3].pattern[1].endNode.id).toBe(3);
+    expect(results[3].pattern[2].id).toBe(3);
+
+    expect(results[4].pattern.length).toBe(5);
+    expect(results[4].pattern[0].id).toBe(2);
+    expect(results[4].pattern[1].startNode.id).toBe(2);
+    expect(results[4].pattern[1].endNode.id).toBe(3);
+    expect(results[4].pattern[2].id).toBe(3);
+    expect(results[4].pattern[3].startNode.id).toBe(3);
+    expect(results[4].pattern[3].endNode.id).toBe(4);
+    expect(results[4].pattern[4].id).toBe(4);
+
+    expect(results[5].pattern.length).toBe(3);
+    expect(results[5].pattern[0].id).toBe(3);
+    expect(results[5].pattern[1].startNode.id).toBe(3);
+    expect(results[5].pattern[1].endNode.id).toBe(4);
+    expect(results[5].pattern[2].id).toBe(4);
+});

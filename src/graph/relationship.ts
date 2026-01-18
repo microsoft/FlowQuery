@@ -8,10 +8,6 @@ import RelationshipMatchCollector, {
 } from "./relationship_match_collector";
 
 class Relationship extends ASTNode {
-    // Labels of the nodes this relationship connects
-    protected _from: string | null = null; // label of the starting node
-    protected _to: string | null = null; // label of the ending node
-
     protected _identifier: string | null = null;
     protected _type: string | null = null;
     protected _properties: Map<string, Expression> = new Map();
@@ -29,18 +25,6 @@ class Relationship extends ASTNode {
         super();
         this._identifier = identifier;
         this._type = type;
-    }
-    public set from(from: string | null) {
-        this._from = from;
-    }
-    public get from(): string | null {
-        return this._from;
-    }
-    public set to(to: string | null) {
-        this._to = to;
-    }
-    public get to(): string | null {
-        return this._to;
     }
     public set identifier(identifier: string) {
         this._identifier = identifier;
@@ -88,6 +72,9 @@ class Relationship extends ASTNode {
     public value(): RelationshipMatchRecord | RelationshipMatchRecord[] | null {
         return this._value;
     }
+    public get matches(): RelationshipMatchRecord[] {
+        return this._matches.matches;
+    }
     public setData(data: RelationshipData | null): void {
         this._data = data;
     }
@@ -98,6 +85,12 @@ class Relationship extends ASTNode {
         this._matches.endNode = node;
     }
     public async find(left_id: string, hop: number = 0): Promise<void> {
+        // Save original source node
+        const original = this._source;
+        if (hop > 0) {
+            // For hops greater than 0, the source becomes the target of the previous hop
+            this._source = this._target;
+        }
         if (hop === 0) {
             this._data?.reset();
         }
@@ -115,6 +108,8 @@ class Relationship extends ASTNode {
                 this._matches.pop();
             }
         }
+        // Restore original source node
+        this._source = original;
     }
 }
 

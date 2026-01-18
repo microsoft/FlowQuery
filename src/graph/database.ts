@@ -33,8 +33,6 @@ class Database {
             throw new Error("Relationship type is null");
         }
         const physical = new PhysicalRelationship(null, relationship.type);
-        physical.from = relationship.from;
-        physical.to = relationship.to;
         physical.statement = statement;
         Database.relationships.set(relationship.type, physical);
     }

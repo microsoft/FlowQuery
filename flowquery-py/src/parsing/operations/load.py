@@ -96,6 +96,11 @@ class Load(Operation):
             headers = options.pop("headers", {})
             body = options.pop("body", None)
             
+            # Set Accept-Encoding to support common compression formats
+            # brotli (br) support requires the 'brotli' package to be installed
+            if "Accept-Encoding" not in headers:
+                headers["Accept-Encoding"] = "gzip, deflate, br"
+            
             async with session.request(
                 method, 
                 self.from_, 

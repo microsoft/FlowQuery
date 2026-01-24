@@ -1,5 +1,6 @@
 """Interactive command-line interface for FlowQuery."""
 
+import argparse
 import asyncio
 from typing import Optional
 
@@ -15,7 +16,25 @@ class CommandLine:
     Example:
         cli = CommandLine()
         cli.loop()  # Starts interactive mode
+        
+        # Or execute a single query:
+        cli.execute("load json from 'https://example.com/data' as d return d")
     """
+
+    def execute(self, query: str) -> None:
+        """Execute a single FlowQuery statement and print results.
+        
+        Args:
+            query: The FlowQuery statement to execute.
+        """
+        # Remove the termination semicolon if present
+        query = query.strip().rstrip(";")
+        
+        try:
+            runner = Runner(query)
+            asyncio.run(self._execute(runner))
+        except Exception as e:
+            print(f"Error: {e}")
 
     def loop(self) -> None:
         """Starts the interactive command loop.
@@ -63,5 +82,28 @@ class CommandLine:
 
 
 def main() -> None:
-    """Entry point for the flowquery CLI command."""
-    CommandLine().loop()
+    """Entry point for the flowquery CLI command.
+    
+    Usage:
+        flowquery              # Start interactive mode
+        flowquery -c "query"   # Execute a single query
+        flowquery --command "query"
+    """
+    parser = argparse.ArgumentParser(
+        description="FlowQuery - A declarative query language for data processing pipelines",
+        prog="flowquery"
+    )
+    parser.add_argument(
+        "-c", "--command",
+        type=str,
+        metavar="QUERY",
+        help="Execute a FlowQuery statement and exit"
+    )
+    
+    args = parser.parse_args()
+    cli = CommandLine()
+    
+    if args.command:
+        cli.execute(args.command)
+    else:
+        cli.loop()

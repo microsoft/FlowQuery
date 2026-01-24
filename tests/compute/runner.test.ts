@@ -1,4 +1,6 @@
 import Runner from "../../src/compute/runner";
+import Database from "../../src/graph/database";
+import Node from "../../src/graph/node";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 
@@ -635,4 +637,656 @@ test("Test call operation with no yielded expressions", async () => {
     expect(() => {
         const runner = new Runner("CALL calltestfunctionnoobject() RETURN 1");
     }).toThrow("CALL operations must have a YIELD clause unless they are the last operation");
+});
+
+test("Test create node operation", async () => {
+    const db = Database.getInstance();
+    const runner = new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            with 1 as x
+            RETURN x
+        }    
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+    expect(db.getNode(new Node(null, "Person"))).not.toBeNull();
+});
+
+test("Test create node and match operations", async () => {
+    const create = new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `);
+    await create.run();
+    const match = new Runner("MATCH (n:Person) RETURN n");
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0].n).toBeDefined();
+    expect(results[0].n.id).toBe(1);
+    expect(results[0].n.name).toBe("Person 1");
+    expect(results[1].n).toBeDefined();
+    expect(results[1].n.id).toBe(2);
+    expect(results[1].n.name).toBe("Person 2");
+});
+
+test("Test complex match operation", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1', age: 30},
+                {id: 2, name: 'Person 2', age: 25},
+                {id: 3, name: 'Person 3', age: 35}
+            ] as record
+            RETURN record.id as id, record.name as name, record.age as age
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        WHERE n.age > 29
+        RETURN n.name AS name, n.age AS age
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1", age: 30 });
+    expect(results[1]).toEqual({ name: "Person 3", age: 35 });
+});
+
+test("Test match", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN n.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1" });
+    expect(results[1]).toEqual({ name: "Person 2" });
+});
+
+test("Test match with nested join", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE a.id <> b.id
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 1" });
+});
+
+test("Test match with graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:User) AS {
+            UNWIND [
+                {id: 1, name: 'User 1', manager_id: null},
+                {id: 2, name: 'User 2', manager_id: 1},
+                {id: 3, name: 'User 3', manager_id: 1},
+                {id: 4, name: 'User 4', manager_id: 2}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.manager_id AS manager_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:MANAGED_BY]-(:User) AS {
+            UNWIND [
+                {id: 1, manager_id: null},
+                {id: 2, manager_id: 1},
+                {id: 3, manager_id: 1},
+                {id: 4, manager_id: 2}
+            ] AS record
+            RETURN record.id AS left_id, record.manager_id AS right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (user:User)-[r:MANAGED_BY]-(manager:User)
+        RETURN user.name AS user, manager.name AS manager
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ user: "User 2", manager: "User 1" });
+    expect(results[1]).toEqual({ user: "User 3", manager: "User 1" });
+    expect(results[2]).toEqual({ user: "User 4", manager: "User 2" });
+});
+
+test("Test match with multiple hop graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*]-(c:Person)
+        RETURN a.name AS name1, c.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 3" });
+});
+
+test("Test match with double graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS]-(b:Person)-[:KNOWS]-(c:Person)
+        RETURN a.name AS name1, b.name AS name2, c.name AS name3
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2", name3: "Person 3" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
+});
+
+test("Test match with referenced to previous variable", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS]-(b:Person)
+        MATCH (b)-[:KNOWS]-(c:Person)
+        RETURN a.name AS name1, b.name AS name2, c.name AS name3
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2", name3: "Person 3" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
+});
+
+test("Test match and return full node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN n
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0].n).toBeDefined();
+    expect(results[0].n.id).toBe(1);
+    expect(results[0].n.name).toBe("Person 1");
+    expect(results[1].n).toBeDefined();
+    expect(results[1].n.id).toBe(2);
+    expect(results[1].n.name).toBe("Person 2");
+});
+
+test("Test return graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, since: "2020-01-01", right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.since as since, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:Person)-[:KNOWS]-(:Person)
+        RETURN p AS pattern
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].pattern).toBeDefined();
+    expect(results[0].pattern.length).toBe(3);
+    expect(results[0].pattern[0].id).toBe(1);
+    expect(results[0].pattern[1].properties.since).toBe("2020-01-01");
+    expect(results[0].pattern[2].id).toBe(2);
+});
+
+test("Test circular graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:Person)-[:KNOWS]-(:Person)-[:KNOWS]-(:Person)
+        RETURN p AS pattern
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0].pattern).toBeDefined();
+    expect(results[0].pattern.length).toBe(5);
+    expect(results[0].pattern[0].id).toBe(1);
+    expect(results[0].pattern[1].id).toBeUndefined();
+    expect(results[0].pattern[2].id).toBe(2);
+    expect(results[0].pattern[3].id).toBeUndefined();
+    expect(results[0].pattern[4].id).toBe(1);
+});
+
+test("Test circular graph pattern with variable length should throw error", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:Person)-[:KNOWS*]-(:Person)
+        RETURN p AS pattern
+    `);
+    await expect(async () => {
+        await match.run();
+    }).rejects.toThrow("Circular relationship detected");
+});
+
+test("Test multi-hop match with variable length relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[r:KNOWS*0..3]->(b:Person)
+        RETURN a, r, b
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(6);
+
+    expect(results[0].a.id).toBe(1);
+    expect(results[0].b.id).toBe(2);
+    expect(results[0].r.length).toBe(undefined);
+    expect(results[0].r.startNode.id).toBe(1);
+    expect(results[0].r.endNode.id).toBe(2);
+
+    expect(results[1].a.id).toBe(1);
+    expect(results[1].b.id).toBe(3);
+    expect(results[1].r.length).toBe(2);
+    expect(results[1].r[0].startNode.id).toBe(1);
+    expect(results[1].r[0].endNode.id).toBe(2);
+    expect(results[1].r[1].startNode.id).toBe(2);
+    expect(results[1].r[1].endNode.id).toBe(3);
+
+    expect(results[2].a.id).toBe(1);
+    expect(results[2].b.id).toBe(4);
+    expect(results[2].r.length).toBe(3);
+    expect(results[2].r[0].startNode.id).toBe(1);
+    expect(results[2].r[0].endNode.id).toBe(2);
+    expect(results[2].r[1].startNode.id).toBe(2);
+    expect(results[2].r[1].endNode.id).toBe(3);
+    expect(results[2].r[2].startNode.id).toBe(3);
+    expect(results[2].r[2].endNode.id).toBe(4);
+
+    expect(results[3].a.id).toBe(2);
+    expect(results[3].b.id).toBe(3);
+    expect(results[3].r.length).toBe(undefined);
+    expect(results[3].r.startNode.id).toBe(2);
+    expect(results[3].r.endNode.id).toBe(3);
+
+    expect(results[4].a.id).toBe(2);
+    expect(results[4].b.id).toBe(4);
+    expect(results[4].r.length).toBe(2);
+    expect(results[4].r[0].startNode.id).toBe(2);
+    expect(results[4].r[0].endNode.id).toBe(3);
+    expect(results[4].r[1].startNode.id).toBe(3);
+    expect(results[4].r[1].endNode.id).toBe(4);
+
+    expect(results[5].a.id).toBe(3);
+    expect(results[5].b.id).toBe(4);
+    expect(results[5].r.length).toBe(undefined);
+    expect(results[5].r.startNode.id).toBe(3);
+    expect(results[5].r.endNode.id).toBe(4);
+});
+
+test("Test return match pattern with variable length relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(a:Person)-[:KNOWS*0..3]->(b:Person)
+        RETURN p AS pattern
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(6);
+
+    expect(results[0].pattern.length).toBe(3);
+    expect(results[0].pattern[0].id).toBe(1);
+    expect(results[0].pattern[1].startNode.id).toBe(1);
+    expect(results[0].pattern[1].endNode.id).toBe(2);
+    expect(results[0].pattern[2].id).toBe(2);
+
+    expect(results[1].pattern.length).toBe(5);
+    expect(results[1].pattern[0].id).toBe(1);
+    expect(results[1].pattern[1].startNode.id).toBe(1);
+    expect(results[1].pattern[1].endNode.id).toBe(2);
+    expect(results[1].pattern[2].id).toBe(2);
+    expect(results[1].pattern[3].startNode.id).toBe(2);
+    expect(results[1].pattern[3].endNode.id).toBe(3);
+    expect(results[1].pattern[4].id).toBe(3);
+
+    expect(results[2].pattern.length).toBe(7);
+    expect(results[2].pattern[0].id).toBe(1);
+    expect(results[2].pattern[1].startNode.id).toBe(1);
+    expect(results[2].pattern[1].endNode.id).toBe(2);
+    expect(results[2].pattern[2].id).toBe(2);
+    expect(results[2].pattern[3].startNode.id).toBe(2);
+    expect(results[2].pattern[3].endNode.id).toBe(3);
+    expect(results[2].pattern[4].id).toBe(3);
+    expect(results[2].pattern[5].startNode.id).toBe(3);
+    expect(results[2].pattern[5].endNode.id).toBe(4);
+    expect(results[2].pattern[6].id).toBe(4);
+
+    expect(results[3].pattern.length).toBe(3);
+    expect(results[3].pattern[0].id).toBe(2);
+    expect(results[3].pattern[1].startNode.id).toBe(2);
+    expect(results[3].pattern[1].endNode.id).toBe(3);
+    expect(results[3].pattern[2].id).toBe(3);
+
+    expect(results[4].pattern.length).toBe(5);
+    expect(results[4].pattern[0].id).toBe(2);
+    expect(results[4].pattern[1].startNode.id).toBe(2);
+    expect(results[4].pattern[1].endNode.id).toBe(3);
+    expect(results[4].pattern[2].id).toBe(3);
+    expect(results[4].pattern[3].startNode.id).toBe(3);
+    expect(results[4].pattern[3].endNode.id).toBe(4);
+    expect(results[4].pattern[4].id).toBe(4);
+
+    expect(results[5].pattern.length).toBe(3);
+    expect(results[5].pattern[0].id).toBe(3);
+    expect(results[5].pattern[1].startNode.id).toBe(3);
+    expect(results[5].pattern[1].endNode.id).toBe(4);
+    expect(results[5].pattern[2].id).toBe(4);
+});
+
+test("Test statement with graph pattern in where clause", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    // Test positive match
+    const match = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE (a)-[:KNOWS]->(b)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 3", name2: "Person 4" });
+
+    // Test negative match
+    const nomatch = new Runner(`
+        MATCH (a:Person), (b:Person)
+        WHERE (a)-[:KNOWS]->(b) <> true
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await nomatch.run();
+    const noresults = nomatch.results;
+    expect(noresults.length).toBe(13);
+    expect(noresults[0]).toEqual({ name1: "Person 1", name2: "Person 1" });
+    expect(noresults[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(noresults[2]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(noresults[3]).toEqual({ name1: "Person 2", name2: "Person 1" });
+    expect(noresults[4]).toEqual({ name1: "Person 2", name2: "Person 2" });
+    expect(noresults[5]).toEqual({ name1: "Person 2", name2: "Person 4" });
+    expect(noresults[6]).toEqual({ name1: "Person 3", name2: "Person 1" });
+    expect(noresults[7]).toEqual({ name1: "Person 3", name2: "Person 2" });
+    expect(noresults[8]).toEqual({ name1: "Person 3", name2: "Person 3" });
+    expect(noresults[9]).toEqual({ name1: "Person 4", name2: "Person 1" });
+    expect(noresults[10]).toEqual({ name1: "Person 4", name2: "Person 2" });
+    expect(noresults[11]).toEqual({ name1: "Person 4", name2: "Person 3" });
+    expect(noresults[12]).toEqual({ name1: "Person 4", name2: "Person 4" });
+});
+
+test("Test person who does not know anyone", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)
+        WHERE NOT (a)-[:KNOWS]->(:Person)
+        RETURN a.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Person 3" });
+});
+
+test("Test manager chain", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Employee) AS {
+            unwind [
+                {id: 1, name: 'Employee 1'},
+                {id: 2, name: 'Employee 2'},
+                {id: 3, name: 'Employee 3'},
+                {id: 4, name: 'Employee 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Employee)-[:MANAGED_BY]-(:Employee) AS {
+            unwind [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 2},
+                {left_id: 4, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH p=(e:Employee)-[:MANAGED_BY*]->(m:Employee)
+        WHERE NOT (m)-[:MANAGED_BY]->(:Employee)
+        RETURN p
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+});
+
+test("Test equality comparison", async () => {
+    const runner = new Runner(`
+        unwind range(1,10) as i
+        return i=5 as \`isEqual\`, i<>5 as \`isNotEqual\`
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(10);
+    for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        if (index + 1 === 5) {
+            expect(result).toEqual({ isEqual: 1, isNotEqual: 0 });
+        } else {
+            expect(result).toEqual({ isEqual: 0, isNotEqual: 1 });
+        }
+    }
 });

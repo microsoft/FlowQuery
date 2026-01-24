@@ -1,5 +1,11 @@
+import Node from "../../src/graph/node";
+import NodeReference from "../../src/graph/node_reference";
+import Relationship from "../../src/graph/relationship";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
+import CreateNode from "../../src/parsing/operations/create_node";
+import CreateRelationship from "../../src/parsing/operations/create_relationship";
+import Match from "../../src/parsing/operations/match";
 import Parser from "../../src/parsing/parser";
 
 // Test class for CALL operation parsing test - defined at module level for Prettier compatibility
@@ -424,7 +430,7 @@ test("Test non-well formed statements", () => {
         "Only one RETURN statement is allowed"
     );
     expect(() => new Parser().parse("return 1 with 1 as n")).toThrow(
-        "Last statement must be a RETURN, WHERE, or a CALL statement"
+        "Last statement must be a RETURN, WHERE, CALL, or CREATE statement"
     );
 });
 
@@ -465,7 +471,13 @@ test("Test limit", () => {
 test("Test return -2", () => {
     const parser = new Parser();
     const ast = parser.parse("return -2");
-    expect(ast.print()).toBe("ASTNode\n" + "- Return\n" + "-- Expression\n" + "--- Number (-2)");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Number (-2)"
+    );
 });
 
 test("Test call operation", () => {
@@ -480,4 +492,263 @@ test("Test call operation", () => {
             "-- Expression (result)\n" +
             "--- Reference (result)"
     );
+});
+
+test("Test f-string", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 1 as value RETURN f'Value is: {value}.'");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- With\n" +
+            "-- Expression (value)\n" +
+            "--- Number (1)\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- FString\n" +
+            "---- String (Value is: )\n" +
+            "---- Expression\n" +
+            "----- Reference (value)\n" +
+            "---- String (.)"
+    );
+});
+
+test("Test create node operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind range(1, 3) AS id
+            return id, f'Person {id}' AS name
+        }
+    `);
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- CreateNode"
+    );
+    const create: CreateNode = ast.firstChild() as CreateNode;
+    expect(create.node).not.toBeNull();
+    expect(create.node!.label).toBe("Person");
+    expect(create.statement!.print()).toBe(
+        "ASTNode\n" +
+            "- Unwind\n" +
+            "-- Expression (id)\n" +
+            "--- Function (range)\n" +
+            "---- Expression\n" +
+            "----- Number (1)\n" +
+            "---- Expression\n" +
+            "----- Number (3)\n" +
+            "- Return\n" +
+            "-- Expression (id)\n" +
+            "--- Reference (id)\n" +
+            "-- Expression (name)\n" +
+            "--- FString\n" +
+            "---- String (Person )\n" +
+            "---- Expression\n" +
+            "----- Reference (id)\n" +
+            "---- String ()"
+    );
+});
+
+test("Test match operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (n:Person) RETURN n");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Match\n" +
+        "- Return\n" +
+        "-- Expression (n)\n" +
+        "--- Reference (n)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].startNode).not.toBeNull();
+    expect(match.patterns[0].startNode!.label).toBe("Person");
+    expect(match.patterns[0].startNode!.identifier).toBe("n");
+});
+
+test("Test create relationship operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {from_id: 1, to_id: 2, since: '2020-01-01'},
+                {from_id: 2, to_id: 3, since: '2021-01-01'}
+            ] AS pair
+            return pair.from_id AS from, pair.to_id AS to, pair.since AS since
+        }
+    `);
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- CreateRelationship"
+    );
+    const create = ast.firstChild() as CreateRelationship;
+    expect(create.relationship).not.toBeNull();
+    expect(create.relationship!.type).toBe("KNOWS");
+    expect(create.statement!.print()).toBe(
+        "ASTNode\n" +
+            "- Unwind\n" +
+            "-- Expression (pair)\n" +
+            "--- JSONArray\n" +
+            "---- Expression\n" +
+            "----- AssociativeArray\n" +
+            "------ KeyValuePair\n" +
+            "------- String (from_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (1)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (to_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (2)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (since)\n" +
+            "------- Expression\n" +
+            "-------- String (2020-01-01)\n" +
+            "---- Expression\n" +
+            "----- AssociativeArray\n" +
+            "------ KeyValuePair\n" +
+            "------- String (from_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (2)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (to_id)\n" +
+            "------- Expression\n" +
+            "-------- Number (3)\n" +
+            "------ KeyValuePair\n" +
+            "------- String (since)\n" +
+            "------- Expression\n" +
+            "-------- String (2021-01-01)\n" +
+            "- Return\n" +
+            "-- Expression (from)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (from_id)\n" +
+            "---- Reference (pair)\n" +
+            "-- Expression (to)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (to_id)\n" +
+            "---- Reference (pair)\n" +
+            "-- Expression (since)\n" +
+            "--- Lookup\n" +
+            "---- Identifier (since)\n" +
+            "---- Reference (pair)"
+    );
+});
+
+test("Match with graph pattern including relationships", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[:KNOWS]-(b:Person) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].chain.length).toBe(3);
+    const source = match.patterns[0].chain[0] as Node;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    const target = match.patterns[0].chain[2] as Node;
+    expect(source.identifier).toBe("a");
+    expect(source.label).toBe("Person");
+    expect(relationship.type).toBe("KNOWS");
+    expect(target.identifier).toBe("b");
+    expect(target.label).toBe("Person");
+});
+
+test("Test not equal operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN 1 <> 2");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- NotEquals\n" +
+            "---- Number (1)\n" +
+            "---- Number (2)"
+    );
+});
+
+test("Test equal operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN 1 = 2");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- Equals\n" +
+            "---- Number (1)\n" +
+            "---- Number (2)"
+    );
+});
+
+test("Test not operator", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN NOT true");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Not\n" +
+        "---- Expression\n" +
+        "----- Boolean"
+    );
+});
+
+test("Parse relationship with hops", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Test)-[:KNOWS*1..3]->(b:Test) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].chain.length).toBe(3);
+    const source = match.patterns[0].chain[0] as Node;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    const target = match.patterns[0].chain[2] as Node;
+    expect(source.identifier).toBe("a");
+    expect(relationship.type).toBe("KNOWS");
+    expect(relationship.hops).not.toBeNull();
+    expect(relationship.hops!.min).toBe(1);
+    expect(relationship.hops!.max).toBe(3);
+    expect(target.identifier).toBe("b");
+});
+
+test("Parse statement with graph pattern in where clause", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person) WHERE (a)-[:KNOWS]->(:Person) RETURN a");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- Where\n" +
+            "-- Expression\n" +
+            "--- PatternExpression\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].startNode).not.toBeNull();
+    expect(match.patterns[0].startNode!.identifier).toBe("a");
+    const where = match.next as any;
+    const pattern = where.firstChild().firstChild() as any;
+    expect(pattern.chain.length).toBe(3);
+    const source = pattern.chain[0] as NodeReference;
+    const relationship = pattern.chain[1] as Relationship;
+    const target = pattern.chain[2] as Node;
+    expect(source.reference?.identifier).toBe("a");
+    expect(relationship.type).toBe("KNOWS");
+    expect(target.label).toBe("Person");
 });

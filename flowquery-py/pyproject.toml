@@ -1,0 +1,75 @@
+[project]
+name = "flowquery"
+version = "1.0.0"
+description = "A declarative query language for data processing pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "FlowQuery Contributors"}
+]
+keywords = ["query", "data-processing", "pipeline", "declarative"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "aiohttp>=3.8.0",
+]
+
+[project.scripts]
+flowquery = "flowquery.io.command_line:main"
+
+[project.urls]
+Homepage = "https://github.com/microsoft/FlowQuery/flowquery-py"
+Repository = "https://github.com/microsoft/FlowQuery/flowquery-py"
+Documentation = "https://github.com/microsoft/FlowQuery/flowquery-py#readme"
+Issues = "https://github.com/microsoft/FlowQuery/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"flowquery" = "src"
+"flowquery.compute" = "src/compute"
+"flowquery.graph" = "src/graph"
+"flowquery.io" = "src/io"
+"flowquery.parsing" = "src/parsing"
+"flowquery.parsing.components" = "src/parsing/components"
+"flowquery.parsing.data_structures" = "src/parsing/data_structures"
+"flowquery.parsing.expressions" = "src/parsing/expressions"
+"flowquery.parsing.functions" = "src/parsing/functions"
+"flowquery.parsing.logic" = "src/parsing/logic"
+"flowquery.parsing.operations" = "src/parsing/operations"
+"flowquery.tokenization" = "src/tokenization"
+"flowquery.utils" = "src/utils"
+
+[tool.setuptools]
+packages = ["flowquery", "flowquery.compute", "flowquery.graph", "flowquery.io", "flowquery.parsing", "flowquery.parsing.components", "flowquery.parsing.data_structures", "flowquery.parsing.expressions", "flowquery.parsing.functions", "flowquery.parsing.logic", "flowquery.parsing.operations", "flowquery.tokenization", "flowquery.utils"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.pytest-asyncio]
+mode = "auto"

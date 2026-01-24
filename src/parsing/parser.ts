@@ -1,3 +1,10 @@
+import Hops from "../graph/hops";
+import Node from "../graph/node";
+import NodeReference from "../graph/node_reference";
+import Pattern from "../graph/pattern";
+import PatternExpression from "../graph/pattern_expression";
+import Relationship from "../graph/relationship";
+import RelationshipReference from "../graph/relationship_reference";
 import Token from "../tokenization/token";
 import ObjectUtils from "../utils/object_utils";
 import Alias from "./alias";
@@ -32,8 +39,11 @@ import When from "./logic/when";
 import AggregatedReturn from "./operations/aggregated_return";
 import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
+import CreateNode from "./operations/create_node";
+import CreateRelationship from "./operations/create_relationship";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
+import Match from "./operations/match";
 import Operation from "./operations/operation";
 import Return from "./operations/return";
 import Unwind from "./operations/unwind";
@@ -72,6 +82,10 @@ class Parser extends BaseParser {
      */
     public parse(statement: string): ASTNode {
         this.tokenize(statement);
+        return this._parseTokenized();
+    }
+
+    private _parseTokenized(isSubQuery: boolean = false): ASTNode {
         const root: ASTNode = new ASTNode();
         let previous: Operation | null = null;
         let operation: Operation | null = null;
@@ -82,8 +96,10 @@ class Parser extends BaseParser {
                 this.skipWhitespaceAndComments();
             }
             operation = this.parseOperation();
-            if (operation === null) {
+            if (operation === null && !isSubQuery) {
                 throw new Error("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL");
+            } else if (operation === null && isSubQuery) {
+                return root;
             }
             if (this._returns > 1) {
                 throw new Error("Only one RETURN statement is allowed");
@@ -94,28 +110,33 @@ class Parser extends BaseParser {
                 );
             }
             if (previous !== null) {
-                previous.addSibling(operation);
+                previous.addSibling(operation!);
             } else {
-                root.addChild(operation);
+                root.addChild(operation!);
             }
             const where = this.parseWhere();
             if (where !== null) {
                 if (operation instanceof Return) {
                     (operation as Return).where = where;
                 } else {
-                    operation.addSibling(where);
+                    operation!.addSibling(where);
                     operation = where;
                 }
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                operation.addSibling(limit);
+                operation!.addSibling(limit);
                 operation = limit;
             }
             previous = operation;
         }
-        if (!(operation instanceof Return) && !(operation instanceof Call)) {
-            throw new Error("Last statement must be a RETURN, WHERE, or a CALL statement");
+        if (
+            !(operation instanceof Return) &&
+            !(operation instanceof Call) &&
+            !(operation instanceof CreateNode) &&
+            !(operation instanceof CreateRelationship)
+        ) {
+            throw new Error("Last statement must be a RETURN, WHERE, CALL, or CREATE statement");
         }
         return root;
     }
@@ -126,7 +147,9 @@ class Parser extends BaseParser {
             this.parseUnwind() ||
             this.parseReturn() ||
             this.parseLoad() ||
-            this.parseCall()
+            this.parseCall() ||
+            this.parseCreate() ||
+            this.parseMatch()
         );
     }
 
@@ -307,6 +330,315 @@ class Parser extends BaseParser {
         return call;
     }
 
+    private parseCreate(): CreateNode | CreateRelationship | null {
+        if (!this.token.isCreate()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: Node | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifier()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+        }
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isAs()) {
+            throw new Error("Expected AS");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const query: ASTNode | null = this.parseSubQuery();
+        if (query === null) {
+            throw new Error("Expected sub-query");
+        }
+        let create: CreateNode | CreateRelationship;
+        if (relationship !== null) {
+            create = new CreateRelationship(relationship, query);
+        } else {
+            create = new CreateNode(node, query);
+        }
+        return create;
+    }
+
+    private parseMatch(): Match | null {
+        if (!this.token.isMatch()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const patterns: Pattern[] = Array.from(this.parsePatterns());
+        if (patterns.length === 0) {
+            throw new Error("Expected graph pattern");
+        }
+        return new Match(patterns);
+    }
+
+    private parseNode(): Node | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        let identifier: string | null = null;
+        if (this.token.isIdentifier()) {
+            identifier = this.token.value || "";
+            this.setNextToken();
+        }
+        this.skipWhitespaceAndComments();
+        let label: string | null = null;
+        if (!this.token.isColon() && this.peek()?.isIdentifier()) {
+            throw new Error("Expected ':' for node label");
+        }
+        if (this.token.isColon() && !this.peek()?.isIdentifier()) {
+            throw new Error("Expected node label identifier");
+        }
+        if (this.token.isColon() && this.peek()?.isIdentifier()) {
+            this.setNextToken();
+            label = this.token.value || "";
+            this.setNextToken();
+        }
+        this.skipWhitespaceAndComments();
+        let node = new Node();
+        node.label = label!;
+        if (label !== null && identifier !== null) {
+            node.identifier = identifier;
+            this.variables.set(identifier, node);
+        } else if (identifier !== null) {
+            const reference = this.variables.get(identifier);
+            if (reference === undefined || reference.constructor !== Node) {
+                throw new Error(`Undefined node reference: ${identifier}`);
+            }
+            node = new NodeReference(node, reference);
+        }
+        if (!this.token.isRightParenthesis()) {
+            throw new Error("Expected closing parenthesis for node definition");
+        }
+        this.setNextToken();
+        return node;
+    }
+
+    private *parsePatterns(): IterableIterator<Pattern> {
+        while (true) {
+            let identifier: string | null = null;
+            if (this.token.isIdentifier()) {
+                identifier = this.token.value || "";
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+                if (!this.token.isEquals()) {
+                    throw new Error("Expected '=' for pattern assignment");
+                }
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            }
+            const pattern: Pattern | null = this.parsePattern();
+            if (pattern !== null) {
+                if (identifier !== null) {
+                    pattern.identifier = identifier;
+                    this.variables.set(identifier, pattern);
+                }
+                yield pattern;
+            } else {
+                break;
+            }
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+    }
+
+    private parsePattern(): Pattern | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        const pattern = new Pattern();
+        let node = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        pattern.addElement(node);
+        let relationship: Relationship | null = null;
+        while (true) {
+            relationship = this.parseRelationship();
+            if (relationship === null) {
+                break;
+            }
+            pattern.addElement(relationship);
+            node = this.parseNode();
+            if (node === null) {
+                throw new Error("Expected target node definition");
+            }
+            pattern.addElement(node);
+        }
+        return pattern;
+    }
+
+    private parsePatternExpression(): PatternExpression | null {
+        if (!this.token.isLeftParenthesis()) {
+            return null;
+        }
+        const pattern = new PatternExpression();
+        let node = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        if (!(node instanceof NodeReference)) {
+            throw new Error("PatternExpression must start with a NodeReference");
+        }
+        pattern.addElement(node);
+        let relationship: Relationship | null = null;
+        while (true) {
+            relationship = this.parseRelationship();
+            if (relationship === null) {
+                break;
+            }
+            if (relationship.hops?.multi()) {
+                throw new Error("PatternExpression does not support variable-length relationships");
+            }
+            pattern.addElement(relationship);
+            node = this.parseNode();
+            if (node === null) {
+                throw new Error("Expected target node definition");
+            }
+            pattern.addElement(node);
+        }
+        return pattern;
+    }
+
+    private parseRelationship(): Relationship | null {
+        if (this.token.isLessThan() && this.peek()?.isSubtract()) {
+            this.setNextToken();
+            this.setNextToken();
+        } else if (this.token.isSubtract()) {
+            this.setNextToken();
+        } else {
+            return null;
+        }
+        if (!this.token.isOpeningBracket()) {
+            return null;
+        }
+        this.setNextToken();
+        let variable: string | null = null;
+        if (this.token.isIdentifier()) {
+            variable = this.token.value || "";
+            this.setNextToken();
+        }
+        if (!this.token.isColon()) {
+            throw new Error("Expected ':' for relationship type");
+        }
+        this.setNextToken();
+        if (!this.token.isIdentifier()) {
+            throw new Error("Expected relationship type identifier");
+        }
+        const type: string = this.token.value || "";
+        this.setNextToken();
+        const hops: Hops | null = this.parseRelationshipHops();
+        if (!this.token.isClosingBracket()) {
+            throw new Error("Expected closing bracket for relationship definition");
+        }
+        this.setNextToken();
+        if (!this.token.isSubtract()) {
+            throw new Error("Expected '-' for relationship definition");
+        }
+        this.setNextToken();
+        if (this.token.isGreaterThan()) {
+            this.setNextToken();
+        }
+        let relationship = new Relationship();
+        if (type !== null && variable !== null) {
+            relationship.identifier = variable;
+            this.variables.set(variable, relationship);
+        } else if (variable !== null) {
+            const reference = this.variables.get(variable);
+            if (reference === undefined || reference.constructor !== Relationship) {
+                throw new Error(`Undefined relationship reference: ${variable}`);
+            }
+            relationship = new RelationshipReference(relationship, reference);
+        }
+        if (hops !== null) {
+            relationship.hops = hops;
+        }
+        relationship.type = type;
+        return relationship;
+    }
+
+    private parseRelationshipHops(): Hops | null {
+        if (!this.token.isMultiply()) {
+            return null;
+        }
+        const hops = new Hops();
+        this.setNextToken();
+        if (this.token.isNumber()) {
+            hops.min = parseInt(this.token.value || "0");
+            this.setNextToken();
+            if (this.token.isDot()) {
+                this.setNextToken();
+                if (!this.token.isDot()) {
+                    throw new Error("Expected '..' for relationship hops");
+                }
+                this.setNextToken();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number for relationship hops");
+                }
+                hops.max = parseInt(this.token.value || "0");
+                this.setNextToken();
+            }
+        } else {
+            hops.min = 0;
+            hops.max = Number.MAX_SAFE_INTEGER;
+        }
+        return hops;
+    }
+
+    private parseSubQuery(): ASTNode | null {
+        if (!this.token.isOpeningBrace()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const query: ASTNode = this._parseTokenized(true);
+        this.skipWhitespaceAndComments();
+        if (!this.token.isClosingBrace()) {
+            throw new Error("Expected closing brace for sub-query");
+        }
+        this.setNextToken();
+        return query;
+    }
+
     private parseLimit(): Limit | null {
         this.skipWhitespaceAndComments();
         if (!this.token.isLimit()) {
@@ -376,6 +708,12 @@ class Parser extends BaseParser {
                 if (func !== null) {
                     const lookup = this.parseLookup(func);
                     expression.addNode(lookup);
+                }
+            } else if (this.token.isLeftParenthesis() && this.peek()?.isIdentifier()) {
+                // Possible graph pattern expression
+                const pattern = this.parsePatternExpression();
+                if (pattern !== null) {
+                    expression.addNode(pattern);
                 }
             } else if (this.token.isOperand()) {
                 expression.addNode(this.token.node);

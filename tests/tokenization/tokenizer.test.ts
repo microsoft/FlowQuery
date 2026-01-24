@@ -28,6 +28,13 @@ test("Test f-string", () => {
     expect(tokens.length).toBeGreaterThan(0);
 });
 
+test("Test another f-string", () => {
+    const tokenizer = new Tokenizer("RETURN f`Value is: {value}`");
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
 test("Test", () => {
     const tokenizer = new Tokenizer("WITH 1 AS n RETURN n");
     const tokens = tokenizer.tokenize();
@@ -60,6 +67,89 @@ test("Test range with function", () => {
     const tokenizer = new Tokenizer(`
         with range(1,10) as data
         return range(0, size(data)-1) as indices
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test create virtual node", () => {
+    const tokenizer = new Tokenizer(`
+        CREATE VIRTUAL (:Person) AS {
+            call users() YIELD id, name
+        }
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test create virtual relationship", () => {
+    const tokenizer = new Tokenizer(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]->(:Person) AS {
+            call friendships() YIELD user1_id, user2_id
+        }
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Match based on virtual node", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)
+        RETURN a.name
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Match based on virtual nodes and relationships", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)-[r:KNOWS]->(b:Person)
+        RETURN a.name, b.name
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test not equal operator", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (n:Person)
+        WHERE n.age <> 30
+        RETURN n.name AS name, n.age AS age
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test equal operator", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (n:Person)
+        WHERE n.age = 30
+        RETURN n.name AS name, n.age AS age
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test boolean operators", () => {
+    const tokenizer = new Tokenizer(`
+        return true AND false OR true NOT false
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test relationship with hops", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:Person)-[r:KNOWS*1..3]->(b:Person)
+        RETURN a.name, b.name
     `);
     const tokens = tokenizer.tokenize();
     expect(tokens).toBeDefined();

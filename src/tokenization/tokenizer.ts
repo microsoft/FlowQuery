@@ -1,18 +1,18 @@
-import Keyword from './keyword';
-import Token from './token';
-import StringWalker from './string_walker';
-import StringUtils from '../utils/string_utils';
-import Symbol from './symbol';
-import Operator from './operator';
-import TokenMapper from './token_mapper';
+import StringUtils from "../utils/string_utils";
+import Keyword from "./keyword";
+import Operator from "./operator";
+import StringWalker from "./string_walker";
+import Symbol from "./symbol";
+import Token from "./token";
+import TokenMapper from "./token_mapper";
 
 /**
  * Tokenizes FlowQuery input strings into a sequence of tokens.
- * 
+ *
  * The tokenizer performs lexical analysis, breaking down the input text into
  * meaningful tokens such as keywords, identifiers, operators, strings, numbers,
  * and symbols. It handles comments, whitespace, and f-strings.
- * 
+ *
  * @example
  * ```typescript
  * const tokenizer = new Tokenizer("WITH x = 1 RETURN x");
@@ -27,7 +27,7 @@ class Tokenizer {
 
     /**
      * Creates a new Tokenizer instance for the given input.
-     * 
+     *
      * @param input - The FlowQuery input string to tokenize
      */
     constructor(input: string) {
@@ -36,7 +36,7 @@ class Tokenizer {
 
     /**
      * Tokenizes the input string into an array of tokens.
-     * 
+     *
      * @returns An array of Token objects representing the tokenized input
      * @throws {Error} If an unrecognized token is encountered
      */
@@ -60,7 +60,7 @@ class Tokenizer {
         if (tokens.length === 0) {
             return null;
         }
-        if(!tokens[tokens.length - 1].isWhitespaceOrComment()) {
+        if (!tokens[tokens.length - 1].isWhitespaceOrComment()) {
             return tokens[tokens.length - 1];
         }
         return null;
@@ -75,6 +75,7 @@ class Tokenizer {
             this.whitespace() ||
             this.lookup(this.keywords) ||
             this.lookup(this.operators, last, this.skipMinus) ||
+            this.boolean() ||
             this.identifier() ||
             this.string() ||
             this.number() ||
@@ -91,12 +92,26 @@ class Tokenizer {
         return null;
     }
 
+    private boolean(): Token | null {
+        const startPosition = this.walker.position;
+        if (this.walker.checkForString("TRUE")) {
+            return Token.BOOLEAN(this.walker.getString(startPosition).toUpperCase());
+        }
+        if (this.walker.checkForString("FALSE")) {
+            return Token.BOOLEAN(this.walker.getString(startPosition).toUpperCase());
+        }
+        return null;
+    }
+
     private identifier(): Token | null {
         const startPosition = this.walker.position;
         if (this.walker.checkForUnderScore() || this.walker.checkForLetter()) {
-            while (!this.walker.isAtEnd && (this.walker.checkForLetter() || this.walker.checkForDigit() || this.walker.checkForUnderScore())) {
-                ;
-            }
+            while (
+                !this.walker.isAtEnd &&
+                (this.walker.checkForLetter() ||
+                    this.walker.checkForDigit() ||
+                    this.walker.checkForUnderScore())
+            ) {}
             return Token.IDENTIFIER(this.walker.getString(startPosition));
         }
         return null;
@@ -127,7 +142,7 @@ class Tokenizer {
     }
 
     private *f_string(): Iterable<Token> {
-        if(!this.walker.checkForFStringStart()) {
+        if (!this.walker.checkForFStringStart()) {
             return;
         }
         this.walker.moveNext(); // skip the f
@@ -142,20 +157,20 @@ class Tokenizer {
                 this.walker.moveNext();
                 continue;
             }
-            if(this.walker.openingBrace()) {
+            if (this.walker.openingBrace()) {
                 yield Token.F_STRING(this.walker.getString(position), quoteChar);
                 position = this.walker.position;
                 yield Token.OPENING_BRACE;
                 this.walker.moveNext(); // skip the opening brace
                 position = this.walker.position;
-                while(!this.walker.isAtEnd && !this.walker.closingBrace()) {
+                while (!this.walker.isAtEnd && !this.walker.closingBrace()) {
                     const token = this.getNextToken();
-                    if(token !== null) {
+                    if (token !== null) {
                         yield token;
                     } else {
                         break;
                     }
-                    if(this.walker.closingBrace()) {
+                    if (this.walker.closingBrace()) {
                         yield Token.CLOSING_BRACE;
                         this.walker.moveNext(); // skip the closing brace
                         position = this.walker.position;
@@ -166,7 +181,7 @@ class Tokenizer {
             if (this.walker.checkForString(quoteChar)) {
                 yield Token.F_STRING(this.walker.getString(position), quoteChar);
                 return;
-            };
+            }
             this.walker.moveNext();
         }
     }
@@ -182,13 +197,15 @@ class Tokenizer {
 
     private number(): Token | null {
         const startPosition = this.walker.position;
-        if (this.walker.checkForString('-') || this.walker.checkForDigit()) {
-            while (!this.walker.isAtEnd && this.walker.checkForDigit()) {
-                ;
-            }
+        if (this.walker.checkForString("-") || this.walker.checkForDigit()) {
+            while (!this.walker.isAtEnd && this.walker.checkForDigit()) {}
             if (this.walker.checkForString(Symbol.DOT)) {
+                let decimalDigits: number = 0;
                 while (!this.walker.isAtEnd && this.walker.checkForDigit()) {
-                    ;
+                    decimalDigits++;
+                }
+                if (decimalDigits === 0) {
+                    this.walker.movePrevious();
                 }
             }
             const _number = this.walker.getString(startPosition);
@@ -197,17 +214,21 @@ class Tokenizer {
         return null;
     }
 
-    private lookup(mapper: TokenMapper, last: Token | null = null, skip?: (last: Token | null, current: Token) => boolean): Token | null {
+    private lookup(
+        mapper: TokenMapper,
+        last: Token | null = null,
+        skip?: (last: Token | null, current: Token) => boolean
+    ): Token | null {
         const token = mapper.map(this.walker.getRemainingString());
         if (token !== undefined && token.value !== null) {
-            if(token.can_be_identifier && this.walker.word_continuation(token.value)) {
+            if (token.can_be_identifier && this.walker.word_continuation(token.value)) {
                 return null;
             }
             if (skip && last && skip(last, token)) {
                 return null;
             }
             this.walker.moveBy(token.value.length);
-            if(mapper.last_found !== null) {
+            if (mapper.last_found !== null) {
                 token.case_sensitive_value = mapper.last_found;
             }
             return token;
@@ -219,7 +240,7 @@ class Tokenizer {
         if (last === null) {
             return false;
         }
-        if((last.isKeyword() || last.isComma() || last.isColon()) && current.isNegation()) {
+        if ((last.isKeyword() || last.isComma() || last.isColon()) && current.isNegation()) {
             return true;
         }
         return false;

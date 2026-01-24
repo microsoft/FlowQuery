@@ -176,4 +176,22 @@ class Is extends Operator {
     }
 }
 
-export { Operator, Add, Subtract, Multiply, Divide, Modulo, Power, Equals, NotEquals, GreaterThan, LessThan, GreaterThanOrEqual, LessThanOrEqual, And, Or, Not, Is };
+export {
+    Operator,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Power,
+    Equals,
+    NotEquals,
+    GreaterThan,
+    LessThan,
+    GreaterThanOrEqual,
+    LessThanOrEqual,
+    And,
+    Or,
+    Not,
+    Is,
+};

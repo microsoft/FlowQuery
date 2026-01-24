@@ -57,6 +57,9 @@ abstract class Operation extends ASTNode {
     public async finish(): Promise<void> {
         await this.next?.finish();
     }
+    public async initialize(): Promise<void> {
+        await this.next?.initialize();
+    }
     public reset(): void {}
     public get results(): Record<string, any>[] {
         throw new Error("Not implemented");

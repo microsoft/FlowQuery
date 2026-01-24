@@ -143,6 +143,18 @@ class Token {
         return this._type === TokenType.NUMBER;
     }
 
+    // Boolean token
+
+    public static BOOLEAN(value: string): Token {
+        return new Token(TokenType.BOOLEAN, value);
+    }
+
+    public isBoolean(): boolean {
+        return (
+            this._type === TokenType.BOOLEAN && (this._value === "TRUE" || this._value === "FALSE")
+        );
+    }
+
     // Symbol tokens
 
     public static get LEFT_PARENTHESIS(): Token {
@@ -511,6 +523,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.CREATE;
     }
 
+    public static get VIRTUAL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.VIRTUAL);
+    }
+
+    public isVirtual(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.VIRTUAL;
+    }
+
     public static get DELETE(): Token {
         return new Token(TokenType.KEYWORD, Keyword.DELETE);
     }
@@ -628,7 +648,7 @@ class Token {
     // Other utility methods
 
     public isOperand(): boolean {
-        return this.isNumber() || this.isString() || this.isNull();
+        return this.isNumber() || this.isBoolean() || this.isString() || this.isNull();
     }
 
     public isWhitespaceOrComment(): boolean {

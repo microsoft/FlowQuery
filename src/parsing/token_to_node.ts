@@ -4,6 +4,7 @@ import CSV from "./components/csv";
 import JSON from "./components/json";
 import Null from "./components/null";
 import Text from "./components/text";
+import Boolean from "./expressions/boolean";
 import Identifier from "./expressions/identifier";
 import Number from "./expressions/number";
 import {
@@ -19,6 +20,7 @@ import {
     Modulo,
     Multiply,
     Not,
+    NotEquals,
     Or,
     Power,
     Subtract,
@@ -61,6 +63,8 @@ class TokenToNode {
                 return new Power();
             } else if (token.isEquals()) {
                 return new Equals();
+            } else if (token.isNotEquals()) {
+                return new NotEquals();
             } else if (token.isLessThan()) {
                 return new LessThan();
             } else if (token.isGreaterThan()) {
@@ -98,6 +102,8 @@ class TokenToNode {
             } else if (token.isNull()) {
                 return new Null();
             }
+        } else if (token.isBoolean()) {
+            return new Boolean(token.value!);
         } else {
             throw new Error("Unknown token");
         }

@@ -21,21 +21,33 @@ class CommandLine:
         """Starts the interactive command loop.
         
         Prompts the user for FlowQuery statements, executes them, and displays results.
-        Type "exit" to quit the loop.
+        Type "exit" to quit the loop. End multi-line queries with ";".
         """
         print('Welcome to FlowQuery! Type "exit" to quit.')
+        print('End queries with ";" to execute. Multi-line input supported.')
         
         while True:
             try:
-                user_input = input("> ")
+                lines = []
+                prompt = "> "
+                while True:
+                    line = input(prompt)
+                    if line.strip() == "exit":
+                        print("Exiting FlowQuery.")
+                        return
+                    lines.append(line)
+                    user_input = "\n".join(lines)
+                    if user_input.strip().endswith(";"):
+                        break
+                    prompt = "... "
             except EOFError:
-                break
-            
-            if user_input == "exit":
                 break
             
             if user_input.strip() == "":
                 continue
+            
+            # Remove the termination semicolon before sending to the engine
+            user_input = user_input.strip().rstrip(";")
             
             try:
                 runner = Runner(user_input)

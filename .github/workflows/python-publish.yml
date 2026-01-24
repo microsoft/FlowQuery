@@ -1,6 +1,16 @@
-name: Publish to PyPI
+name: Publish Python Package to PyPI
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "flowquery-py/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "flowquery-py/**"
   release:
     types: [published]
   workflow_dispatch:

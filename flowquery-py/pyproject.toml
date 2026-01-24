@@ -1,6 +1,6 @@
 [project]
 name = "flowquery"
-dynamic = ["version"]
+version = "1.0.3"
 description = "A declarative query language for data processing pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,14 +41,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools_scm]
-root = ".."
-version_file = "src/_version.py"
-tag_regex = "^py-v(?P<version>.*)$"
-local_scheme = "no-local-version"
 
 [tool.setuptools.package-dir]
 "flowquery" = "src"

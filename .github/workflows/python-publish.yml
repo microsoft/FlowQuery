@@ -3,7 +3,7 @@ name: Publish Python Package to PyPI
 on:
   push:
     tags:
-      - "py-v*" # Trigger on tags like py-v1.0.1
+      - "py-v*" # Trigger on tags like py-v1.0.1, py-v2.3.4, etc.
   pull_request:
     branches:
       - main

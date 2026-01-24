@@ -66,7 +66,7 @@ class Tokenizer:
 
     def _get_next_token(self, last: Optional[Token] = None) -> Optional[Token]:
         if self._walker.is_at_end:
-            return Token.EOF
+            return Token.EOF()
         return (
             self._comment() or
             self._whitespace() or
@@ -144,7 +144,7 @@ class Tokenizer:
             if self._walker.opening_brace():
                 yield Token.F_STRING(self._walker.get_string(position), quote_char)
                 position = self._walker.position
-                yield Token.OPENING_BRACE
+                yield Token.OPENING_BRACE()
                 self._walker.move_next()  # skip the opening brace
                 position = self._walker.position
                 
@@ -155,7 +155,7 @@ class Tokenizer:
                     else:
                         break
                     if self._walker.closing_brace():
-                        yield Token.CLOSING_BRACE
+                        yield Token.CLOSING_BRACE()
                         self._walker.move_next()  # skip the closing brace
                         position = self._walker.position
                         break
@@ -171,7 +171,7 @@ class Tokenizer:
         while not self._walker.is_at_end and self._walker.check_for_whitespace():
             self._walker.move_next()
             found_whitespace = True
-        return Token.WHITESPACE if found_whitespace else None
+        return Token.WHITESPACE() if found_whitespace else None
 
     def _number(self) -> Optional[Token]:
         start_position = self._walker.position

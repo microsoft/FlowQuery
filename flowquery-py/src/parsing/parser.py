@@ -795,9 +795,9 @@ class Parser(BaseParser):
         # Lookahead: identifier ( identifier in
         if not self.ahead([
             Token.IDENTIFIER(""),
-            Token.LEFT_PARENTHESIS,
+            Token.LEFT_PARENTHESIS(),
             Token.IDENTIFIER(""),
-            Token.IN,
+            Token.IN(),
         ]):
             return None
         if self.token.value is None:

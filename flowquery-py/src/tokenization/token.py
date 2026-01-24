@@ -21,7 +21,7 @@ class Token:
     and an optional value.
     
     Example:
-        with_token = Token.WITH
+        with_token = Token.WITH()
         ident_token = Token.IDENTIFIER("myVar")
         num_token = Token.NUMBER("42")
     """
@@ -153,73 +153,64 @@ class Token:
 
     # Symbol tokens
 
-    @classmethod
-    @property
-    def LEFT_PARENTHESIS(cls) -> Token:
+    @staticmethod
+    def LEFT_PARENTHESIS() -> Token:
         return Token(TokenType.SYMBOL, Symbol.LEFT_PARENTHESIS.value)
 
     def is_left_parenthesis(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.LEFT_PARENTHESIS.value
 
-    @classmethod
-    @property
-    def RIGHT_PARENTHESIS(cls) -> Token:
+    @staticmethod
+    def RIGHT_PARENTHESIS() -> Token:
         return Token(TokenType.SYMBOL, Symbol.RIGHT_PARENTHESIS.value)
 
     def is_right_parenthesis(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.RIGHT_PARENTHESIS.value
 
-    @classmethod
-    @property
-    def COMMA(cls) -> Token:
+    @staticmethod
+    def COMMA() -> Token:
         return Token(TokenType.SYMBOL, Symbol.COMMA.value)
 
     def is_comma(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.COMMA.value
 
-    @classmethod
-    @property
-    def DOT(cls) -> Token:
+    @staticmethod
+    def DOT() -> Token:
         return Token(TokenType.SYMBOL, Symbol.DOT.value)
 
     def is_dot(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.DOT.value
 
-    @classmethod
-    @property
-    def COLON(cls) -> Token:
+    @staticmethod
+    def COLON() -> Token:
         return Token(TokenType.SYMBOL, Symbol.COLON.value)
 
     def is_colon(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.COLON.value
 
-    @classmethod
-    @property
-    def OPENING_BRACE(cls) -> Token:
+    @staticmethod
+    def OPENING_BRACE() -> Token:
         return Token(TokenType.SYMBOL, Symbol.OPENING_BRACE.value)
 
     def is_opening_brace(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.OPENING_BRACE.value
 
-    @classmethod
-    @property
-    def CLOSING_BRACE(cls) -> Token:
+    @staticmethod
+    def CLOSING_BRACE() -> Token:
         return Token(TokenType.SYMBOL, Symbol.CLOSING_BRACE.value)
 
     def is_closing_brace(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.CLOSING_BRACE.value
 
-    @classmethod
-    @property
-    def OPENING_BRACKET(cls) -> Token:
+    @staticmethod
+    def OPENING_BRACKET() -> Token:
         return Token(TokenType.SYMBOL, Symbol.OPENING_BRACKET.value)
 
     def is_opening_bracket(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.OPENING_BRACKET.value
 
-    @classmethod
-    @property
-    def CLOSING_BRACKET(cls) -> Token:
+    @staticmethod
+    def CLOSING_BRACKET() -> Token:
         return Token(TokenType.SYMBOL, Symbol.CLOSING_BRACKET.value)
 
     def is_closing_bracket(self) -> bool:
@@ -227,9 +218,8 @@ class Token:
 
     # Whitespace token
 
-    @classmethod
-    @property
-    def WHITESPACE(cls) -> Token:
+    @staticmethod
+    def WHITESPACE() -> Token:
         return Token(TokenType.WHITESPACE)
 
     def is_whitespace(self) -> bool:
@@ -243,17 +233,15 @@ class Token:
     def is_unary_operator(self) -> bool:
         return self._type == TokenType.UNARY_OPERATOR
 
-    @classmethod
-    @property
-    def ADD(cls) -> Token:
+    @staticmethod
+    def ADD() -> Token:
         return Token(TokenType.OPERATOR, Operator.ADD.value)
 
     def is_add(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.ADD.value
 
-    @classmethod
-    @property
-    def SUBTRACT(cls) -> Token:
+    @staticmethod
+    def SUBTRACT() -> Token:
         return Token(TokenType.OPERATOR, Operator.SUBTRACT.value)
 
     def is_subtract(self) -> bool:
@@ -262,113 +250,99 @@ class Token:
     def is_negation(self) -> bool:
         return self.is_subtract()
 
-    @classmethod
-    @property
-    def MULTIPLY(cls) -> Token:
+    @staticmethod
+    def MULTIPLY() -> Token:
         return Token(TokenType.OPERATOR, Operator.MULTIPLY.value)
 
     def is_multiply(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.MULTIPLY.value
 
-    @classmethod
-    @property
-    def DIVIDE(cls) -> Token:
+    @staticmethod
+    def DIVIDE() -> Token:
         return Token(TokenType.OPERATOR, Operator.DIVIDE.value)
 
     def is_divide(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.DIVIDE.value
 
-    @classmethod
-    @property
-    def EXPONENT(cls) -> Token:
+    @staticmethod
+    def EXPONENT() -> Token:
         return Token(TokenType.OPERATOR, Operator.EXPONENT.value)
 
     def is_exponent(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.EXPONENT.value
 
-    @classmethod
-    @property
-    def MODULO(cls) -> Token:
+    @staticmethod
+    def MODULO() -> Token:
         return Token(TokenType.OPERATOR, Operator.MODULO.value)
 
     def is_modulo(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.MODULO.value
 
-    @classmethod
-    @property
-    def EQUALS(cls) -> Token:
+    @staticmethod
+    def EQUALS() -> Token:
         return Token(TokenType.OPERATOR, Operator.EQUALS.value)
 
     def is_equals(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.EQUALS.value
 
-    @classmethod
-    @property
-    def NOT_EQUALS(cls) -> Token:
+    @staticmethod
+    def NOT_EQUALS() -> Token:
         return Token(TokenType.OPERATOR, Operator.NOT_EQUALS.value)
 
     def is_not_equals(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.NOT_EQUALS.value
 
-    @classmethod
-    @property
-    def LESS_THAN(cls) -> Token:
+    @staticmethod
+    def LESS_THAN() -> Token:
         return Token(TokenType.OPERATOR, Operator.LESS_THAN.value)
 
     def is_less_than(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.LESS_THAN.value
 
-    @classmethod
-    @property
-    def LESS_THAN_OR_EQUAL(cls) -> Token:
+    @staticmethod
+    def LESS_THAN_OR_EQUAL() -> Token:
         return Token(TokenType.OPERATOR, Operator.LESS_THAN_OR_EQUAL.value)
 
     def is_less_than_or_equal(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.LESS_THAN_OR_EQUAL.value
 
-    @classmethod
-    @property
-    def GREATER_THAN(cls) -> Token:
+    @staticmethod
+    def GREATER_THAN() -> Token:
         return Token(TokenType.OPERATOR, Operator.GREATER_THAN.value)
 
     def is_greater_than(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.GREATER_THAN.value
 
-    @classmethod
-    @property
-    def GREATER_THAN_OR_EQUAL(cls) -> Token:
+    @staticmethod
+    def GREATER_THAN_OR_EQUAL() -> Token:
         return Token(TokenType.OPERATOR, Operator.GREATER_THAN_OR_EQUAL.value)
 
     def is_greater_than_or_equal(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.GREATER_THAN_OR_EQUAL.value
 
-    @classmethod
-    @property
-    def AND(cls) -> Token:
+    @staticmethod
+    def AND() -> Token:
         return Token(TokenType.OPERATOR, Operator.AND.value)
 
     def is_and(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.AND.value
 
-    @classmethod
-    @property
-    def OR(cls) -> Token:
+    @staticmethod
+    def OR() -> Token:
         return Token(TokenType.OPERATOR, Operator.OR.value)
 
     def is_or(self) -> bool:
         return self._type == TokenType.OPERATOR and self._value == Operator.OR.value
 
-    @classmethod
-    @property
-    def NOT(cls) -> Token:
+    @staticmethod
+    def NOT() -> Token:
         return Token(TokenType.UNARY_OPERATOR, Operator.NOT.value)
 
     def is_not(self) -> bool:
         return self._type == TokenType.UNARY_OPERATOR and self._value == Operator.NOT.value
 
-    @classmethod
-    @property
-    def IS(cls) -> Token:
+    @staticmethod
+    def IS() -> Token:
         return Token(TokenType.OPERATOR, Operator.IS.value)
 
     def is_is(self) -> bool:
@@ -379,249 +353,218 @@ class Token:
     def is_keyword(self) -> bool:
         return self._type == TokenType.KEYWORD
 
-    @classmethod
-    @property
-    def WITH(cls) -> Token:
+    @staticmethod
+    def WITH() -> Token:
         return Token(TokenType.KEYWORD, Keyword.WITH.value)
 
     def is_with(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.WITH.value
 
-    @classmethod
-    @property
-    def RETURN(cls) -> Token:
+    @staticmethod
+    def RETURN() -> Token:
         return Token(TokenType.KEYWORD, Keyword.RETURN.value)
 
     def is_return(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.RETURN.value
 
-    @classmethod
-    @property
-    def LOAD(cls) -> Token:
+    @staticmethod
+    def LOAD() -> Token:
         return Token(TokenType.KEYWORD, Keyword.LOAD.value)
 
     def is_load(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.LOAD.value
 
-    @classmethod
-    @property
-    def CALL(cls) -> Token:
+    @staticmethod
+    def CALL() -> Token:
         return Token(TokenType.KEYWORD, Keyword.CALL.value)
 
     def is_call(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.CALL.value
 
-    @classmethod
-    @property
-    def YIELD(cls) -> Token:
+    @staticmethod
+    def YIELD() -> Token:
         return Token(TokenType.KEYWORD, Keyword.YIELD.value)
 
     def is_yield(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.YIELD.value
 
-    @classmethod
-    @property
-    def JSON(cls) -> Token:
+    @staticmethod
+    def JSON() -> Token:
         return Token(TokenType.KEYWORD, Keyword.JSON.value)
 
     def is_json(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.JSON.value
 
-    @classmethod
-    @property
-    def CSV(cls) -> Token:
+    @staticmethod
+    def CSV() -> Token:
         return Token(TokenType.KEYWORD, Keyword.CSV.value)
 
     def is_csv(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.CSV.value
 
-    @classmethod
-    @property
-    def TEXT(cls) -> Token:
+    @staticmethod
+    def TEXT() -> Token:
         return Token(TokenType.KEYWORD, Keyword.TEXT.value)
 
     def is_text(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.TEXT.value
 
-    @classmethod
-    @property
-    def FROM(cls) -> Token:
+    @staticmethod
+    def FROM() -> Token:
         return Token(TokenType.KEYWORD, Keyword.FROM.value)
 
     def is_from(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.FROM.value
 
-    @classmethod
-    @property
-    def HEADERS(cls) -> Token:
+    @staticmethod
+    def HEADERS() -> Token:
         return Token(TokenType.KEYWORD, Keyword.HEADERS.value)
 
     def is_headers(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.HEADERS.value
 
-    @classmethod
-    @property
-    def POST(cls) -> Token:
+    @staticmethod
+    def POST() -> Token:
         return Token(TokenType.KEYWORD, Keyword.POST.value)
 
     def is_post(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.POST.value
 
-    @classmethod
-    @property
-    def UNWIND(cls) -> Token:
+    @staticmethod
+    def UNWIND() -> Token:
         return Token(TokenType.KEYWORD, Keyword.UNWIND.value)
 
     def is_unwind(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.UNWIND.value
 
-    @classmethod
-    @property
-    def MATCH(cls) -> Token:
+    @staticmethod
+    def MATCH() -> Token:
         return Token(TokenType.KEYWORD, Keyword.MATCH.value)
 
     def is_match(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.MATCH.value
 
-    @classmethod
-    @property
-    def AS(cls) -> Token:
+    @staticmethod
+    def AS() -> Token:
         return Token(TokenType.KEYWORD, Keyword.AS.value)
 
     def is_as(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.AS.value
 
-    @classmethod
-    @property
-    def WHERE(cls) -> Token:
+    @staticmethod
+    def WHERE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.WHERE.value)
 
     def is_where(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.WHERE.value
 
-    @classmethod
-    @property
-    def MERGE(cls) -> Token:
+    @staticmethod
+    def MERGE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.MERGE.value)
 
     def is_merge(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.MERGE.value
 
-    @classmethod
-    @property
-    def CREATE(cls) -> Token:
+    @staticmethod
+    def CREATE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.CREATE.value)
 
     def is_create(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.CREATE.value
 
-    @classmethod
-    @property
-    def VIRTUAL(cls) -> Token:
+    @staticmethod
+    def VIRTUAL() -> Token:
         return Token(TokenType.KEYWORD, Keyword.VIRTUAL.value)
 
     def is_virtual(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.VIRTUAL.value
 
-    @classmethod
-    @property
-    def DELETE(cls) -> Token:
+    @staticmethod
+    def DELETE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.DELETE.value)
 
     def is_delete(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.DELETE.value
 
-    @classmethod
-    @property
-    def SET(cls) -> Token:
+    @staticmethod
+    def SET() -> Token:
         return Token(TokenType.KEYWORD, Keyword.SET.value)
 
     def is_set(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.SET.value
 
-    @classmethod
-    @property
-    def REMOVE(cls) -> Token:
+    @staticmethod
+    def REMOVE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.REMOVE.value)
 
     def is_remove(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.REMOVE.value
 
-    @classmethod
-    @property
-    def CASE(cls) -> Token:
+    @staticmethod
+    def CASE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.CASE.value)
 
     def is_case(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.CASE.value
 
-    @classmethod
-    @property
-    def WHEN(cls) -> Token:
+    @staticmethod
+    def WHEN() -> Token:
         return Token(TokenType.KEYWORD, Keyword.WHEN.value)
 
     def is_when(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.WHEN.value
 
-    @classmethod
-    @property
-    def THEN(cls) -> Token:
+    @staticmethod
+    def THEN() -> Token:
         return Token(TokenType.KEYWORD, Keyword.THEN.value)
 
     def is_then(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.THEN.value
 
-    @classmethod
-    @property
-    def ELSE(cls) -> Token:
+    @staticmethod
+    def ELSE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.ELSE.value)
 
     def is_else(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.ELSE.value
 
-    @classmethod
-    @property
-    def END(cls) -> Token:
+    @staticmethod
+    def END() -> Token:
         return Token(TokenType.KEYWORD, Keyword.END.value)
 
     def is_end(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.END.value
 
-    @classmethod
-    @property
-    def NULL(cls) -> Token:
+    @staticmethod
+    def NULL() -> Token:
         return Token(TokenType.KEYWORD, Keyword.NULL.value)
 
     def is_null(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.NULL.value
 
-    @classmethod
-    @property
-    def IN(cls) -> Token:
+    @staticmethod
+    def IN() -> Token:
         return Token(TokenType.KEYWORD, Keyword.IN.value)
 
     def is_in(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.IN.value
 
-    @classmethod
-    @property
-    def PIPE(cls) -> Token:
+    @staticmethod
+    def PIPE() -> Token:
         return Token(TokenType.KEYWORD, Operator.PIPE.value)
 
     def is_pipe(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Operator.PIPE.value
 
-    @classmethod
-    @property
-    def DISTINCT(cls) -> Token:
+    @staticmethod
+    def DISTINCT() -> Token:
         return Token(TokenType.KEYWORD, Keyword.DISTINCT.value)
 
     def is_distinct(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.DISTINCT.value
 
-    @classmethod
-    @property
-    def LIMIT(cls) -> Token:
+    @staticmethod
+    def LIMIT() -> Token:
         return Token(TokenType.KEYWORD, Keyword.LIMIT.value)
 
     def is_limit(self) -> bool:
@@ -629,9 +572,8 @@ class Token:
 
     # End of file token
 
-    @classmethod
-    @property
-    def EOF(cls) -> Token:
+    @staticmethod
+    def EOF() -> Token:
         return Token(TokenType.EOF)
 
     def is_eof(self) -> bool:
@@ -654,6 +596,10 @@ class Token:
         name_upper = name.upper()
         if hasattr(Token, name_upper):
             attr = getattr(Token, name_upper)
-            if isinstance(attr, Token):
+            if callable(attr):
+                result = attr()
+                if isinstance(result, Token):
+                    return result
+            elif isinstance(attr, Token):
                 return attr
         return None

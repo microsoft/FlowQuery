@@ -69,7 +69,7 @@ class BaseParser:
             The current token, or EOF if at the end
         """
         if self._token_index >= len(self._tokens):
-            return Token.EOF
+            return Token.EOF()
         return self._tokens[self._token_index]
 
     @property
@@ -80,5 +80,5 @@ class BaseParser:
             The previous token, or EOF if at the beginning
         """
         if self._token_index - 1 < 0:
-            return Token.EOF
+            return Token.EOF()
         return self._tokens[self._token_index - 1]

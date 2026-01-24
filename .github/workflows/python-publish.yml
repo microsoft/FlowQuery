@@ -2,10 +2,8 @@ name: Publish Python Package to PyPI
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - "flowquery-py/**"
+    tags:
+      - "py-v*" # Trigger on tags like py-v1.0.1
   pull_request:
     branches:
       - main
@@ -34,6 +32,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for setuptools-scm to find tags
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -76,7 +76,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/py-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
     needs: build
     runs-on: ubuntu-latest
     environment:

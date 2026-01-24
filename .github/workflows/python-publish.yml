@@ -57,6 +57,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'testpypi'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: testpypi
       url: https://test.pypi.org/p/flowquery
@@ -72,13 +74,14 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TESTPYPI_API_TOKEN }}
 
   publish-pypi:
     name: Publish to PyPI
     if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/py-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/flowquery
@@ -92,5 +95,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}

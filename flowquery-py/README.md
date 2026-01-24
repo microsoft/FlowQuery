@@ -1,68 +1,24 @@
-# FlowQuery Python Implementation
+# FlowQuery
 
-This is the Python implementation of FlowQuery, a declarative query language for data processing pipelines.
+A declarative query language for data processing pipelines.
 
 ## Installation
 
-### From Source
-
 ```bash
-git clone https://github.com/microsoft/FlowQuery.git
-cd FlowQuery/flowquery-py
-pip install -e .
-```
-
-### With Development Dependencies
-
-```bash
-pip install -e ".[dev]"
+pip install flowquery
 ```
 
 ## Quick Start
 
 ### Command Line Interface
 
-After installation, you can start the interactive REPL:
+Start the interactive REPL:
 
 ```bash
 flowquery
 ```
 
-### Using Conda (Alternative)
-
-**Windows (PowerShell):**
-
-```powershell
-cd flowquery-py
-.\setup_env.ps1
-conda activate flowquery
-```
-
-**Linux/macOS:**
-
-```bash
-cd flowquery-py
-chmod +x setup_env.sh
-./setup_env.sh
-conda activate flowquery
-```
-
-The setup scripts automatically:
-
-1. Read the Python version from `pyproject.toml`
-2. Create a conda environment named `flowquery`
-3. Install the package with all dev dependencies
-
-## Requirements
-
-- Python 3.10+ (defined in `pyproject.toml`)
-- pytest (for running tests)
-- pytest-asyncio (for async test support)
-- aiohttp (for HTTP requests)
-
-All dependencies are managed in `pyproject.toml`.
-
-## Programmatic Usage
+### Programmatic Usage
 
 ```python
 import asyncio
@@ -71,66 +27,6 @@ from flowquery import Runner
 runner = Runner("WITH 1 as x RETURN x + 1 as result")
 asyncio.run(runner.run())
 print(runner.results)  # [{'result': 2}]
-```
-
-## Running Tests
-
-```bash
-pytest tests/
-```
-
-## Project Structure
-
-```
-flowquery-py/
-├── pyproject.toml       # Dependencies & project config (single source of truth)
-├── setup_env.ps1        # Windows conda setup script
-├── setup_env.sh         # Linux/macOS conda setup script
-├── README.md
-├── src/
-│   ├── __init__.py          # Main package entry point
-│   ├── extensibility.py     # Public API for custom functions
-│   ├── compute/
-│   │   └── runner.py        # Query execution engine
-│   ├── graph/
-│   │   ├── node.py          # Graph node representation
-│   │   ├── relationship.py  # Graph relationship representation
-│   │   ├── pattern.py       # Pattern matching
-│   │   └── database.py      # In-memory graph database
-│   ├── io/
-│   │   └── command_line.py  # Interactive REPL
-│   ├── parsing/
-│   │   ├── parser.py        # Main parser
-│   │   ├── ast_node.py      # AST node base class
-│   │   ├── expressions/     # Expression types (numbers, strings, operators)
-│   │   ├── functions/       # Built-in and custom functions
-│   │   ├── operations/      # Query operations (WITH, RETURN, UNWIND, etc.)
-│   │   ├── components/      # LOAD clause components
-│   │   ├── data_structures/ # Arrays, objects, lookups
-│   │   └── logic/           # CASE/WHEN/THEN/ELSE
-│   ├── tokenization/
-│   │   ├── tokenizer.py     # Lexer
-│   │   ├── token.py         # Token class
-│   │   └── ...              # Token types and mappers
-│   └── utils/
-│       ├── string_utils.py  # String manipulation utilities
-│       └── object_utils.py  # Object utilities
-└── tests/
-    ├── test_extensibility.py
-    ├── compute/
-    │   └── test_runner.py
-    ├── graph/
-    │   ├── test_create.py
-    │   ├── test_data.py
-    │   └── test_match.py
-    ├── parsing/
-    │   ├── test_parser.py
-    │   ├── test_context.py
-    │   └── test_expression.py
-    └── tokenization/
-        ├── test_tokenizer.py
-        ├── test_token_mapper.py
-        └── test_trie.py
 ```
 
 ## Creating Custom Functions
@@ -155,12 +51,17 @@ class UpperCase(Function):
         return str(self.get_children()[0].value()).upper()
 ```
 
+## Documentation
+
+- [Full Documentation](https://github.com/microsoft/FlowQuery)
+- [Contributing Guide](https://github.com/microsoft/FlowQuery/blob/main/flowquery-py/CONTRIBUTING.md)
+
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/microsoft/FlowQuery/blob/main/LICENSE) for details.
 
 ## Links
 
-- [Homepage](https://github.com/microsoft/FlowQuery/flowquery-py)
-- [Repository](https://github.com/microsoft/FlowQuery/flowquery-py)
+- [Homepage](https://github.com/microsoft/FlowQuery)
+- [Repository](https://github.com/microsoft/FlowQuery)
 - [Issues](https://github.com/microsoft/FlowQuery/issues)

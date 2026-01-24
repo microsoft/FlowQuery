@@ -48,6 +48,7 @@ build-backend = "setuptools.build_meta"
 root = ".."
 version_file = "src/_version.py"
 tag_regex = "^py-v(?P<version>.*)$"
+local_scheme = "no-local-version"
 
 [tool.setuptools.package-dir]
 "flowquery" = "src"

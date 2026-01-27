@@ -97,9 +97,10 @@ class Load(Operation):
             body = options.pop("body", None)
             
             # Set Accept-Encoding to support common compression formats
-            # brotli (br) support requires the 'brotli' package to be installed
+            # Note: brotli (br) is excluded due to API incompatibility between
+            # aiohttp 3.13+ and the brotli package's Decompressor.decompress() method
             if "Accept-Encoding" not in headers:
-                headers["Accept-Encoding"] = "gzip, deflate, br"
+                headers["Accept-Encoding"] = "gzip, deflate"
             
             async with session.request(
                 method, 

@@ -752,3 +752,11 @@ test("Parse statement with graph pattern in where clause", () => {
     expect(relationship.type).toBe("KNOWS");
     expect(target.label).toBe("Person");
 });
+
+test("Test check pattern expression without NodeReference", () => {
+    const parser = new Parser();
+    // Should throw an error because pattern does not start with NodeReference
+    expect(() => {
+        parser.parse("MATCH (a:Person) WHERE (:Person)-[:KNOWS]->(:Person) RETURN a");
+    }).toThrow("PatternExpression must contain at least one NodeReference");
+});

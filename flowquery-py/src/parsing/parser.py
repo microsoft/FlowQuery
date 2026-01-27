@@ -426,8 +426,6 @@ class Parser(BaseParser):
         node = self._parse_node()
         if node is None:
             raise ValueError("Expected node definition")
-        if not isinstance(node, NodeReference):
-            raise ValueError("PatternExpression must start with a NodeReference")
         pattern.add_element(node)
         while True:
             relationship = self._parse_relationship()
@@ -440,6 +438,7 @@ class Parser(BaseParser):
             if node is None:
                 raise ValueError("Expected target node definition")
             pattern.add_element(node)
+        pattern.verify()
         return pattern
 
     def _parse_node(self) -> Optional[Node]:
@@ -606,7 +605,7 @@ class Parser(BaseParser):
                 if func is not None:
                     lookup = self._parse_lookup(func)
                     expression.add_node(lookup)
-            elif self.token.is_left_parenthesis() and self.peek() is not None and self.peek().is_identifier():
+            elif self.token.is_left_parenthesis() and self.peek() is not None and (self.peek().is_identifier() or self.peek().is_colon() or self.peek().is_right_parenthesis()):
                 # Possible graph pattern expression
                 pattern = self._parse_pattern_expression()
                 if pattern is not None:

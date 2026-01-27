@@ -10,10 +10,21 @@ class PatternExpression extends Pattern {
         throw new Error("Cannot set identifier on PatternExpression");
     }
     public addElement(element: Relationship | Node): void {
-        if (this._chain.length == 0 && !(element instanceof NodeReference)) {
-            throw new Error("PatternExpression must start with a NodeReference");
-        }
         super.addElement(element);
+    }
+    public verify(): void {
+        if (this._chain.length === 0) {
+            throw new Error("PatternExpression must contain at least one element");
+        }
+        const referenced = this._chain.some((element) => {
+            if (element instanceof NodeReference) {
+                return true;
+            }
+            return false;
+        });
+        if (!referenced) {
+            throw new Error("PatternExpression must contain at least one NodeReference");
+        }
     }
     public async evaluate(): Promise<void> {
         this._evaluation = false;

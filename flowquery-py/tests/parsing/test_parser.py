@@ -672,3 +672,9 @@ class TestParser:
             "--- Reference (a)"
         )
         assert ast.print() == expected
+
+    def test_check_pattern_expression_without_noderef(self):
+        """Test check pattern expression without NodeReference."""
+        parser = Parser()
+        with pytest.raises(Exception, match="PatternExpression must contain at least one NodeReference"):
+            parser.parse("MATCH (a:Person) WHERE (:Person)-[:KNOWS]->(:Person) RETURN a")

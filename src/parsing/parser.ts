@@ -516,9 +516,6 @@ class Parser extends BaseParser {
         if (node === null) {
             throw new Error("Expected node definition");
         }
-        if (!(node instanceof NodeReference)) {
-            throw new Error("PatternExpression must start with a NodeReference");
-        }
         pattern.addElement(node);
         let relationship: Relationship | null = null;
         while (true) {
@@ -536,6 +533,7 @@ class Parser extends BaseParser {
             }
             pattern.addElement(node);
         }
+        pattern.verify();
         return pattern;
     }
 
@@ -709,7 +707,12 @@ class Parser extends BaseParser {
                     const lookup = this.parseLookup(func);
                     expression.addNode(lookup);
                 }
-            } else if (this.token.isLeftParenthesis() && this.peek()?.isIdentifier()) {
+            } else if (
+                this.token.isLeftParenthesis() &&
+                (this.peek()?.isIdentifier() ||
+                    this.peek()?.isColon() ||
+                    this.peek()?.isRightParenthesis())
+            ) {
                 // Possible graph pattern expression
                 const pattern = this.parsePatternExpression();
                 if (pattern !== null) {

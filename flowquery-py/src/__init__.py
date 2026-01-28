@@ -2,6 +2,8 @@
 FlowQuery - A declarative query language for data processing pipelines.
 
 This is the Python implementation of FlowQuery.
+
+This module provides the core components for defining, parsing, and executing FlowQuery queries.
 """
 
 from .compute.runner import Runner

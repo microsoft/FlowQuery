@@ -2,8 +2,10 @@ name: Publish Python Package to PyPI
 
 on:
   push:
-    tags:
-      - "py-v*" # Trigger on tags like py-v1.0.1, py-v2.3.4, etc.
+    branches:
+      - main
+    paths:
+      - "flowquery-py/**"
   pull_request:
     branches:
       - main
@@ -22,9 +24,52 @@ on:
           - testpypi
           - pypi
 
+permissions:
+  contents: write
+
 jobs:
+  bump-version:
+    name: Bump version
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Bump Python package version
+        id: bump
+        working-directory: flowquery-py
+        run: |
+          # Get current version from pyproject.toml
+          CURRENT=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
+          echo "Current version: $CURRENT"
+
+          # Parse and bump patch version
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          NEW_VERSION="$major.$minor.$((patch + 1))"
+          echo "New version: $NEW_VERSION"
+
+          # Update pyproject.toml
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" pyproject.toml
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore(py): bump version to $NEW_VERSION [skip ci]"
+          git push
+
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
   build:
     name: Build distribution
+    needs: [bump-version]
+    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,6 +77,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        if: needs.bump-version.result == 'success'
+        run: git pull origin main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -75,7 +127,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/py-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -20,10 +20,13 @@ class PatternExpression(Pattern):
         self._evaluation: bool = False
 
     def add_element(self, element) -> None:
-        """Add an element to the pattern, ensuring it starts with a NodeReference."""
-        if len(self._chain) == 0 and not isinstance(element, NodeReference):
-            raise ValueError("PatternExpression must start with a NodeReference")
         super().add_element(element)
+
+    def verify(self) -> None:
+        if(len(self._chain) == 0):
+            raise ValueError("PatternExpression cannot be empty")
+        if not(any(isinstance(el, NodeReference) for el in self._chain if isinstance(el, ASTNode))):
+            raise ValueError("PatternExpression must contain at least one NodeReference")
 
     @property
     def identifier(self):

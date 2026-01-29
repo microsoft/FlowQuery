@@ -5,12 +5,12 @@ on:
     branches:
       - main
     paths:
-      - "flowquery-py/**"
+      - "flowquery-py/src/**"
   pull_request:
     branches:
       - main
     paths:
-      - "flowquery-py/**"
+      - "flowquery-py/src/**"
   release:
     types: [published]
   workflow_dispatch:

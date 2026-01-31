@@ -1,12 +1,11 @@
 /**
  * FlowQuery - A declarative query language for data processing pipelines.
- * 
+ *
  * This is the main entry point for the FlowQuery command-line interface.
- * 
+ *
  * @packageDocumentation
  */
-
-import CommandLine from './io/command_line';
+import CommandLine from "./io/command_line";
 
 const commandLine = new CommandLine();
 commandLine.loop();

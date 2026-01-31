@@ -10,7 +10,7 @@ from .reducer_element import ReducerElement
 class SumReducerElement(ReducerElement):
     """Reducer element for Sum aggregate function."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._value: Any = None
 
     @property
@@ -40,7 +40,7 @@ class Sum(AggregateFunction):
     Calculates the sum of numeric values across grouped rows.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("sum")
         self._expected_parameter_count = 1
 

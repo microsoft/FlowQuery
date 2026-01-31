@@ -24,7 +24,7 @@ class Stringify(Function):
     Converts a value to its JSON string representation.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("stringify")
         self._expected_parameter_count = 2
 

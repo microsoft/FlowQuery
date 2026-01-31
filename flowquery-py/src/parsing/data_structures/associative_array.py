@@ -1,6 +1,6 @@
 """Represents an associative array (object/dictionary) in the AST."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Generator
 
 from ..ast_node import ASTNode
 from .key_value_pair import KeyValuePair
@@ -29,7 +29,7 @@ class AssociativeArray(ASTNode):
     def __str__(self) -> str:
         return 'AssociativeArray'
 
-    def _value(self):
+    def _value(self) -> Generator[Dict[str, Any], None, None]:
         for child in self.children:
             if isinstance(child, KeyValuePair):
                 yield {child.key: child._value}

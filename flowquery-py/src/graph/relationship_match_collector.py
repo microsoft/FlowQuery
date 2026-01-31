@@ -18,7 +18,7 @@ class RelationshipMatchRecord(TypedDict, total=False):
 class RelationshipMatchCollector:
     """Collects relationship matches during graph traversal."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._matches: List[RelationshipMatchRecord] = []
         self._node_ids: List[str] = []
 

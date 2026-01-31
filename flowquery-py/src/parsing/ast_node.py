@@ -17,7 +17,7 @@ class ASTNode:
         root.add_child(child)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._parent: Optional[ASTNode] = None
         self.children: List[ASTNode] = []
 

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class Pattern(ASTNode):
     """Represents a graph pattern for matching."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._identifier: Optional[str] = None
         self._chain: List[Union['Node', 'Relationship']] = []

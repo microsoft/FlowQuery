@@ -39,7 +39,7 @@ class Operator(ASTNode, ABC):
 
 
 class Add(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(1, True)
 
     def value(self) -> Any:
@@ -47,7 +47,7 @@ class Add(Operator):
 
 
 class Subtract(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(1, True)
 
     def value(self) -> Any:
@@ -55,7 +55,7 @@ class Subtract(Operator):
 
 
 class Multiply(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(2, True)
 
     def value(self) -> Any:
@@ -63,7 +63,7 @@ class Multiply(Operator):
 
 
 class Divide(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(2, True)
 
     def value(self) -> Any:
@@ -71,7 +71,7 @@ class Divide(Operator):
 
 
 class Modulo(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(2, True)
 
     def value(self) -> Any:
@@ -79,7 +79,7 @@ class Modulo(Operator):
 
 
 class Power(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(3, False)
 
     def value(self) -> Any:
@@ -87,7 +87,7 @@ class Power(Operator):
 
 
 class Equals(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -95,7 +95,7 @@ class Equals(Operator):
 
 
 class NotEquals(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -103,7 +103,7 @@ class NotEquals(Operator):
 
 
 class GreaterThan(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -111,7 +111,7 @@ class GreaterThan(Operator):
 
 
 class LessThan(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -119,7 +119,7 @@ class LessThan(Operator):
 
 
 class GreaterThanOrEqual(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -127,7 +127,7 @@ class GreaterThanOrEqual(Operator):
 
 
 class LessThanOrEqual(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def value(self) -> int:
@@ -135,7 +135,7 @@ class LessThanOrEqual(Operator):
 
 
 class And(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(-1, True)
 
     def value(self) -> int:
@@ -143,7 +143,7 @@ class And(Operator):
 
 
 class Or(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(-1, True)
 
     def value(self) -> int:
@@ -151,7 +151,7 @@ class Or(Operator):
 
 
 class Not(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, True)
 
     def is_operator(self) -> bool:
@@ -162,7 +162,7 @@ class Not(Operator):
 
 
 class Is(Operator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(-1, True)
 
     def value(self) -> int:

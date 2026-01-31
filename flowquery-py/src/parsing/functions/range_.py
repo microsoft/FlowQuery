@@ -27,7 +27,7 @@ class Range(Function):
     Generates an array of sequential integers.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("range")
         self._expected_parameter_count = 2
 

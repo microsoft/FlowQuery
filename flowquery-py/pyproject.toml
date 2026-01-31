@@ -89,8 +89,8 @@ warn_unreachable = false
 strict_equality = true
 no_implicit_optional = true
 check_untyped_defs = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 ignore_missing_imports = true
 exclude = [
     "tests/",

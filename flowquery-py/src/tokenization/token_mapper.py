@@ -1,6 +1,7 @@
 """Maps string values to tokens using a Trie for efficient lookup."""
 
-from typing import Optional
+from enum import Enum
+from typing import Optional, Type
 
 from .token import Token
 from .trie import Trie
@@ -17,7 +18,7 @@ class TokenMapper:
         token = mapper.map("WITH")
     """
 
-    def __init__(self, enum_class):
+    def __init__(self, enum_class: Type[Enum]) -> None:
         """Creates a TokenMapper from an enum of token values.
 
         Args:

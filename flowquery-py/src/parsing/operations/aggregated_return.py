@@ -1,7 +1,6 @@
-"""Represents an aggregated RETURN operation."""
-
 from typing import Any, Dict, List
 
+from ..ast_node import ASTNode
 from .group_by import GroupBy
 from .return_op import Return
 
@@ -9,7 +8,7 @@ from .return_op import Return
 class AggregatedReturn(Return):
     """Represents an aggregated RETURN operation that groups and reduces values."""
 
-    def __init__(self, expressions):
+    def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
         self._group_by = GroupBy(self.children)
 

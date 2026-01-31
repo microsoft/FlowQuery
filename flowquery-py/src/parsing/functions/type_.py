@@ -25,7 +25,7 @@ class Type(Function):
     Returns the type of a value as a string.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("type")
         self._expected_parameter_count = 1
 

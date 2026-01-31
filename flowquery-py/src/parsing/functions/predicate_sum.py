@@ -30,7 +30,7 @@ class PredicateSum(PredicateFunction):
     Calculates the sum of values in an array with optional filtering.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("sum")
 
     def value(self) -> Any:

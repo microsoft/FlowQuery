@@ -20,7 +20,7 @@ class Rand(Function):
     Generates a random number between 0 and 1.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("rand")
         self._expected_parameter_count = 0
 

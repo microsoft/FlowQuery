@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
+from ..ast_node import ASTNode
 from ..components.headers import Headers
 from ..components.json import JSON as JSONComponent
 from ..components.post import Post
@@ -16,17 +17,17 @@ from .operation import Operation
 class Load(Operation):
     """Represents a LOAD operation that fetches data from external sources."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._value: Any = None
 
     @property
-    def type(self):
+    def type(self) -> ASTNode:
         """Gets the data type (JSON, CSV, or Text)."""
         return self.children[0]
 
     @property
-    def from_component(self):
+    def from_component(self) -> ASTNode:
         """Gets the From component which contains either a URL expression or an AsyncFunction."""
         return self.children[1]
 
@@ -52,7 +53,7 @@ class Load(Operation):
         return {}
 
     @property
-    def payload(self):
+    def payload(self) -> Optional[ASTNode]:
         post = None
         if self.child_count() > 2 and isinstance(self.children[2], Post):
             post = self.children[2]

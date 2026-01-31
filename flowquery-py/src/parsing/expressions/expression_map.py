@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 class ExpressionMap:
     """Maps expression aliases to their corresponding Expression objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._map: dict[str, Any] = {}
 
     def get(self, alias: str) -> Optional[Any]:

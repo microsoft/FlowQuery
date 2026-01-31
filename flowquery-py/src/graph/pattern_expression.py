@@ -1,10 +1,12 @@
 """Pattern expression for FlowQuery."""
 
-from typing import Any
+from typing import Any, Union
 
 from ..parsing.ast_node import ASTNode
+from .node import Node
 from .node_reference import NodeReference
 from .pattern import Pattern
+from .relationship import Relationship
 
 
 class PatternExpression(Pattern):
@@ -14,12 +16,12 @@ class PatternExpression(Pattern):
     exists. It evaluates to True if the pattern is matched, False otherwise.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._fetched: bool = False
         self._evaluation: bool = False
 
-    def add_element(self, element) -> None:
+    def add_element(self, element: Union[Node, Relationship]) -> None:
         super().add_element(element)
 
     def verify(self) -> None:
@@ -29,11 +31,11 @@ class PatternExpression(Pattern):
             raise ValueError("PatternExpression must contain at least one NodeReference")
 
     @property
-    def identifier(self):
+    def identifier(self) -> None:
         return None
 
     @identifier.setter
-    def identifier(self, value):
+    def identifier(self, value: str) -> None:
         raise ValueError("Cannot set identifier on PatternExpression")
 
     async def fetch_data(self) -> None:
@@ -50,7 +52,7 @@ class PatternExpression(Pattern):
         """
         self._evaluation = False
 
-        async def set_evaluation_true():
+        async def set_evaluation_true() -> None:
             self._evaluation = True
 
         self.end_node.todo_next = set_evaluation_true

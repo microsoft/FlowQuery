@@ -17,7 +17,7 @@ class Context:
         has_return = context.contains_type(Return)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._nodes: List[ASTNode] = []
 
     def push(self, node: ASTNode) -> None:

@@ -102,7 +102,7 @@ class FunctionRegistry:
         return cls._factories.get(lower_name)
 
 
-def FunctionDef(options: FunctionDefOptions):
+def FunctionDef(options: FunctionDefOptions) -> Callable[[type], type]:
     """Class decorator that registers function metadata.
 
     The function name is derived from the class's constructor.

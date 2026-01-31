@@ -20,7 +20,7 @@ class Database:
     _nodes: Dict[str, 'PhysicalNode'] = {}
     _relationships: Dict[str, 'PhysicalRelationship'] = {}
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @classmethod

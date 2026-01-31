@@ -13,7 +13,7 @@ DEFAULT_VARIABLE_NAME = "value"
 class Call(Projection):
     """Represents a CALL operation for invoking async functions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__([])
         self._function: Optional[AsyncFunction] = None
         self._map = ExpressionMap()

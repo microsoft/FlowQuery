@@ -8,7 +8,7 @@ from ..ast_node import ASTNode
 class ValueHolder(ASTNode):
     """Holds a value that can be set and retrieved."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._holder: Any = None
 

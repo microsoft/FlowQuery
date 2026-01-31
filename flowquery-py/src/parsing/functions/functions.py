@@ -47,7 +47,7 @@ class Functions(Function):
     Lists all registered functions with their metadata.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("functions")
         self._expected_parameter_count = None  # 0 or 1 parameter
 

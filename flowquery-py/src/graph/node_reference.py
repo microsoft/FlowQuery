@@ -1,6 +1,4 @@
-"""Node reference for FlowQuery."""
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from .node import Node
 
@@ -11,7 +9,7 @@ if TYPE_CHECKING:
 class NodeReference(Node):
     """Represents a reference to an existing node variable."""
 
-    def __init__(self, base: Node, reference: Node):
+    def __init__(self, base: Node, reference: Node) -> None:
         super().__init__(base.identifier, base.label)
         self._reference: Node = reference
         # Copy properties from base
@@ -28,7 +26,7 @@ class NodeReference(Node):
     def referred(self) -> Node:
         return self._reference
 
-    def value(self):
+    def value(self) -> Optional[Any]:
         return self._reference.value() if self._reference else None
 
     async def next(self) -> None:

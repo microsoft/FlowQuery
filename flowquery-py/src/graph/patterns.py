@@ -8,7 +8,7 @@ from .pattern import Pattern
 class Patterns:
     """Manages a collection of graph patterns."""
 
-    def __init__(self, patterns: Optional[List[Pattern]] = None):
+    def __init__(self, patterns: Optional[List[Pattern]] = None) -> None:
         self._patterns = patterns or []
         self._to_do_next: Optional[Callable[[], Awaitable[None]]] = None
 
@@ -32,7 +32,7 @@ class Patterns:
             await pattern.fetch_data()  # Ensure data is loaded
             if previous is not None:
                 # Chain the patterns together
-                async def next_pattern_start(p=pattern):
+                async def next_pattern_start(p: Pattern = pattern) -> None:
                     await p.start_node.next()
                 previous.end_node.todo_next = next_pattern_start
             previous = pattern

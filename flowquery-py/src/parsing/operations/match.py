@@ -1,6 +1,8 @@
 """Represents a MATCH operation for graph pattern matching."""
 
+from typing import List, Optional
 
+from ...graph.pattern import Pattern
 from ...graph.patterns import Patterns
 from .operation import Operation
 
@@ -8,19 +10,19 @@ from .operation import Operation
 class Match(Operation):
     """Represents a MATCH operation for graph pattern matching."""
 
-    def __init__(self, patterns=None):
+    def __init__(self, patterns: Optional[List[Pattern]] = None) -> None:
         super().__init__()
         self._patterns = Patterns(patterns or [])
 
     @property
-    def patterns(self):
+    def patterns(self) -> List[Pattern]:
         return self._patterns.patterns if self._patterns else []
 
     async def run(self) -> None:
         """Executes the match operation by chaining the patterns together."""
         await self._patterns.initialize()
 
-        async def to_do_next():
+        async def to_do_next() -> None:
             if self.next:
                 await self.next.run()
 

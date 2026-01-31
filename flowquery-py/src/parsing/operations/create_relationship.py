@@ -3,6 +3,7 @@
 from typing import Any, Dict, List
 
 from ...graph.database import Database
+from ...graph.relationship import Relationship
 from ..ast_node import ASTNode
 from .operation import Operation
 
@@ -10,13 +11,13 @@ from .operation import Operation
 class CreateRelationship(Operation):
     """Represents a CREATE operation for creating virtual relationships."""
 
-    def __init__(self, relationship, statement: ASTNode):
+    def __init__(self, relationship: Relationship, statement: ASTNode) -> None:
         super().__init__()
         self._relationship = relationship
         self._statement = statement
 
     @property
-    def relationship(self):
+    def relationship(self) -> Relationship:
         return self._relationship
 
     @property

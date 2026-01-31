@@ -15,7 +15,7 @@ class TrieNode:
     if the path to this node represents a complete word.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._children: dict[str, TrieNode] = {}
         self._token: Optional[Token] = None
 
@@ -54,7 +54,7 @@ class Trie:
         found = trie.find("WITH")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._root = TrieNode()
         self._max_length = 0
         self._last_found: Optional[str] = None

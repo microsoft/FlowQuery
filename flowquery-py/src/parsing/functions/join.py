@@ -24,7 +24,7 @@ class Join(Function):
     Joins an array of strings with a delimiter.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("join")
         self._expected_parameter_count = 2
 

@@ -36,13 +36,13 @@ class GroupByNode:
 class GroupBy(Projection):
     """Implements grouping and aggregation for FlowQuery operations."""
 
-    def __init__(self, expressions: List[ASTNode]):
+    def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
         self._root = GroupByNode()
         self._current = self._root
         self._mappers: Optional[List[Any]] = None
         self._reducers: Optional[List[AggregateFunction]] = None
-        self._where = None
+        self._where: Optional[ASTNode] = None
 
     async def run(self) -> None:
         self._reset_tree()
@@ -118,11 +118,11 @@ class GroupBy(Projection):
                 yield record
 
     @property
-    def where(self):
+    def where(self) -> Optional[ASTNode]:
         return self._where
 
     @where.setter
-    def where(self, where) -> None:
+    def where(self, where: Optional[ASTNode]) -> None:
         self._where = where
 
     @property

@@ -3,6 +3,7 @@
 from typing import Any, Dict, List
 
 from ...graph.database import Database
+from ...graph.node import Node
 from ..ast_node import ASTNode
 from .operation import Operation
 
@@ -10,13 +11,13 @@ from .operation import Operation
 class CreateNode(Operation):
     """Represents a CREATE operation for creating virtual nodes."""
 
-    def __init__(self, node, statement: ASTNode):
+    def __init__(self, node: Node, statement: ASTNode) -> None:
         super().__init__()
         self._node = node
         self._statement = statement
 
     @property
-    def node(self):
+    def node(self) -> Node:
         return self._node
 
     @property

@@ -24,7 +24,7 @@ class Replace(Function):
     Replaces occurrences of a pattern in a string.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("replace")
         self._expected_parameter_count = 3
 

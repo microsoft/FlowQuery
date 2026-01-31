@@ -13,7 +13,7 @@ class Operation(ASTNode, ABC):
     They form a linked list structure and can be executed sequentially.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._previous: Optional[Operation] = None
         self._next: Optional[Operation] = None

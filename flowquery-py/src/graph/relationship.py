@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class Relationship(ASTNode):
     """Represents a relationship in a graph pattern."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._identifier: Optional[str] = None
         self._type: Optional[str] = None

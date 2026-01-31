@@ -21,7 +21,7 @@ class Keys(Function):
     Returns the keys of an object (associative array) as an array.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("keys")
         self._expected_parameter_count = 1
 

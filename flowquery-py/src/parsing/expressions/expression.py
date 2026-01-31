@@ -25,7 +25,7 @@ class Expression(ASTNode):
         expr.finish()
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._operators: List[ASTNode] = []
         self._output: List[ASTNode] = []

@@ -525,7 +525,7 @@ class Parser(BaseParser):
         relationship.type = rel_type
         return relationship
 
-    def _parse_relationship_hops(self):
+    def _parse_relationship_hops(self) -> Optional[Hops]:
         if not self.token.is_multiply():
             return None
         hops = Hops()

@@ -3,6 +3,7 @@
 import copy
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from ..ast_node import ASTNode
 from .projection import Projection
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ class Return(Projection):
         # RETURN x, y WHERE x > 0
     """
 
-    def __init__(self, expressions):
+    def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
         self._where: Optional['Where'] = None
         self._results: List[Dict[str, Any]] = []

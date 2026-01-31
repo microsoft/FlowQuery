@@ -1,4 +1,4 @@
-"""Relationship reference for FlowQuery."""
+from typing import Any, Optional
 
 from ..parsing.ast_node import ASTNode
 from .relationship import Relationship
@@ -7,7 +7,7 @@ from .relationship import Relationship
 class RelationshipReference(Relationship):
     """Represents a reference to an existing relationship variable."""
 
-    def __init__(self, relationship: Relationship, referred: ASTNode):
+    def __init__(self, relationship: Relationship, referred: ASTNode) -> None:
         super().__init__()
         self._referred = referred
         if relationship.type:
@@ -17,5 +17,5 @@ class RelationshipReference(Relationship):
     def referred(self) -> ASTNode:
         return self._referred
 
-    def value(self):
+    def value(self) -> Optional[Any]:
         return self._referred.value() if self._referred else None

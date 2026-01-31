@@ -29,7 +29,7 @@ class Split(Function):
     Splits a string into an array by a delimiter.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("split")
         self._expected_parameter_count = 2
 

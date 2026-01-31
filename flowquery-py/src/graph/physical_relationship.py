@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class PhysicalRelationship(Relationship):
     """Represents a physical relationship in the graph database."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._statement: Optional[ASTNode] = None
 

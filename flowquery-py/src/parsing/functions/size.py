@@ -21,7 +21,7 @@ class Size(Function):
     Returns the length of an array or string.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("size")
         self._expected_parameter_count = 1
 

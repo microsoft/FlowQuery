@@ -1,7 +1,7 @@
 /**
  * FlowQuery - A declarative query language for data processing pipelines.
  *
- * This is the main entry point for the FlowQuery command-line interface.
+ * Main entry point for the FlowQuery command-line interface.
  *
  * @packageDocumentation
  */

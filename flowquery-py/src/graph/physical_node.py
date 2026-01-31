@@ -1,10 +1,10 @@
 """Physical node representation for FlowQuery."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
+from typing import Any, Dict, List, Optional
 
+from ..parsing.ast_node import ASTNode
 from .node import Node
 
 

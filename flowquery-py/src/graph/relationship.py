@@ -1,14 +1,16 @@
 """Graph relationship representation for FlowQuery."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from .hops import Hops
+from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
 
 if TYPE_CHECKING:
     from .node import Node
-    from .relationship_data import RelationshipData
 
 
 class Relationship(ASTNode):

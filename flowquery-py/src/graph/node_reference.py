@@ -1,9 +1,8 @@
-from typing import TYPE_CHECKING, Any, Optional
+from __future__ import annotations
+
+from typing import Any, Optional
 
 from .node import Node
-
-if TYPE_CHECKING:
-    pass
 
 
 class NodeReference(Node):

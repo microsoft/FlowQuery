@@ -1,12 +1,17 @@
 """Graph pattern representation for FlowQuery."""
 
-from typing import TYPE_CHECKING, Any, Generator, List, Optional, Sequence, Union
+from __future__ import annotations
+
+from typing import Any, Generator, List, Optional, Sequence, Union
 
 from ..parsing.ast_node import ASTNode
-
-if TYPE_CHECKING:
-    from .node import Node
-    from .relationship import Relationship
+from .database import Database
+from .node import Node
+from .node_data import NodeData
+from .node_reference import NodeReference
+from .relationship import Relationship
+from .relationship_data import RelationshipData
+from .relationship_reference import RelationshipReference
 
 
 class Pattern(ASTNode):
@@ -34,10 +39,6 @@ class Pattern(ASTNode):
         return self._chain
 
     def add_element(self, element: Union['Node', 'Relationship']) -> None:
-        # Import at runtime to avoid circular dependency
-        from .node import Node
-        from .relationship import Relationship
-
         if (len(self._chain) > 0 and
             type(self._chain[-1]) is type(element)):
             raise ValueError("Cannot add two consecutive elements of the same type to the graph pattern")
@@ -56,8 +57,6 @@ class Pattern(ASTNode):
 
     @property
     def start_node(self) -> 'Node':
-        # Import at runtime to avoid circular dependency
-        from .node import Node
         if len(self._chain) == 0:
             raise ValueError("Pattern is empty")
         first = self._chain[0]
@@ -67,8 +66,6 @@ class Pattern(ASTNode):
 
     @property
     def end_node(self) -> 'Node':
-        # Import at runtime to avoid circular dependency
-        from .node import Node
         if len(self._chain) == 0:
             raise ValueError("Pattern is empty")
         last = self._chain[-1]
@@ -85,10 +82,6 @@ class Pattern(ASTNode):
         return list(self.values())
 
     def values(self) -> Generator[Any, None, None]:
-        # Import at runtime to avoid circular dependency
-        from .node import Node
-        from .relationship import Relationship
-
         for i, element in enumerate(self._chain):
             if isinstance(element, Node):
                 # Skip node if previous element was a zero-hop relationship (no matches)
@@ -104,15 +97,6 @@ class Pattern(ASTNode):
 
     async def fetch_data(self) -> None:
         """Loads data from the database for all elements."""
-        # Import at runtime to avoid circular dependency
-        from .database import Database
-        from .node import Node
-        from .node_data import NodeData
-        from .node_reference import NodeReference
-        from .relationship import Relationship
-        from .relationship_data import RelationshipData
-        from .relationship_reference import RelationshipReference
-
         db = Database.get_instance()
         for element in self._chain:
             if isinstance(element, (NodeReference, RelationshipReference)):
@@ -127,7 +111,6 @@ class Pattern(ASTNode):
         await self.fetch_data()
 
     async def traverse(self) -> None:
-        from .node import Node
         first = self.first_node()
         if first and isinstance(first, Node):
             await first.next()

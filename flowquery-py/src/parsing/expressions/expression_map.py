@@ -1,9 +1,8 @@
 """Expression map for managing named expressions."""
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    pass
+from typing import Any, List, Optional
 
 
 class ExpressionMap:

@@ -1,5 +1,7 @@
 """Collector for relationship match records."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
 
 if TYPE_CHECKING:

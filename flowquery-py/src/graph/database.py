@@ -1,16 +1,16 @@
 """Graph database for FlowQuery."""
 
-from typing import TYPE_CHECKING, Dict, Optional, Union
+from __future__ import annotations
+
+from typing import Dict, Optional, Union
 
 from ..parsing.ast_node import ASTNode
-
-if TYPE_CHECKING:
-    from .node import Node
-    from .node_data import NodeData
-    from .physical_node import PhysicalNode
-    from .physical_relationship import PhysicalRelationship
-    from .relationship import Relationship
-    from .relationship_data import RelationshipData
+from .node import Node
+from .node_data import NodeData
+from .physical_node import PhysicalNode
+from .physical_relationship import PhysicalRelationship
+from .relationship import Relationship
+from .relationship_data import RelationshipData
 
 
 class Database:
@@ -31,8 +31,6 @@ class Database:
 
     def add_node(self, node: 'Node', statement: ASTNode) -> None:
         """Adds a node to the database."""
-        # Import at runtime to avoid circular dependency
-        from .physical_node import PhysicalNode
         if node.label is None:
             raise ValueError("Node label is null")
         physical = PhysicalNode(None, node.label)
@@ -45,8 +43,6 @@ class Database:
 
     def add_relationship(self, relationship: 'Relationship', statement: ASTNode) -> None:
         """Adds a relationship to the database."""
-        # Import at runtime to avoid circular dependency
-        from .physical_relationship import PhysicalRelationship
         if relationship.type is None:
             raise ValueError("Relationship type is null")
         physical = PhysicalRelationship()
@@ -60,12 +56,6 @@ class Database:
 
     async def get_data(self, element: Union['Node', 'Relationship']) -> Union['NodeData', 'RelationshipData']:
         """Gets data for a node or relationship."""
-        # Import at runtime to avoid circular dependency
-        from .node import Node
-        from .node_data import NodeData
-        from .relationship import Relationship
-        from .relationship_data import RelationshipData
-
         if isinstance(element, Node):
             node = self.get_node(element)
             if node is None:

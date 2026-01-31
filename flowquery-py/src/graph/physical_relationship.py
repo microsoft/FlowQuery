@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from ..parsing.ast_node import ASTNode
 from .relationship import Relationship
-
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
 
 
 class PhysicalRelationship(Relationship):

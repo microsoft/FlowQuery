@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
+from ..parsing.ast_node import ASTNode
 from ..utils.string_utils import StringUtils
 from .keyword import Keyword
 from .operator import Operator
 from .symbol import Symbol
 from .token_type import TokenType
-
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
 
 
 class Token:

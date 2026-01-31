@@ -1,12 +1,14 @@
 """Graph node representation for FlowQuery."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.expression import Expression
+from .node_data import NodeData, NodeRecord
 
 if TYPE_CHECKING:
-    from .node_data import NodeData, NodeRecord
     from .relationship import Relationship
 
 

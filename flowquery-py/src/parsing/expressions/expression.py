@@ -1,13 +1,15 @@
 """Represents an expression in the FlowQuery AST."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Generator, List, Optional
 
 from ..ast_node import ASTNode
+from ..functions.aggregate_function import AggregateFunction
 from .reference import Reference
 
 if TYPE_CHECKING:
     from ...graph.pattern_expression import PatternExpression
-    from ..functions.aggregate_function import AggregateFunction
 
 
 class Expression(ASTNode):

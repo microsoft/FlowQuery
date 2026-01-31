@@ -2,34 +2,33 @@
 
 import argparse
 import asyncio
-from typing import Optional
 
 from ..compute.runner import Runner
 
 
 class CommandLine:
     """Interactive command-line interface for FlowQuery.
-    
+
     Provides a REPL (Read-Eval-Print Loop) for executing FlowQuery statements
     and displaying results.
-    
+
     Example:
         cli = CommandLine()
         cli.loop()  # Starts interactive mode
-        
+
         # Or execute a single query:
         cli.execute("load json from 'https://example.com/data' as d return d")
     """
 
     def execute(self, query: str) -> None:
         """Execute a single FlowQuery statement and print results.
-        
+
         Args:
             query: The FlowQuery statement to execute.
         """
         # Remove the termination semicolon if present
         query = query.strip().rstrip(";")
-        
+
         try:
             runner = Runner(query)
             asyncio.run(self._execute(runner))
@@ -38,13 +37,13 @@ class CommandLine:
 
     def loop(self) -> None:
         """Starts the interactive command loop.
-        
+
         Prompts the user for FlowQuery statements, executes them, and displays results.
         Type "exit" to quit the loop. End multi-line queries with ";".
         """
         print('Welcome to FlowQuery! Type "exit" to quit.')
         print('End queries with ";" to execute. Multi-line input supported.')
-        
+
         while True:
             try:
                 lines = []
@@ -61,13 +60,13 @@ class CommandLine:
                     prompt = "... "
             except EOFError:
                 break
-            
+
             if user_input.strip() == "":
                 continue
-            
+
             # Remove the termination semicolon before sending to the engine
             user_input = user_input.strip().rstrip(";")
-            
+
             try:
                 runner = Runner(user_input)
                 asyncio.run(self._execute(runner))
@@ -83,7 +82,7 @@ class CommandLine:
 
 def main() -> None:
     """Entry point for the flowquery CLI command.
-    
+
     Usage:
         flowquery              # Start interactive mode
         flowquery -c "query"   # Execute a single query
@@ -99,10 +98,10 @@ def main() -> None:
         metavar="QUERY",
         help="Execute a FlowQuery statement and exit"
     )
-    
+
     args = parser.parse_args()
     cli = CommandLine()
-    
+
     if args.command:
         cli.execute(args.command)
     else:

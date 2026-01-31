@@ -1,7 +1,7 @@
 """Relationship reference for FlowQuery."""
 
-from .relationship import Relationship
 from ..parsing.ast_node import ASTNode
+from .relationship import Relationship
 
 
 class RelationshipReference(Relationship):

@@ -1,17 +1,17 @@
 """Collector for relationship match records."""
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
 
 if TYPE_CHECKING:
-    from .relationship import Relationship
     from .node import Node
+    from .relationship import Relationship
 
 
 class RelationshipMatchRecord(TypedDict, total=False):
     """Represents a matched relationship record."""
     type: str
-    startNode: Dict[str, Any]
-    endNode: Optional[Dict[str, Any]]
+    startNode: Any
+    endNode: Any
     properties: Dict[str, Any]
 
 
@@ -24,20 +24,20 @@ class RelationshipMatchCollector:
 
     def push(self, relationship: 'Relationship') -> RelationshipMatchRecord:
         """Push a new match onto the collector."""
+        start_node_value = relationship.source.value() if relationship.source else None
         match: RelationshipMatchRecord = {
             "type": relationship.type or "",
-            "startNode": relationship.source.value() if relationship.source else {},
+            "startNode": start_node_value or {},
             "endNode": None,
             "properties": relationship.properties,
         }
         self._matches.append(match)
-        start_node_value = match.get("startNode", {})
         if isinstance(start_node_value, dict):
             self._node_ids.append(start_node_value.get("id", ""))
         return match
 
     @property
-    def end_node(self) -> Optional[Dict[str, Any]]:
+    def end_node(self) -> Any:
         """Get the end node of the last match."""
         if self._matches:
             return self._matches[-1].get("endNode")
@@ -47,7 +47,8 @@ class RelationshipMatchCollector:
     def end_node(self, node: 'Node') -> None:
         """Set the end node of the last match."""
         if self._matches:
-            self._matches[-1]["endNode"] = node.value()
+            node_value = node.value()
+            self._matches[-1]["endNode"] = node_value if node_value else None
 
     def pop(self) -> Optional[RelationshipMatchRecord]:
         """Pop the last match from the collector."""

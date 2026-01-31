@@ -1,11 +1,12 @@
 """Base class for predicate functions in FlowQuery."""
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..ast_node import ASTNode
-from ..expressions.expression import Expression
-from ..expressions.reference import Reference
 from .value_holder import ValueHolder
+
+if TYPE_CHECKING:
+    pass
 
 
 class PredicateFunction(ASTNode):
@@ -21,7 +22,7 @@ class PredicateFunction(ASTNode):
         return self._name
 
     @property
-    def reference(self) -> Reference:
+    def reference(self) -> ASTNode:
         return self.first_child()
 
     @property
@@ -29,12 +30,12 @@ class PredicateFunction(ASTNode):
         return self.get_children()[1].first_child()
 
     @property
-    def _return(self) -> Expression:
+    def _return(self) -> ASTNode:
         return self.get_children()[2]
 
     @property
-    def where(self) -> Optional['Where']:
-        from ..operations.where import Where
+    def where(self) -> Optional[ASTNode]:
+        # Import at runtime to avoid circular dependency
         if len(self.get_children()) == 4:
             return self.get_children()[3]
         return None

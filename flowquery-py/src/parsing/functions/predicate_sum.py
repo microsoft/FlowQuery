@@ -1,13 +1,16 @@
 """PredicateSum function."""
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
-from .predicate_function import PredicateFunction
 from .function_metadata import FunctionDef
+from .predicate_function import PredicateFunction
 
 
 @FunctionDef({
-    "description": "Calculates the sum of values in an array with optional filtering. Uses list comprehension syntax: sum(variable IN array [WHERE condition] | expression)",
+    "description": (
+        "Calculates the sum of values in an array with optional filtering. "
+        "Uses list comprehension syntax: sum(variable IN array [WHERE condition] | expression)"
+    ),
     "category": "predicate",
     "parameters": [
         {"name": "variable", "description": "Variable name to bind each element", "type": "string"},
@@ -23,7 +26,7 @@ from .function_metadata import FunctionDef
 })
 class PredicateSum(PredicateFunction):
     """PredicateSum function.
-    
+
     Calculates the sum of values in an array with optional filtering.
     """
 
@@ -31,11 +34,13 @@ class PredicateSum(PredicateFunction):
         super().__init__("sum")
 
     def value(self) -> Any:
-        self.reference.referred = self._value_holder
+        ref = self.reference
+        if hasattr(ref, 'referred'):
+            ref.referred = self._value_holder
         array = self.array.value()
         if array is None or not isinstance(array, list):
             raise ValueError("Invalid array for sum function")
-        
+
         _sum: Optional[Any] = None
         for item in array:
             self._value_holder.holder = item

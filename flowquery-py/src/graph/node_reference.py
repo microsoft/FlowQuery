@@ -1,11 +1,11 @@
 """Node reference for FlowQuery."""
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .node import Node
 
 if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
+    pass
 
 
 class NodeReference(Node):
@@ -33,9 +33,11 @@ class NodeReference(Node):
 
     async def next(self) -> None:
         """Process next using the referenced node's value."""
-        self.set_value(self._reference.value())
-        if self._outgoing and self._value:
-            await self._outgoing.find(self._value['id'])
+        ref_value = self._reference.value()
+        if ref_value is not None:
+            self.set_value(dict(ref_value))
+            if self._outgoing and self._value:
+                await self._outgoing.find(self._value['id'])
         await self.run_todo_next()
 
     async def find(self, id_: str, hop: int = 0) -> None:
@@ -43,7 +45,7 @@ class NodeReference(Node):
         referenced = self._reference.value()
         if referenced is None or id_ != referenced.get('id'):
             return
-        self.set_value(referenced)
+        self.set_value(dict(referenced))
         if self._outgoing and self._value:
             await self._outgoing.find(self._value['id'], hop)
         await self.run_todo_next()

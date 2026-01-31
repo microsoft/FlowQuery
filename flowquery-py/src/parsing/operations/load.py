@@ -3,8 +3,14 @@
 import json
 from typing import Any, Dict, Optional
 
-from .operation import Operation
+import aiohttp
+
+from ..components.headers import Headers
+from ..components.json import JSON as JSONComponent
+from ..components.post import Post
+from ..components.text import Text
 from ..functions.async_function import AsyncFunction
+from .operation import Operation
 
 
 class Load(Operation):
@@ -36,19 +42,17 @@ class Load(Operation):
         return child if isinstance(child, AsyncFunction) else None
 
     @property
-    def from_(self) -> str:
+    def from_(self) -> Any:
         return self.children[1].value()
 
     @property
     def headers(self) -> Dict[str, str]:
-        from ..components.headers import Headers
         if self.child_count() > 2 and isinstance(self.children[2], Headers):
             return self.children[2].value() or {}
         return {}
 
     @property
     def payload(self):
-        from ..components.post import Post
         post = None
         if self.child_count() > 2 and isinstance(self.children[2], Post):
             post = self.children[2]
@@ -86,26 +90,22 @@ class Load(Operation):
 
     async def _load_from_url(self) -> None:
         """Loads data from a URL source."""
-        import aiohttp
-        from ..components.json import JSON as JSONComponent
-        from ..components.text import Text
-        
         async with aiohttp.ClientSession() as session:
             options = self._options()
             method = options.pop("method")
             headers = options.pop("headers", {})
             body = options.pop("body", None)
-            
+
             # Set Accept-Encoding to support common compression formats
             # Note: brotli (br) is excluded due to API incompatibility between
             # aiohttp 3.13+ and the brotli package's Decompressor.decompress() method
             if "Accept-Encoding" not in headers:
                 headers["Accept-Encoding"] = "gzip, deflate"
-            
+
             async with session.request(
-                method, 
-                self.from_, 
-                headers=headers, 
+                method,
+                self.from_,
+                headers=headers,
                 data=body
             ) as response:
                 if isinstance(self.type, JSONComponent):
@@ -114,7 +114,7 @@ class Load(Operation):
                     data = await response.text()
                 else:
                     data = await response.text()
-                
+
                 if isinstance(data, list):
                     for item in data:
                         self._value = item
@@ -139,7 +139,8 @@ class Load(Operation):
         try:
             await self.load()
         except Exception as e:
-            source = self.async_function.name if self.is_async_function else self.from_
+            async_func = self.async_function
+            source = async_func.name if async_func else self.from_
             raise RuntimeError(f"Failed to load data from {source}. Error: {e}")
 
     def value(self) -> Any:

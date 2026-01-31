@@ -3,11 +3,11 @@
 
 class StringUtils:
     """Utility class for string manipulation and validation.
-    
+
     Provides methods for handling quoted strings, comments, escape sequences,
     and identifier validation.
     """
-    
+
     quotes = ['"', "'", '`']
     letters = 'abcdefghijklmnopqrstuvwxyz'
     digits = '0123456789'
@@ -17,10 +17,10 @@ class StringUtils:
     @staticmethod
     def unquote(s: str) -> str:
         """Removes surrounding quotes from a string.
-        
+
         Args:
             s: The string to unquote
-            
+
         Returns:
             The unquoted string
         """
@@ -41,10 +41,10 @@ class StringUtils:
     @staticmethod
     def uncomment(s: str) -> str:
         """Removes comment markers from a string.
-        
+
         Args:
             s: The comment string
-            
+
         Returns:
             The string without comment markers
         """
@@ -59,11 +59,11 @@ class StringUtils:
     @staticmethod
     def remove_escaped_quotes(s: str, quote_char: str) -> str:
         """Removes escape sequences before quotes in a string.
-        
+
         Args:
             s: The string to process
             quote_char: The quote character that was escaped
-            
+
         Returns:
             The string with escape sequences removed
         """
@@ -79,10 +79,10 @@ class StringUtils:
     @staticmethod
     def remove_escaped_braces(s: str) -> str:
         """Removes escaped braces ({{ and }}) from f-strings.
-        
+
         Args:
             s: The string to process
-            
+
         Returns:
             The string with escaped braces resolved
         """
@@ -98,10 +98,10 @@ class StringUtils:
     @staticmethod
     def can_be_identifier(s: str) -> bool:
         """Checks if a string is a valid identifier.
-        
+
         Args:
             s: The string to validate
-            
+
         Returns:
             True if the string can be used as an identifier, false otherwise
         """

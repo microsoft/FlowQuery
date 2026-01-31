@@ -18,7 +18,7 @@ from .function_metadata import FunctionDef
 })
 class ToJson(Function):
     """ToJson function.
-    
+
     Parses a JSON string into an object.
     """
 

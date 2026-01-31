@@ -2,9 +2,8 @@
 
 from typing import Any, Dict, List
 
-from .return_op import Return
 from .group_by import GroupBy
-from ..expressions.expression import Expression
+from .return_op import Return
 
 
 class AggregatedReturn(Return):

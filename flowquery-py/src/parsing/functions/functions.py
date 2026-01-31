@@ -1,6 +1,6 @@
 """Functions introspection function."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .function import Function
 from .function_factory import FunctionFactory
@@ -8,10 +8,18 @@ from .function_metadata import FunctionDef
 
 
 @FunctionDef({
-    "description": "Lists all registered functions with their metadata. Useful for discovering available functions and their documentation.",
+    "description": (
+        "Lists all registered functions with their metadata. "
+        "Useful for discovering available functions and their documentation."
+    ),
     "category": "scalar",
     "parameters": [
-        {"name": "category", "description": "Optional category to filter by (e.g., 'aggregation', 'string', 'math')", "type": "string", "required": False}
+        {
+            "name": "category",
+            "description": "Optional category to filter by (e.g., 'aggregation', 'string', 'math')",
+            "type": "string",
+            "required": False
+        }
     ],
     "output": {
         "description": "Array of function metadata objects",
@@ -35,7 +43,7 @@ from .function_metadata import FunctionDef
 })
 class Functions(Function):
     """Functions introspection function.
-    
+
     Lists all registered functions with their metadata.
     """
 
@@ -45,7 +53,7 @@ class Functions(Function):
 
     def value(self) -> Any:
         children = self.get_children()
-        
+
         if len(children) == 0:
             # Return all functions
             return FunctionFactory.list_functions()

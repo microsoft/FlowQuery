@@ -2,11 +2,10 @@
 
 from typing import Any, Dict, List, Optional
 
-from ..expressions.expression import Expression
+from ..ast_node import ASTNode
 from ..expressions.expression_map import ExpressionMap
 from ..functions.async_function import AsyncFunction
 from .projection import Projection
-
 
 DEFAULT_VARIABLE_NAME = "value"
 
@@ -29,13 +28,13 @@ class Call(Projection):
         self._function = async_function
 
     @property
-    def yielded(self) -> List[Expression]:
+    def yielded(self) -> List[ASTNode]:
         return self.children
 
     @yielded.setter
-    def yielded(self, expressions: List[Expression]) -> None:
+    def yielded(self, expressions: List[ASTNode]) -> None:
         self.children = expressions
-        self._map.set_map(expressions)
+        self._map.set_map(expressions)  # ExpressionMap accepts list of expressions
 
     @property
     def has_yield(self) -> bool:
@@ -44,7 +43,7 @@ class Call(Projection):
     async def run(self) -> None:
         if self._function is None:
             raise ValueError("No function set for Call operation.")
-        
+
         args = self._function.get_arguments()
         async for item in self._function.generate(*args):
             if not self.is_last:

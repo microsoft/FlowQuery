@@ -1,6 +1,6 @@
 """Physical node representation for FlowQuery."""
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from ..parsing.ast_node import ASTNode
@@ -34,6 +34,7 @@ class PhysicalNode(Node):
     async def data(self) -> List[Dict[str, Any]]:
         if self._statement is None:
             raise ValueError("Statement is null")
+        # Import at runtime to avoid circular dependency
         from ..compute.runner import Runner
         runner = Runner(ast=self._statement)
         await runner.run()

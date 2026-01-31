@@ -4,7 +4,6 @@ from typing import Any
 
 from ..ast_node import ASTNode
 from .when import When
-from .then import Then
 
 
 class Case(ASTNode):

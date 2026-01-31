@@ -1,18 +1,26 @@
 """Main parser for FlowQuery statements."""
 
-from typing import Dict, Iterator, List, Optional
+import sys
+from typing import Dict, Iterator, List, Optional, cast
 
+from ..graph.hops import Hops
+from ..graph.node import Node
+from ..graph.node_reference import NodeReference
+from ..graph.pattern import Pattern
+from ..graph.pattern_expression import PatternExpression
+from ..graph.relationship import Relationship
+from ..graph.relationship_reference import RelationshipReference
 from ..tokenization.token import Token
 from ..utils.object_utils import ObjectUtils
 from .alias import Alias
 from .alias_option import AliasOption
 from .ast_node import ASTNode
 from .base_parser import BaseParser
-from .context import Context
 from .components.from_ import From
 from .components.headers import Headers
 from .components.null import Null
 from .components.post import Post
+from .context import Context
 from .data_structures.associative_array import AssociativeArray
 from .data_structures.json_array import JSONArray
 from .data_structures.key_value_pair import KeyValuePair
@@ -30,12 +38,14 @@ from .functions.function import Function
 from .functions.function_factory import FunctionFactory
 from .functions.predicate_function import PredicateFunction
 from .logic.case import Case
-from .logic.when import When
-from .logic.then import Then
 from .logic.else_ import Else
+from .logic.then import Then
+from .logic.when import When
 from .operations.aggregated_return import AggregatedReturn
 from .operations.aggregated_with import AggregatedWith
 from .operations.call import Call
+from .operations.create_node import CreateNode
+from .operations.create_relationship import CreateRelationship
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
@@ -44,22 +54,15 @@ from .operations.return_op import Return
 from .operations.unwind import Unwind
 from .operations.where import Where
 from .operations.with_op import With
-from ..graph.node import Node
-from ..graph.node_reference import NodeReference
-from ..graph.pattern import Pattern
-from ..graph.pattern_expression import PatternExpression
-from ..graph.relationship import Relationship
-from .operations.create_node import CreateNode
-from .operations.create_relationship import CreateRelationship
 
 
 class Parser(BaseParser):
     """Main parser for FlowQuery statements.
-    
+
     Parses FlowQuery declarative query language statements into an Abstract Syntax Tree (AST).
     Supports operations like WITH, UNWIND, RETURN, LOAD, WHERE, and LIMIT, along with
     expressions, functions, data structures, and logical constructs.
-    
+
     Example:
         parser = Parser()
         ast = parser.parse("unwind [1, 2, 3, 4, 5] as num return num")
@@ -73,13 +76,13 @@ class Parser(BaseParser):
 
     def parse(self, statement: str) -> ASTNode:
         """Parses a FlowQuery statement into an Abstract Syntax Tree.
-        
+
         Args:
             statement: The FlowQuery statement to parse
-            
+
         Returns:
             The root AST node containing the parsed structure
-            
+
         Raises:
             ValueError: If the statement is malformed or contains syntax errors
         """
@@ -90,32 +93,32 @@ class Parser(BaseParser):
         root = ASTNode()
         previous: Optional[Operation] = None
         operation: Optional[Operation] = None
-        
+
         while not self.token.is_eof():
             if root.child_count() > 0:
                 self._expect_and_skip_whitespace_and_comments()
             else:
                 self._skip_whitespace_and_comments()
-            
+
             operation = self._parse_operation()
             if operation is None and not is_sub_query:
                 raise ValueError("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL")
             elif operation is None and is_sub_query:
                 return root
-            
+
             if self._returns > 1:
                 raise ValueError("Only one RETURN statement is allowed")
-            
+
             if isinstance(previous, Call) and not previous.has_yield:
                 raise ValueError(
                     "CALL operations must have a YIELD clause unless they are the last operation"
                 )
-            
+
             if previous is not None:
                 previous.add_sibling(operation)
             else:
                 root.add_child(operation)
-            
+
             where = self._parse_where()
             if where is not None:
                 if isinstance(operation, Return):
@@ -123,17 +126,17 @@ class Parser(BaseParser):
                 else:
                     operation.add_sibling(where)
                     operation = where
-            
+
             limit = self._parse_limit()
             if limit is not None:
                 operation.add_sibling(limit)
                 operation = limit
-            
+
             previous = operation
-        
+
         if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
             raise ValueError("Last statement must be a RETURN, WHERE, CALL, or CREATE statement")
-        
+
         return root
 
     def _parse_operation(self) -> Optional[Operation]:
@@ -156,7 +159,7 @@ class Parser(BaseParser):
         if len(expressions) == 0:
             raise ValueError("Expected expression")
         if any(expr.has_reducers() for expr in expressions):
-            return AggregatedWith(expressions)
+            return AggregatedWith(expressions)  # type: ignore[return-value]
         return With(expressions)
 
     def _parse_unwind(self) -> Optional[Unwind]:
@@ -228,7 +231,7 @@ class Parser(BaseParser):
         self._expect_and_skip_whitespace_and_comments()
         from_node = From()
         load.add_child(from_node)
-        
+
         # Check if source is async function
         async_func = self._parse_async_function()
         if async_func is not None:
@@ -238,7 +241,7 @@ class Parser(BaseParser):
             if expression is None:
                 raise ValueError("Expected expression or async function")
             from_node.add_child(expression)
-        
+
         self._expect_and_skip_whitespace_and_comments()
         if self.token.is_headers():
             headers = Headers()
@@ -250,7 +253,7 @@ class Parser(BaseParser):
             headers.add_child(header)
             load.add_child(headers)
             self._expect_and_skip_whitespace_and_comments()
-        
+
         if self.token.is_post():
             post = Post()
             self.set_next_token()
@@ -261,7 +264,7 @@ class Parser(BaseParser):
             post.add_child(payload)
             load.add_child(post)
             self._expect_and_skip_whitespace_and_comments()
-        
+
         alias = self._parse_alias()
         if alias is not None:
             load.add_child(alias)
@@ -288,7 +291,7 @@ class Parser(BaseParser):
             expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
             if len(expressions) == 0:
                 raise ValueError("Expected at least one expression")
-            call.yielded = expressions
+            call.yielded = expressions  # type: ignore[assignment]
         return call
 
     def _parse_match(self) -> Optional[Match]:
@@ -311,11 +314,11 @@ class Parser(BaseParser):
             raise ValueError("Expected VIRTUAL")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
-        
+
         node = self._parse_node()
         if node is None:
             raise ValueError("Expected node definition")
-        
+
         relationship: Optional[Relationship] = None
         if self.token.is_subtract() and self.peek() and self.peek().is_opening_bracket():
             self.set_next_token()  # skip -
@@ -341,17 +344,17 @@ class Parser(BaseParser):
                 raise ValueError("Expected target node definition")
             relationship = Relationship()
             relationship.type = rel_type
-        
+
         self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_as():
             raise ValueError("Expected AS")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
-        
+
         query = self._parse_sub_query()
         if query is None:
             raise ValueError("Expected sub-query")
-        
+
         if relationship is not None:
             return CreateRelationship(relationship, query)
         else:
@@ -416,7 +419,7 @@ class Parser(BaseParser):
 
     def _parse_pattern_expression(self) -> Optional[PatternExpression]:
         """Parse a pattern expression for WHERE clauses.
-        
+
         PatternExpression is used to test if a graph pattern exists.
         It must start with a NodeReference (referencing an existing variable).
         """
@@ -459,7 +462,7 @@ class Parser(BaseParser):
             raise ValueError("Expected node label identifier")
         if self.token.is_colon() and peek is not None and peek.is_identifier():
             self.set_next_token()
-            label = self.token.value
+            label = cast(str, self.token.value)  # Guaranteed by is_identifier check
             self.set_next_token()
         self._skip_whitespace_and_comments()
         node = Node()
@@ -469,7 +472,6 @@ class Parser(BaseParser):
             self._variables[identifier] = node
         elif identifier is not None:
             reference = self._variables.get(identifier)
-            from ..graph.node_reference import NodeReference
             if reference is None or not isinstance(reference, Node):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
@@ -515,7 +517,6 @@ class Parser(BaseParser):
             self._variables[variable] = relationship
         elif variable is not None:
             reference = self._variables.get(variable)
-            from ..graph.relationship_reference import RelationshipReference
             if reference is None or not isinstance(reference, Relationship):
                 raise ValueError(f"Undefined relationship reference: {variable}")
             relationship = RelationshipReference(relationship, reference)
@@ -525,8 +526,6 @@ class Parser(BaseParser):
         return relationship
 
     def _parse_relationship_hops(self):
-        import sys
-        from ..graph.hops import Hops
         if not self.token.is_multiply():
             return None
         hops = Hops()
@@ -572,10 +571,11 @@ class Parser(BaseParser):
                 alias = self._parse_alias()
                 if isinstance(expression.first_child(), Reference) and alias is None:
                     reference = expression.first_child()
+                    assert isinstance(reference, Reference)  # For type narrowing
                     expression.set_alias(reference.identifier)
                     self._variables[reference.identifier] = expression
-                elif (alias_option == AliasOption.REQUIRED and 
-                      alias is None and 
+                elif (alias_option == AliasOption.REQUIRED and
+                      alias is None and
                       not isinstance(expression.first_child(), Reference)):
                     raise ValueError("Alias required")
                 elif alias_option == AliasOption.NOT_ALLOWED and alias is not None:
@@ -607,7 +607,15 @@ class Parser(BaseParser):
                 lookup = self._parse_lookup(func)
                 expression.add_node(lookup)
                 return True
-        elif self.token.is_left_parenthesis() and self.peek() is not None and (self.peek().is_identifier() or self.peek().is_colon() or self.peek().is_right_parenthesis()):
+        elif (
+            self.token.is_left_parenthesis()
+            and self.peek() is not None
+            and (
+                self.peek().is_identifier()
+                or self.peek().is_colon()
+                or self.peek().is_right_parenthesis()
+            )
+        ):
             # Possible graph pattern expression
             pattern = self._parse_pattern_expression()
             if pattern is not None:
@@ -675,7 +683,7 @@ class Parser(BaseParser):
             else:
                 break
             self.set_next_token()
-        
+
         if expression.nodes_added():
             expression.finish()
             return expression
@@ -683,7 +691,7 @@ class Parser(BaseParser):
 
     def _parse_lookup(self, node: ASTNode) -> ASTNode:
         variable = node
-        lookup = None
+        lookup: Lookup | RangeLookup | None = None
         while True:
             if self.token.is_dot():
                 self.set_next_token()
@@ -870,30 +878,30 @@ class Parser(BaseParser):
         name = self.token.value or ""
         if not self.peek() or not self.peek().is_left_parenthesis():
             return None
-        
+
         try:
             func = FunctionFactory.create(name)
         except ValueError:
             raise ValueError(f"Unknown function: {name}")
-        
+
         # Check for nested aggregate functions
         if isinstance(func, AggregateFunction) and self._context.contains_type(AggregateFunction):
             raise ValueError("Aggregate functions cannot be nested")
-        
+
         self._context.push(func)
         self.set_next_token()  # skip function name
         self.set_next_token()  # skip left parenthesis
         self._skip_whitespace_and_comments()
-        
+
         # Check for DISTINCT keyword
         if self.token.is_distinct():
             func.distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-        
+
         params = list(self._parse_function_parameters())
         func.parameters = params
-        
+
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected right parenthesis")
         self.set_next_token()
@@ -910,11 +918,11 @@ class Parser(BaseParser):
         if not self.token.is_left_parenthesis():
             raise ValueError("Expected left parenthesis")
         self.set_next_token()
-        
+
         func = FunctionFactory.create_async(name)
         params = list(self._parse_function_parameters())
         func.parameters = params
-        
+
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected right parenthesis")
         self.set_next_token()

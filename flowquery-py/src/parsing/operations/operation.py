@@ -8,7 +8,7 @@ from ..ast_node import ASTNode
 
 class Operation(ASTNode, ABC):
     """Base class for all FlowQuery operations.
-    
+
     Operations represent the main statements in FlowQuery (WITH, UNWIND, RETURN, LOAD, WHERE).
     They form a linked list structure and can be executed sequentially.
     """
@@ -46,7 +46,7 @@ class Operation(ASTNode, ABC):
 
     async def run(self) -> None:
         """Executes this operation. Must be implemented by subclasses.
-        
+
         Raises:
             NotImplementedError: If not implemented by subclass
         """

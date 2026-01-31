@@ -7,10 +7,10 @@ from .ast_node import ASTNode
 
 class Context:
     """Maintains a stack of AST nodes to track parsing context.
-    
+
     Used during parsing to maintain the current context and check for specific node types
     in the parsing hierarchy, which helps with context-sensitive parsing decisions.
-    
+
     Example:
         context = Context()
         context.push(node)
@@ -22,7 +22,7 @@ class Context:
 
     def push(self, node: ASTNode) -> None:
         """Pushes a node onto the context stack.
-        
+
         Args:
             node: The AST node to push
         """
@@ -30,7 +30,7 @@ class Context:
 
     def pop(self) -> Optional[ASTNode]:
         """Pops the top node from the context stack.
-        
+
         Returns:
             The popped node, or None if the stack is empty
         """
@@ -40,10 +40,10 @@ class Context:
 
     def contains_type(self, type_: Type[ASTNode]) -> bool:
         """Checks if the nodes stack contains a node of the specified type.
-        
+
         Args:
             type_: The class of the node type to search for
-            
+
         Returns:
             True if a node of the specified type is found in the stack, False otherwise
         """

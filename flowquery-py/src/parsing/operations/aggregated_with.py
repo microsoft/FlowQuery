@@ -1,8 +1,7 @@
 """Represents an aggregated WITH operation."""
 
-from .return_op import Return
 from .group_by import GroupBy
-from ..expressions.expression import Expression
+from .return_op import Return
 
 
 class AggregatedWith(Return):

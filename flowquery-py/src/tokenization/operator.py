@@ -5,7 +5,7 @@ from enum import Enum
 
 class Operator(Enum):
     """Enumeration of all operators in FlowQuery."""
-    
+
     # Arithmetic
     ADD = "+"
     SUBTRACT = "-"

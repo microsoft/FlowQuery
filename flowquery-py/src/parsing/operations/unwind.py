@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ..ast_node import ASTNode
 from ..expressions.expression import Expression
 from .operation import Operation
 
@@ -15,11 +16,11 @@ class Unwind(Operation):
         self.add_child(expression)
 
     @property
-    def expression(self) -> Expression:
+    def expression(self) -> ASTNode:
         return self.children[0]
 
     @property
-    def as_(self) -> str:
+    def as_(self) -> Any:
         return self.children[1].value()
 
     async def run(self) -> None:

@@ -1,10 +1,10 @@
 """Logic module for FlowQuery parsing."""
 
 from .case import Case
-from .when import When
-from .then import Then
 from .else_ import Else
 from .end import End
+from .then import Then
+from .when import When
 
 __all__ = [
     "Case",

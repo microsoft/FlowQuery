@@ -17,7 +17,7 @@ from .function_metadata import FunctionDef
 })
 class Size(Function):
     """Size function.
-    
+
     Returns the length of an array or string.
     """
 

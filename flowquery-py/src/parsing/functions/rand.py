@@ -16,7 +16,7 @@ from .function_metadata import FunctionDef
 })
 class Rand(Function):
     """Rand function.
-    
+
     Generates a random number between 0 and 1.
     """
 

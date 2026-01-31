@@ -2,8 +2,9 @@
 
 from typing import Any, Dict, List
 
-from .operation import Operation
+from ...graph.database import Database
 from ..ast_node import ASTNode
+from .operation import Operation
 
 
 class CreateRelationship(Operation):
@@ -25,7 +26,6 @@ class CreateRelationship(Operation):
     async def run(self) -> None:
         if self._relationship is None:
             raise ValueError("Relationship is null")
-        from ...graph.database import Database
         db = Database.get_instance()
         db.add_relationship(self._relationship, self._statement)
 

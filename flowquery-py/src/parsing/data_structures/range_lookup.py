@@ -1,6 +1,6 @@
 """Represents a range lookup operation in the AST."""
 
-from typing import Any, List
+from typing import Any
 
 from ..ast_node import ASTNode
 
@@ -35,7 +35,7 @@ class RangeLookup(ASTNode):
     def is_operand(self) -> bool:
         return True
 
-    def value(self) -> List[Any]:
+    def value(self) -> Any:
         array = self.variable.value()
         from_val = self.from_.value() or 0
         to_val = self.to.value() or len(array)

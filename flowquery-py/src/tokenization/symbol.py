@@ -5,7 +5,7 @@ from enum import Enum
 
 class Symbol(Enum):
     """Enumeration of all symbols in FlowQuery."""
-    
+
     LEFT_PARENTHESIS = "("
     RIGHT_PARENTHESIS = ")"
     COMMA = ","

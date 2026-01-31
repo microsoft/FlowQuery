@@ -1,17 +1,20 @@
 """Represents a RETURN operation that produces the final query results."""
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .projection import Projection
+
+if TYPE_CHECKING:
+    from .where import Where
 
 
 class Return(Projection):
     """Represents a RETURN operation that produces the final query results.
-    
+
     The RETURN operation evaluates expressions and collects them into result records.
     It can optionally have a WHERE clause to filter results.
-    
+
     Example:
         # RETURN x, y WHERE x > 0
     """
@@ -22,7 +25,7 @@ class Return(Projection):
         self._results: List[Dict[str, Any]] = []
 
     @property
-    def where(self) -> bool:
+    def where(self) -> Any:
         if self._where is None:
             return True
         return self._where.value()

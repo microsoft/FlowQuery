@@ -1,11 +1,11 @@
 """Collect aggregate function."""
 
-from typing import Any, Dict, List, Union
 import json
+from typing import Any, Dict, List, Union
 
 from .aggregate_function import AggregateFunction
-from .reducer_element import ReducerElement
 from .function_metadata import FunctionDef
+from .reducer_element import ReducerElement
 
 
 class CollectReducerElement(ReducerElement):
@@ -51,7 +51,7 @@ class DistinctCollectReducerElement(ReducerElement):
 })
 class Collect(AggregateFunction):
     """Collect aggregate function.
-    
+
     Collects values into an array across grouped rows.
     """
 

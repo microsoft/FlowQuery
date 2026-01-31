@@ -1,5 +1,23 @@
 npx lint-staged
 
+# Run ruff and mypy on Python files in flowquery-py
+if git diff --cached --name-only | grep -q "^flowquery-py/.*\.py$"; then
+    echo "Running ruff on Python files..."
+    cd flowquery-py
+    conda run -n flowquery ruff check src --select=F401,E,W,I
+    if [ $? -ne 0 ]; then
+        echo "Ruff check failed. Please fix the issues before committing."
+        exit 1
+    fi
+    echo "Running mypy on Python files..."
+    conda run -n flowquery mypy src --no-error-summary
+    if [ $? -ne 0 ]; then
+        echo "Mypy check failed. Please fix the type errors before committing."
+        exit 1
+    fi
+    cd ..
+fi
+
 # Strip outputs from notebook files in flowquery-py
 for notebook in $(git ls-files 'flowquery-py/**/*.ipynb'); do
     if [ -f "$notebook" ]; then

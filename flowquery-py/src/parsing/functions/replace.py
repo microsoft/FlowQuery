@@ -20,7 +20,7 @@ from .function_metadata import FunctionDef
 })
 class Replace(Function):
     """Replace function.
-    
+
     Replaces occurrences of a pattern in a string.
     """
 

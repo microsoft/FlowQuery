@@ -2,8 +2,9 @@
 
 from typing import Any, Dict, List
 
-from .operation import Operation
+from ...graph.database import Database
 from ..ast_node import ASTNode
+from .operation import Operation
 
 
 class CreateNode(Operation):
@@ -25,7 +26,6 @@ class CreateNode(Operation):
     async def run(self) -> None:
         if self._node is None:
             raise ValueError("Node is null")
-        from ...graph.database import Database
         db = Database.get_instance()
         db.add_node(self._node, self._statement)
 

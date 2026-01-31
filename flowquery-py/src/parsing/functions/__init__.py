@@ -1,41 +1,41 @@
 """Functions module for FlowQuery parsing."""
 
-from .function import Function
 from .aggregate_function import AggregateFunction
 from .async_function import AsyncFunction
-from .predicate_function import PredicateFunction
-from .reducer_element import ReducerElement
-from .value_holder import ValueHolder
-from .function_metadata import (
-    FunctionCategory,
-    ParameterSchema,
-    OutputSchema,
-    FunctionMetadata,
-    FunctionDef,
-    FunctionDefOptions,
-    get_registered_function_metadata,
-    get_registered_function_factory,
-    get_function_metadata,
-)
-from .function_factory import FunctionFactory
-
-# Built-in functions
-from .sum import Sum
 from .avg import Avg
 from .collect import Collect
+from .function import Function
+from .function_factory import FunctionFactory
+from .function_metadata import (
+    FunctionCategory,
+    FunctionDef,
+    FunctionDefOptions,
+    FunctionMetadata,
+    OutputSchema,
+    ParameterSchema,
+    get_function_metadata,
+    get_registered_function_factory,
+    get_registered_function_metadata,
+)
+from .functions import Functions
 from .join import Join
 from .keys import Keys
+from .predicate_function import PredicateFunction
+from .predicate_sum import PredicateSum
 from .rand import Rand
 from .range_ import Range
+from .reducer_element import ReducerElement
 from .replace import Replace
 from .round_ import Round
 from .size import Size
 from .split import Split
 from .stringify import Stringify
+
+# Built-in functions
+from .sum import Sum
 from .to_json import ToJson
 from .type_ import Type
-from .functions import Functions
-from .predicate_sum import PredicateSum
+from .value_holder import ValueHolder
 
 __all__ = [
     # Base classes

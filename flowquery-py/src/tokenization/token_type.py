@@ -5,7 +5,7 @@ from enum import Enum
 
 class TokenType(Enum):
     """Enumeration of all token types in FlowQuery."""
-    
+
     KEYWORD = "KEYWORD"
     BOOLEAN = "BOOLEAN"
     OPERATOR = "OPERATOR"

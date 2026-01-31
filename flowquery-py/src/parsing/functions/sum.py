@@ -3,8 +3,8 @@
 from typing import Any
 
 from .aggregate_function import AggregateFunction
-from .reducer_element import ReducerElement
 from .function_metadata import FunctionDef
+from .reducer_element import ReducerElement
 
 
 class SumReducerElement(ReducerElement):
@@ -36,7 +36,7 @@ class SumReducerElement(ReducerElement):
 })
 class Sum(AggregateFunction):
     """Sum aggregate function.
-    
+
     Calculates the sum of numeric values across grouped rows.
     """
 

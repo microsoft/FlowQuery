@@ -8,9 +8,9 @@ from .key_value_pair import KeyValuePair
 
 class AssociativeArray(ASTNode):
     """Represents an associative array (object/dictionary) in the AST.
-    
+
     Associative arrays map string keys to values, similar to JSON objects.
-    
+
     Example:
         # For { name: "Alice", age: 30 }
         obj = AssociativeArray()
@@ -20,7 +20,7 @@ class AssociativeArray(ASTNode):
 
     def add_key_value(self, key_value_pair: KeyValuePair) -> None:
         """Adds a key-value pair to the associative array.
-        
+
         Args:
             key_value_pair: The key-value pair to add
         """
@@ -31,8 +31,8 @@ class AssociativeArray(ASTNode):
 
     def _value(self):
         for child in self.children:
-            key_value = child
-            yield {key_value.key: key_value._value}
+            if isinstance(child, KeyValuePair):
+                yield {child.key: child._value}
 
     def value(self) -> Dict[str, Any]:
         result = {}

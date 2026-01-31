@@ -5,7 +5,7 @@ from enum import Enum
 
 class Keyword(Enum):
     """Enumeration of all keywords in FlowQuery."""
-    
+
     RETURN = "RETURN"
     MATCH = "MATCH"
     WHERE = "WHERE"

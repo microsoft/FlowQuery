@@ -17,7 +17,7 @@ from .function_metadata import FunctionDef
 })
 class Round(Function):
     """Round function.
-    
+
     Rounds a number to the nearest integer.
     """
 

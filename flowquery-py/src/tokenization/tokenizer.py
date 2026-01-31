@@ -1,6 +1,6 @@
 """Tokenizes FlowQuery input strings into a sequence of tokens."""
 
-from typing import List, Optional, Iterator, Callable
+from typing import Callable, Iterator, List, Optional
 
 from ..utils.string_utils import StringUtils
 from .keyword import Keyword
@@ -13,11 +13,11 @@ from .token_mapper import TokenMapper
 
 class Tokenizer:
     """Tokenizes FlowQuery input strings into a sequence of tokens.
-    
+
     The tokenizer performs lexical analysis, breaking down the input text into
     meaningful tokens such as keywords, identifiers, operators, strings, numbers,
     and symbols. It handles comments, whitespace, and f-strings.
-    
+
     Example:
         tokenizer = Tokenizer("WITH x = 1 RETURN x")
         tokens = tokenizer.tokenize()
@@ -25,7 +25,7 @@ class Tokenizer:
 
     def __init__(self, input_: str):
         """Creates a new Tokenizer instance for the given input.
-        
+
         Args:
             input_: The FlowQuery input string to tokenize
         """
@@ -36,16 +36,16 @@ class Tokenizer:
 
     def tokenize(self) -> List[Token]:
         """Tokenizes the input string into an array of tokens.
-        
+
         Returns:
             An array of Token objects representing the tokenized input
-            
+
         Raises:
             ValueError: If an unrecognized token is encountered
         """
         tokens: List[Token] = []
         last: Optional[Token] = None
-        
+
         while not self._walker.is_at_end:
             tokens.extend(self._f_string())
             last = self._get_last_non_whitespace_or_non_comment_token(tokens) or last
@@ -54,7 +54,7 @@ class Tokenizer:
                 raise ValueError(f"Unrecognized token at position {self._walker.position}")
             token.position = self._walker.position
             tokens.append(token)
-        
+
         return tokens
 
     def _get_last_non_whitespace_or_non_comment_token(self, tokens: List[Token]) -> Optional[Token]:
@@ -97,9 +97,9 @@ class Tokenizer:
     def _identifier(self) -> Optional[Token]:
         start_position = self._walker.position
         if self._walker.check_for_under_score() or self._walker.check_for_letter():
-            while (not self._walker.is_at_end and 
-                   (self._walker.check_for_letter() or 
-                    self._walker.check_for_digit() or 
+            while (not self._walker.is_at_end and
+                   (self._walker.check_for_letter() or
+                    self._walker.check_for_digit() or
                     self._walker.check_for_under_score())):
                 pass
             return Token.IDENTIFIER(self._walker.get_string(start_position))
@@ -110,7 +110,7 @@ class Tokenizer:
         quote_char = self._walker.check_for_quote()
         if quote_char is None:
             return None
-        
+
         while not self._walker.is_at_end:
             if self._walker.escaped(quote_char):
                 self._walker.move_next()
@@ -122,32 +122,32 @@ class Tokenizer:
                     return Token.BACKTICK_STRING(value, quote_char)
                 return Token.STRING(value, quote_char)
             self._walker.move_next()
-        
+
         raise ValueError(f"Unterminated string at position {start_position}")
 
     def _f_string(self) -> Iterator[Token]:
         if not self._walker.check_for_f_string_start():
             return
-        
+
         self._walker.move_next()  # skip the f
         position = self._walker.position
         quote_char = self._walker.check_for_quote()
         if quote_char is None:
             return
-        
+
         while not self._walker.is_at_end:
             if self._walker.escaped(quote_char) or self._walker.escaped_brace():
                 self._walker.move_next()
                 self._walker.move_next()
                 continue
-            
+
             if self._walker.opening_brace():
                 yield Token.F_STRING(self._walker.get_string(position), quote_char)
                 position = self._walker.position
                 yield Token.OPENING_BRACE()
                 self._walker.move_next()  # skip the opening brace
                 position = self._walker.position
-                
+
                 while not self._walker.is_at_end and not self._walker.closing_brace():
                     token = self._get_next_token()
                     if token is not None:
@@ -159,11 +159,11 @@ class Tokenizer:
                         self._walker.move_next()  # skip the closing brace
                         position = self._walker.position
                         break
-            
+
             if self._walker.check_for_string(quote_char):
                 yield Token.F_STRING(self._walker.get_string(position), quote_char)
                 return
-            
+
             self._walker.move_next()
 
     def _whitespace(self) -> Optional[Token]:

@@ -9,7 +9,7 @@ from .pattern import Pattern
 
 class PatternExpression(Pattern):
     """Represents a pattern expression that can be evaluated.
-    
+
     PatternExpression is used in WHERE clauses to test whether a graph pattern
     exists. It evaluates to True if the pattern is matched, False otherwise.
     """
@@ -45,18 +45,18 @@ class PatternExpression(Pattern):
 
     async def evaluate(self) -> None:
         """Evaluates the pattern expression by traversing the graph.
-        
+
         Sets _evaluation to True if the pattern is matched, False otherwise.
         """
         self._evaluation = False
-        
+
         async def set_evaluation_true():
             self._evaluation = True
-        
+
         self.end_node.todo_next = set_evaluation_true
         await self.start_node.next()
 
-    def value(self) -> bool:
+    def value(self) -> Any:
         """Returns the result of the pattern evaluation."""
         return self._evaluation
 

@@ -3,8 +3,8 @@
 from typing import Optional
 
 from .aggregate_function import AggregateFunction
-from .reducer_element import ReducerElement
 from .function_metadata import FunctionDef
+from .reducer_element import ReducerElement
 
 
 class AvgReducerElement(ReducerElement):
@@ -40,7 +40,7 @@ class AvgReducerElement(ReducerElement):
 })
 class Avg(AggregateFunction):
     """Avg aggregate function.
-    
+
     Calculates the average of numeric values across grouped rows.
     """
 

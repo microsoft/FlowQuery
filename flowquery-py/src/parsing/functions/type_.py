@@ -21,7 +21,7 @@ from .function_metadata import FunctionDef
 })
 class Type(Function):
     """Type function.
-    
+
     Returns the type of a value as a string.
     """
 
@@ -31,7 +31,7 @@ class Type(Function):
 
     def value(self) -> Any:
         val = self.get_children()[0].value()
-        
+
         if val is None:
             return "null"
         if isinstance(val, list):

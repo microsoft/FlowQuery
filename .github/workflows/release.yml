@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'src/**'
+      - "src/**"
 
 permissions:
   contents: write
@@ -13,78 +13,82 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          node-version: "20"
+          cache: "npm"
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run tests
         run: npm test
-      
+
       - name: Build project
         run: npm run build
-      
+
       - name: Verify build artifacts
         run: |
           echo "Checking build artifacts..."
           ls -la dist/flowquery.min.js || echo "dist/flowquery.min.js not found"
-      
+
       - name: Copy to VS Code extension
         run: |
           echo "Copying flowquery.min.js to VS Code extension..."
           mkdir -p flowquery-vscode/flowQueryEngine
           cp dist/flowquery.min.js flowquery-vscode/flowQueryEngine/
           ls -la flowquery-vscode/flowQueryEngine/
-      
+
       - name: Copy to docs folder
         run: |
           echo "Copying flowquery.min.js to docs folder for GitHub Pages..."
           cp dist/flowquery.min.js docs/
           ls -la docs/flowquery.min.js
-      
+
       - name: Bump version
         id: version
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Bump patch version (use 'minor' or 'major' for other bump types)
           npm version patch --no-git-tag-version
-          
+
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
-          
+
           # Commit the version bump
           git add package.json package-lock.json docs/flowquery.min.js
           git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
-          
+
+          # Include any changes from formatters/linters in the commit
+          git add -A
+          git diff --cached --quiet || git commit --amend --no-edit
+
           # Pull latest changes and rebase our commit on top
           git pull --rebase origin main
           git push
-      
+
       - name: Install VS Code extension dependencies
         working-directory: ./flowquery-vscode
         run: |
           npm install @vscode/vsce
-      
+
       - name: Package VS Code extension
         working-directory: ./flowquery-vscode
         run: |
           npx @vscode/vsce package
           ls -la *.vsix
-      
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:

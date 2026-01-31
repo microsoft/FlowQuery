@@ -23,7 +23,7 @@ class FunctionFactory:
     """
 
     @staticmethod
-    def get_async_provider(name: str) -> Optional[Callable]:
+    def get_async_provider(name: str) -> Optional[Callable[..., Any]]:
         """Gets an async data provider by name.
 
         Args:

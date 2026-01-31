@@ -7,7 +7,7 @@ class ObjectUtils:
     """Utility class for object-related operations."""
 
     @staticmethod
-    def is_instance_of_any(obj: Any, classes: List[Type]) -> bool:
+    def is_instance_of_any(obj: Any, classes: List[Type[Any]]) -> bool:
         """Checks if an object is an instance of any of the provided classes.
 
         Args:

@@ -1,0 +1,10 @@
+[
+  {
+    "test": "This is a test.",
+    "description": "A simple JSON file for testing."
+  },
+  {
+    "test": "Another test entry.",
+    "description": "Another simple JSON object."
+  }
+]

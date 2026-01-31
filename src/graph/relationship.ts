@@ -93,6 +93,14 @@ class Relationship extends ASTNode {
         }
         if (hop === 0) {
             this._data?.reset();
+
+            // Handle zero-hop case: when min is 0 on a variable-length relationship,
+            // match source node as target (no traversal)
+            if (this.hops?.multi() && this.hops.min === 0 && this._target) {
+                // For zero-hop, target finds the same node as source (left_id)
+                // No relationship match is pushed since no edge is traversed
+                await this._target.find(left_id, hop);
+            }
         }
         while (this._data?.find(left_id, hop)) {
             const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;

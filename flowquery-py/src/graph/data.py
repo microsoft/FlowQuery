@@ -100,9 +100,10 @@ class Data:
 
     def reset(self) -> None:
         """Reset iteration to the beginning."""
-        self.layer(0).current = -1
-        for entry in self.layer(0).index.values():
-            entry.reset()
+        for layer in self._layers.values():
+            layer.current = -1
+            for entry in layer.index.values():
+                entry.reset()
 
     def next(self, level: int = 0) -> bool:
         """Move to the next record. Returns True if successful."""

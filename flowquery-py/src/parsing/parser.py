@@ -540,9 +540,10 @@ class Parser(BaseParser):
                     raise ValueError("Expected '..' for relationship hops")
                 self.set_next_token()
                 if not self.token.is_number():
-                    raise ValueError("Expected number for relationship hops")
-                hops.max = int(self.token.value or "0")
-                self.set_next_token()
+                    hops.max = sys.maxsize
+                else:
+                    hops.max = int(self.token.value or "0")
+                    self.set_next_token()
         else:
             # Just * without numbers means unbounded
             hops.min = 0
@@ -590,64 +591,80 @@ class Parser(BaseParser):
                 break
             self.set_next_token()
 
+    def _parse_operand(self, expression: Expression) -> bool:
+        """Parse a single operand (without operators). Returns True if an operand was parsed."""
+        self._skip_whitespace_and_comments()
+        if self.token.is_identifier() and (self.peek() is None or not self.peek().is_left_parenthesis()):
+            identifier = self.token.value or ""
+            reference = Reference(identifier, self._variables.get(identifier))
+            self.set_next_token()
+            lookup = self._parse_lookup(reference)
+            expression.add_node(lookup)
+            return True
+        elif self.token.is_identifier() and self.peek() is not None and self.peek().is_left_parenthesis():
+            func = self._parse_predicate_function() or self._parse_function()
+            if func is not None:
+                lookup = self._parse_lookup(func)
+                expression.add_node(lookup)
+                return True
+        elif self.token.is_left_parenthesis() and self.peek() is not None and (self.peek().is_identifier() or self.peek().is_colon() or self.peek().is_right_parenthesis()):
+            # Possible graph pattern expression
+            pattern = self._parse_pattern_expression()
+            if pattern is not None:
+                expression.add_node(pattern)
+                return True
+        elif self.token.is_operand():
+            expression.add_node(self.token.node)
+            self.set_next_token()
+            return True
+        elif self.token.is_f_string():
+            f_string = self._parse_f_string()
+            if f_string is None:
+                raise ValueError("Expected f-string")
+            expression.add_node(f_string)
+            return True
+        elif self.token.is_left_parenthesis():
+            self.set_next_token()
+            sub = self._parse_expression()
+            if sub is None:
+                raise ValueError("Expected expression")
+            if not self.token.is_right_parenthesis():
+                raise ValueError("Expected right parenthesis")
+            self.set_next_token()
+            lookup = self._parse_lookup(sub)
+            expression.add_node(lookup)
+            return True
+        elif self.token.is_opening_brace() or self.token.is_opening_bracket():
+            json = self._parse_json()
+            if json is None:
+                raise ValueError("Expected JSON object")
+            lookup = self._parse_lookup(json)
+            expression.add_node(lookup)
+            return True
+        elif self.token.is_case():
+            case = self._parse_case()
+            if case is None:
+                raise ValueError("Expected CASE statement")
+            expression.add_node(case)
+            return True
+        elif self.token.is_not():
+            not_node = Not()
+            self.set_next_token()
+            # NOT should only bind to the next operand, not the entire expression
+            # Create a temporary expression to parse just one operand
+            temp_expr = Expression()
+            if not self._parse_operand(temp_expr):
+                raise ValueError("Expected expression after NOT")
+            temp_expr.finish()
+            not_node.add_child(temp_expr)
+            expression.add_node(not_node)
+            return True
+        return False
+
     def _parse_expression(self) -> Optional[Expression]:
         expression = Expression()
         while True:
-            self._skip_whitespace_and_comments()
-            if self.token.is_identifier() and (self.peek() is None or not self.peek().is_left_parenthesis()):
-                identifier = self.token.value or ""
-                reference = Reference(identifier, self._variables.get(identifier))
-                self.set_next_token()
-                lookup = self._parse_lookup(reference)
-                expression.add_node(lookup)
-            elif self.token.is_identifier() and self.peek() is not None and self.peek().is_left_parenthesis():
-                func = self._parse_predicate_function() or self._parse_function()
-                if func is not None:
-                    lookup = self._parse_lookup(func)
-                    expression.add_node(lookup)
-            elif self.token.is_left_parenthesis() and self.peek() is not None and (self.peek().is_identifier() or self.peek().is_colon() or self.peek().is_right_parenthesis()):
-                # Possible graph pattern expression
-                pattern = self._parse_pattern_expression()
-                if pattern is not None:
-                    expression.add_node(pattern)
-            elif self.token.is_operand():
-                expression.add_node(self.token.node)
-                self.set_next_token()
-            elif self.token.is_f_string():
-                f_string = self._parse_f_string()
-                if f_string is None:
-                    raise ValueError("Expected f-string")
-                expression.add_node(f_string)
-            elif self.token.is_left_parenthesis():
-                self.set_next_token()
-                sub = self._parse_expression()
-                if sub is None:
-                    raise ValueError("Expected expression")
-                if not self.token.is_right_parenthesis():
-                    raise ValueError("Expected right parenthesis")
-                self.set_next_token()
-                lookup = self._parse_lookup(sub)
-                expression.add_node(lookup)
-            elif self.token.is_opening_brace() or self.token.is_opening_bracket():
-                json = self._parse_json()
-                if json is None:
-                    raise ValueError("Expected JSON object")
-                lookup = self._parse_lookup(json)
-                expression.add_node(lookup)
-            elif self.token.is_case():
-                case = self._parse_case()
-                if case is None:
-                    raise ValueError("Expected CASE statement")
-                expression.add_node(case)
-            elif self.token.is_not():
-                not_node = Not()
-                self.set_next_token()
-                sub = self._parse_expression()
-                if sub is None:
-                    raise ValueError("Expected expression")
-                not_node.add_child(sub)
-                expression.add_node(not_node)
-            else:
+            if not self._parse_operand(expression):
                 if expression.nodes_added():
                     raise ValueError("Expected operand or left parenthesis")
                 else:

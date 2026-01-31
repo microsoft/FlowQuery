@@ -118,6 +118,13 @@ class Relationship(ASTNode):
             self._source = self._target
         if hop == 0:
             self._data.reset() if self._data else None
+            
+            # Handle zero-hop case: when min is 0 on a variable-length relationship,
+            # match source node as target (no traversal)
+            if self._hops and self._hops.multi() and self._hops.min == 0 and self._target:
+                # For zero-hop, target finds the same node as source (left_id)
+                # No relationship match is pushed since no edge is traversed
+                await self._target.find(left_id, hop)
         
         while self._data and self._data.find(left_id, hop):
             data = self._data.current(hop)

@@ -610,10 +610,11 @@ class Parser extends BaseParser {
                 }
                 this.setNextToken();
                 if (!this.token.isNumber()) {
-                    throw new Error("Expected number for relationship hops");
+                    hops.max = Number.MAX_SAFE_INTEGER;
+                } else {
+                    hops.max = parseInt(this.token.value || "0");
+                    this.setNextToken();
                 }
-                hops.max = parseInt(this.token.value || "0");
-                this.setNextToken();
             }
         } else {
             hops.min = 0;
@@ -691,77 +692,97 @@ class Parser extends BaseParser {
         }
     }
 
+    /**
+     * Parse a single operand (without operators).
+     * @returns True if an operand was parsed, false otherwise.
+     */
+    private parseOperand(expression: Expression): boolean {
+        this.skipWhitespaceAndComments();
+        if (this.token.isIdentifier() && !this.peek()?.isLeftParenthesis()) {
+            const identifier: string = this.token.value || "";
+            const reference = new Reference(identifier, this.variables.get(identifier));
+            this.setNextToken();
+            const lookup = this.parseLookup(reference);
+            expression.addNode(lookup);
+            return true;
+        } else if (this.token.isIdentifier() && this.peek()?.isLeftParenthesis()) {
+            const func = this.parsePredicateFunction() || this.parseFunction();
+            if (func !== null) {
+                const lookup = this.parseLookup(func);
+                expression.addNode(lookup);
+                return true;
+            }
+        } else if (
+            this.token.isLeftParenthesis() &&
+            (this.peek()?.isIdentifier() ||
+                this.peek()?.isColon() ||
+                this.peek()?.isRightParenthesis())
+        ) {
+            // Possible graph pattern expression
+            const pattern = this.parsePatternExpression();
+            if (pattern !== null) {
+                expression.addNode(pattern);
+                return true;
+            }
+        } else if (this.token.isOperand()) {
+            expression.addNode(this.token.node);
+            this.setNextToken();
+            return true;
+        } else if (this.token.isFString()) {
+            const f_string = this.parseFString();
+            if (f_string === null) {
+                throw new Error("Expected f-string");
+            }
+            expression.addNode(f_string);
+            return true;
+        } else if (this.token.isLeftParenthesis()) {
+            this.setNextToken();
+            const sub = this.parseExpression();
+            if (sub === null) {
+                throw new Error("Expected expression");
+            }
+            if (!this.token.isRightParenthesis()) {
+                throw new Error("Expected right parenthesis");
+            }
+            this.setNextToken();
+            const lookup = this.parseLookup(sub);
+            expression.addNode(lookup);
+            return true;
+        } else if (this.token.isOpeningBrace() || this.token.isOpeningBracket()) {
+            const json = this.parseJSON();
+            if (json === null) {
+                throw new Error("Expected JSON object");
+            }
+            const lookup = this.parseLookup(json);
+            expression.addNode(lookup);
+            return true;
+        } else if (this.token.isCase()) {
+            const _case = this.parseCase();
+            if (_case === null) {
+                throw new Error("Expected CASE statement");
+            }
+            expression.addNode(_case);
+            return true;
+        } else if (this.token.isNot()) {
+            const not = new Not();
+            this.setNextToken();
+            // NOT should only bind to the next operand, not the entire expression
+            const tempExpr = new Expression();
+            if (!this.parseOperand(tempExpr)) {
+                throw new Error("Expected expression after NOT");
+            }
+            tempExpr.finish();
+            not.addChild(tempExpr);
+            expression.addNode(not);
+            return true;
+        }
+        return false;
+    }
+
     private parseExpression(): Expression | null {
         const expression = new Expression();
         while (true) {
-            this.skipWhitespaceAndComments();
-            if (this.token.isIdentifier() && !this.peek()?.isLeftParenthesis()) {
-                const identifier: string = this.token.value || "";
-                const reference = new Reference(identifier, this.variables.get(identifier));
-                this.setNextToken();
-                const lookup = this.parseLookup(reference);
-                expression.addNode(lookup);
-            } else if (this.token.isIdentifier() && this.peek()?.isLeftParenthesis()) {
-                const func = this.parsePredicateFunction() || this.parseFunction();
-                if (func !== null) {
-                    const lookup = this.parseLookup(func);
-                    expression.addNode(lookup);
-                }
-            } else if (
-                this.token.isLeftParenthesis() &&
-                (this.peek()?.isIdentifier() ||
-                    this.peek()?.isColon() ||
-                    this.peek()?.isRightParenthesis())
-            ) {
-                // Possible graph pattern expression
-                const pattern = this.parsePatternExpression();
-                if (pattern !== null) {
-                    expression.addNode(pattern);
-                }
-            } else if (this.token.isOperand()) {
-                expression.addNode(this.token.node);
-                this.setNextToken();
-            } else if (this.token.isFString()) {
-                const f_string = this.parseFString();
-                if (f_string === null) {
-                    throw new Error("Expected f-string");
-                }
-                expression.addNode(f_string);
-            } else if (this.token.isLeftParenthesis()) {
-                this.setNextToken();
-                const sub = this.parseExpression();
-                if (sub === null) {
-                    throw new Error("Expected expression");
-                }
-                if (!this.token.isRightParenthesis()) {
-                    throw new Error("Expected right parenthesis");
-                }
-                this.setNextToken();
-                const lookup = this.parseLookup(sub);
-                expression.addNode(lookup);
-            } else if (this.token.isOpeningBrace() || this.token.isOpeningBracket()) {
-                const json = this.parseJSON();
-                if (json === null) {
-                    throw new Error("Expected JSON object");
-                }
-                const lookup = this.parseLookup(json);
-                expression.addNode(lookup);
-            } else if (this.token.isCase()) {
-                const _case = this.parseCase();
-                if (_case === null) {
-                    throw new Error("Expected CASE statement");
-                }
-                expression.addNode(_case);
-            } else if (this.token.isNot()) {
-                const not = new Not();
-                this.setNextToken();
-                const sub = this.parseExpression();
-                if (sub === null) {
-                    throw new Error("Expected expression");
-                }
-                not.addChild(sub);
-                expression.addNode(not);
-            } else {
+            if (!this.parseOperand(expression)) {
                 if (expression.nodesAdded()) {
                     throw new Error("Expected operand or left parenthesis");
                 } else {

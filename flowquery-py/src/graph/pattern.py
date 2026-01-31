@@ -85,16 +85,19 @@ class Pattern(ASTNode):
         from .node import Node
         from .relationship import Relationship
         
-        for element in self._chain:
+        for i, element in enumerate(self._chain):
             if isinstance(element, Node):
+                # Skip node if previous element was a zero-hop relationship (no matches)
+                if i > 0 and isinstance(self._chain[i-1], Relationship) and len(self._chain[i-1].matches) == 0:
+                    continue
                 yield element.value()
             elif isinstance(element, Relationship):
-                i = 0
+                j = 0
                 for match in element.matches:
                     yield match
-                    if i < len(element.matches) - 1:
+                    if j < len(element.matches) - 1:
                         yield match["endNode"]
-                    i += 1
+                    j += 1
 
     async def fetch_data(self) -> None:
         """Loads data from the database for all elements."""

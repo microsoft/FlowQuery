@@ -69,6 +69,9 @@ jobs:
           # Commit the version bump
           git add package.json package-lock.json docs/flowquery.min.js
           git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+          
+          # Pull latest changes and rebase our commit on top
+          git pull --rebase origin main
           git push
       
       - name: Install VS Code extension dependencies

@@ -12,11 +12,12 @@ FlowQuery is written in TypeScript (https://www.typescriptlang.org/) and built/c
 - Try as a VSCode plugin from https://marketplace.visualstudio.com/items?itemName=FlowQuery.flowquery-vscode.
 
 ## Howto
-- Dev: ```npm start```
-  - This will start a FlowQuery command line where you can run statements.
-- Test: ```npm test```
-  - This will run all unit tests.
-- Build: ```npm run build``` (builds for both Node and web)
+
+- Dev: `npm start`
+    - This will start a FlowQuery command line where you can run statements.
+- Test: `npm test`
+    - This will run all unit tests.
+- Build: `npm run build` (builds for both Node and web)
 
 ## Installation & Usage
 
@@ -31,12 +32,12 @@ npm install flowquery
 Then use it in your code:
 
 ```javascript
-const FlowQuery = require('flowquery').default;
+const FlowQuery = require("flowquery").default;
 // Or with ES modules:
 // import FlowQuery from 'flowquery';
 
 async function main() {
-    const query = new FlowQuery('WITH 1 AS x RETURN x + 1');
+    const query = new FlowQuery("WITH 1 AS x RETURN x + 1");
     await query.run();
     console.log(query.results); // [ { expr0: 2 } ]
 }
@@ -51,20 +52,20 @@ Include the minified bundle in your HTML:
 ```html
 <script src="https://microsoft.github.io/FlowQuery/flowquery.min.js"></script>
 <script>
-async function main() {
-    const query = new FlowQuery('WITH 1 AS x RETURN x + 1');
-    await query.run();
-    console.log(query.results); // [ { expr0: 2 } ]
-}
+    async function main() {
+        const query = new FlowQuery("WITH 1 AS x RETURN x + 1");
+        await query.run();
+        console.log(query.results); // [ { expr0: 2 } ]
+    }
 
-main();
+    main();
 </script>
 ```
 
 Or import from the browser-specific entry point:
 
 ```javascript
-import FlowQuery from 'flowquery/browser';
+import FlowQuery from "flowquery/browser";
 
 const query = new FlowQuery('WITH "Hello" AS greeting RETURN greeting');
 await query.run();
@@ -72,7 +73,9 @@ console.log(query.results);
 ```
 
 ## Examples
+
 See also ./misc/queries and ./tests/compute/runner.test.ts for more examples.
+
 ```cypher
 /*
 Collect 10 random pieces of wisdom and create a letter histogram.
@@ -83,12 +86,13 @@ with join(collect(item.slip.advice),"") as wisdom
 unwind split(wisdom,"") as letter
 return letter, sum(1) as lettercount
 ```
+
 ```cypher
 /*
   This query fetches 10 cat facts from the Cat Facts API (https://catfact.ninja/fact)
   and then uses the OpenAI API to analyze those cat facts and return a short summary
   of the most interesting facts and what they imply about cats as pets.
-  
+
   To run this query, you need to set the OPENAI_API_KEY variable to your OpenAI API key.
   You also need to set the OpenAI-Organization header to your organization ID.
     You can find your organization ID in the OpenAI dashboard.
@@ -127,6 +131,7 @@ with openai_response.choices[0].message.content as catfacts_analysis
 // Return the analysis
 return catfacts_analysis
 ```
+
 ```cypher
 // Test completion from Azure OpenAI API
 with
@@ -153,12 +158,12 @@ Import the necessary classes and decorators from the extensibility module:
 
 ```typescript
 import {
-    Function,
     AggregateFunction,
+    Function,
+    FunctionDef,
     PredicateFunction,
     ReducerElement,
-    FunctionDef
-} from 'flowquery/extensibility';
+} from "flowquery/extensibility";
 ```
 
 ### Creating a Custom Scalar Function
@@ -166,20 +171,20 @@ import {
 Scalar functions operate on individual values and return a result:
 
 ```typescript
-import { Function, FunctionDef } from 'flowquery/extensibility';
+import { Function, FunctionDef } from "flowquery/extensibility";
 
 @FunctionDef({
     description: "Doubles a number",
     category: "scalar",
     parameters: [{ name: "value", description: "Number to double", type: "number" }],
-    output: { description: "Doubled value", type: "number" }
+    output: { description: "Doubled value", type: "number" },
 })
 class Double extends Function {
     constructor() {
         super("double");
         this._expectedParameterCount = 1;
     }
-    
+
     public value(): number {
         return this.getChildren()[0].value() * 2;
     }
@@ -196,23 +201,23 @@ WITH 5 AS num RETURN double(num) AS result
 ### Creating a Custom String Function
 
 ```typescript
-import { Function, FunctionDef } from 'flowquery/extensibility';
+import { Function, FunctionDef } from "flowquery/extensibility";
 
 @FunctionDef({
     description: "Reverses a string",
     category: "scalar",
     parameters: [{ name: "text", description: "String to reverse", type: "string" }],
-    output: { description: "Reversed string", type: "string" }
+    output: { description: "Reversed string", type: "string" },
 })
 class StrReverse extends Function {
     constructor() {
         super("strreverse");
         this._expectedParameterCount = 1;
     }
-    
+
     public value(): string {
         const input = String(this.getChildren()[0].value());
-        return input.split('').reverse().join('');
+        return input.split("").reverse().join("");
     }
 }
 ```
@@ -229,7 +234,7 @@ WITH 'hello' AS s RETURN strreverse(s) AS reversed
 Aggregate functions process multiple values and return a single result. They require a `ReducerElement` to track state:
 
 ```typescript
-import { AggregateFunction, ReducerElement, FunctionDef } from 'flowquery/extensibility';
+import { AggregateFunction, FunctionDef, ReducerElement } from "flowquery/extensibility";
 
 class ProductElement extends ReducerElement {
     private _value: number = 1;
@@ -245,18 +250,18 @@ class ProductElement extends ReducerElement {
     description: "Calculates the product of values",
     category: "aggregate",
     parameters: [{ name: "value", description: "Number to multiply", type: "number" }],
-    output: { description: "Product of all values", type: "number" }
+    output: { description: "Product of all values", type: "number" },
 })
 class Product extends AggregateFunction {
     constructor() {
         super("product");
         this._expectedParameterCount = 1;
     }
-    
+
     public reduce(element: ReducerElement): void {
         element.value = this.firstChild().value();
     }
-    
+
     public element(): ReducerElement {
         return new ProductElement();
     }
@@ -275,13 +280,13 @@ UNWIND [2, 3, 4] AS num RETURN product(num) AS result
 Async providers allow you to create custom data sources that can be used with `LOAD JSON FROM`:
 
 ```typescript
-import { FunctionDef, AsyncFunction } from 'flowquery/extensibility';
+import { AsyncFunction, FunctionDef } from "flowquery/extensibility";
 
 @FunctionDef({
     description: "Provides example data for testing",
     category: "async",
     parameters: [],
-    output: { description: "Example data object", type: "object" }
+    output: { description: "Example data object", type: "object" },
 })
 class GetExampleData extends AsyncFunction {
     async *generate(): AsyncGenerator<any> {
@@ -323,7 +328,7 @@ RETURN f.name AS name, f.description AS description, f.category AS category
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
 

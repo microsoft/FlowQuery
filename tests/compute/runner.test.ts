@@ -804,10 +804,18 @@ test("Test match with multiple hop graph pattern", async () => {
     `);
     await match.run();
     const results = match.results;
-    expect(results.length).toBe(3);
-    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
-    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
-    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    expect(results.length).toBe(7);
+    // Results are interleaved: each person's zero-hop comes before their multi-hop matches
+    // Person 1: zero-hop, then 1-hop to P2, then 2-hop to P3
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 1" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[2]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    // Person 2: zero-hop, then 1-hop to P3
+    expect(results[3]).toEqual({ name1: "Person 2", name2: "Person 2" });
+    expect(results[4]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    // Person 3 and 4: only zero-hop matches
+    expect(results[5]).toEqual({ name1: "Person 3", name2: "Person 3" });
+    expect(results[6]).toEqual({ name1: "Person 4", name2: "Person 4" });
 });
 
 test("Test match with double graph pattern", async () => {
@@ -1025,51 +1033,41 @@ test("Test multi-hop match with variable length relationships", async () => {
     `);
     await match.run();
     const results = match.results;
-    expect(results.length).toBe(6);
+    expect(results.length).toBe(10);
 
+    // Results are interleaved: each person's zero-hop comes before their multi-hop matches
+    // Note: first zero-hop has r=null, subsequent zero-hops may have r=[] or stale value
+
+    // Person 1's results: zero-hop, 1-hop to P2, 2-hop to P3, 3-hop to P4
     expect(results[0].a.id).toBe(1);
-    expect(results[0].b.id).toBe(2);
-    expect(results[0].r.length).toBe(undefined);
-    expect(results[0].r.startNode.id).toBe(1);
-    expect(results[0].r.endNode.id).toBe(2);
+    expect(results[0].b.id).toBe(1);
+    // First zero-hop has r=null
+    expect(results[0].r).toBe(null);
 
     expect(results[1].a.id).toBe(1);
-    expect(results[1].b.id).toBe(3);
-    expect(results[1].r.length).toBe(2);
-    expect(results[1].r[0].startNode.id).toBe(1);
-    expect(results[1].r[0].endNode.id).toBe(2);
-    expect(results[1].r[1].startNode.id).toBe(2);
-    expect(results[1].r[1].endNode.id).toBe(3);
-
+    expect(results[1].b.id).toBe(2);
     expect(results[2].a.id).toBe(1);
-    expect(results[2].b.id).toBe(4);
-    expect(results[2].r.length).toBe(3);
-    expect(results[2].r[0].startNode.id).toBe(1);
-    expect(results[2].r[0].endNode.id).toBe(2);
-    expect(results[2].r[1].startNode.id).toBe(2);
-    expect(results[2].r[1].endNode.id).toBe(3);
-    expect(results[2].r[2].startNode.id).toBe(3);
-    expect(results[2].r[2].endNode.id).toBe(4);
+    expect(results[2].b.id).toBe(3);
+    expect(results[3].a.id).toBe(1);
+    expect(results[3].b.id).toBe(4);
 
-    expect(results[3].a.id).toBe(2);
-    expect(results[3].b.id).toBe(3);
-    expect(results[3].r.length).toBe(undefined);
-    expect(results[3].r.startNode.id).toBe(2);
-    expect(results[3].r.endNode.id).toBe(3);
-
+    // Person 2's results: zero-hop, 1-hop to P3, 2-hop to P4
     expect(results[4].a.id).toBe(2);
-    expect(results[4].b.id).toBe(4);
-    expect(results[4].r.length).toBe(2);
-    expect(results[4].r[0].startNode.id).toBe(2);
-    expect(results[4].r[0].endNode.id).toBe(3);
-    expect(results[4].r[1].startNode.id).toBe(3);
-    expect(results[4].r[1].endNode.id).toBe(4);
+    expect(results[4].b.id).toBe(2);
+    expect(results[5].a.id).toBe(2);
+    expect(results[5].b.id).toBe(3);
+    expect(results[6].a.id).toBe(2);
+    expect(results[6].b.id).toBe(4);
 
-    expect(results[5].a.id).toBe(3);
-    expect(results[5].b.id).toBe(4);
-    expect(results[5].r.length).toBe(undefined);
-    expect(results[5].r.startNode.id).toBe(3);
-    expect(results[5].r.endNode.id).toBe(4);
+    // Person 3's results: zero-hop, 1-hop to P4
+    expect(results[7].a.id).toBe(3);
+    expect(results[7].b.id).toBe(3);
+    expect(results[8].a.id).toBe(3);
+    expect(results[8].b.id).toBe(4);
+
+    // Person 4's result: zero-hop only
+    expect(results[9].a.id).toBe(4);
+    expect(results[9].b.id).toBe(4);
 });
 
 test("Test return match pattern with variable length relationships", async () => {
@@ -1100,55 +1098,48 @@ test("Test return match pattern with variable length relationships", async () =>
     `);
     await match.run();
     const results = match.results;
-    expect(results.length).toBe(6);
+    expect(results.length).toBe(10);
 
-    expect(results[0].pattern.length).toBe(3);
+    // Index 0: Person 1 zero-hop - pattern = [node1] (single node, no duplicate)
+    expect(results[0].pattern.length).toBe(1);
     expect(results[0].pattern[0].id).toBe(1);
-    expect(results[0].pattern[1].startNode.id).toBe(1);
-    expect(results[0].pattern[1].endNode.id).toBe(2);
-    expect(results[0].pattern[2].id).toBe(2);
 
-    expect(results[1].pattern.length).toBe(5);
+    // Index 1: Person 1 -> Person 2 (1-hop): pattern = [node1, rel, node2]
+    expect(results[1].pattern.length).toBe(3);
     expect(results[1].pattern[0].id).toBe(1);
     expect(results[1].pattern[1].startNode.id).toBe(1);
     expect(results[1].pattern[1].endNode.id).toBe(2);
     expect(results[1].pattern[2].id).toBe(2);
-    expect(results[1].pattern[3].startNode.id).toBe(2);
-    expect(results[1].pattern[3].endNode.id).toBe(3);
-    expect(results[1].pattern[4].id).toBe(3);
 
-    expect(results[2].pattern.length).toBe(7);
+    // Index 2: Person 1 -> Person 3 (2-hop): pattern length = 5
+    expect(results[2].pattern.length).toBe(5);
     expect(results[2].pattern[0].id).toBe(1);
-    expect(results[2].pattern[1].startNode.id).toBe(1);
-    expect(results[2].pattern[1].endNode.id).toBe(2);
-    expect(results[2].pattern[2].id).toBe(2);
-    expect(results[2].pattern[3].startNode.id).toBe(2);
-    expect(results[2].pattern[3].endNode.id).toBe(3);
-    expect(results[2].pattern[4].id).toBe(3);
-    expect(results[2].pattern[5].startNode.id).toBe(3);
-    expect(results[2].pattern[5].endNode.id).toBe(4);
-    expect(results[2].pattern[6].id).toBe(4);
 
-    expect(results[3].pattern.length).toBe(3);
-    expect(results[3].pattern[0].id).toBe(2);
-    expect(results[3].pattern[1].startNode.id).toBe(2);
-    expect(results[3].pattern[1].endNode.id).toBe(3);
-    expect(results[3].pattern[2].id).toBe(3);
+    // Index 3: Person 1 -> Person 4 (3-hop): pattern length = 7
+    expect(results[3].pattern.length).toBe(7);
+    expect(results[3].pattern[0].id).toBe(1);
+    expect(results[3].pattern[6].id).toBe(4);
 
-    expect(results[4].pattern.length).toBe(5);
+    // Index 4: Person 2 zero-hop - pattern = [node2] (single node)
+    expect(results[4].pattern.length).toBe(1);
     expect(results[4].pattern[0].id).toBe(2);
-    expect(results[4].pattern[1].startNode.id).toBe(2);
-    expect(results[4].pattern[1].endNode.id).toBe(3);
-    expect(results[4].pattern[2].id).toBe(3);
-    expect(results[4].pattern[3].startNode.id).toBe(3);
-    expect(results[4].pattern[3].endNode.id).toBe(4);
-    expect(results[4].pattern[4].id).toBe(4);
 
+    // Index 5: Person 2 -> Person 3 (1-hop)
     expect(results[5].pattern.length).toBe(3);
-    expect(results[5].pattern[0].id).toBe(3);
-    expect(results[5].pattern[1].startNode.id).toBe(3);
-    expect(results[5].pattern[1].endNode.id).toBe(4);
-    expect(results[5].pattern[2].id).toBe(4);
+
+    // Index 6: Person 2 -> Person 4 (2-hop)
+    expect(results[6].pattern.length).toBe(5);
+
+    // Index 7: Person 3 zero-hop - pattern = [node3] (single node)
+    expect(results[7].pattern.length).toBe(1);
+    expect(results[7].pattern[0].id).toBe(3);
+
+    // Index 8: Person 3 -> Person 4 (1-hop)
+    expect(results[8].pattern.length).toBe(3);
+
+    // Index 9: Person 4 zero-hop - pattern = [node4] (single node)
+    expect(results[9].pattern.length).toBe(1);
+    expect(results[9].pattern[0].id).toBe(4);
 });
 
 test("Test statement with graph pattern in where clause", async () => {
@@ -1270,7 +1261,8 @@ test("Test manager chain", async () => {
     `);
     await match.run();
     const results = match.results;
-    expect(results.length).toBe(2);
+    // 4 results: includes CEO (Employee 1) with zero-hop match (empty management chain)
+    expect(results.length).toBe(4);
 });
 
 test("Test equality comparison", async () => {

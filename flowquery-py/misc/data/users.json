@@ -1,0 +1,242 @@
+[
+  {
+    "id": 1,
+    "name": "Victoria Harrington",
+    "title": "Managing Partner",
+    "department": "Executive",
+    "email": "v.harrington@blackstone-legal.com",
+    "managerId": null
+  },
+  {
+    "id": 2,
+    "name": "Charles Whitmore",
+    "title": "Senior Partner",
+    "department": "Corporate Law",
+    "email": "c.whitmore@blackstone-legal.com",
+    "managerId": 1
+  },
+  {
+    "id": 3,
+    "name": "Eleanor Prescott",
+    "title": "Senior Partner",
+    "department": "Litigation",
+    "email": "e.prescott@blackstone-legal.com",
+    "managerId": 1
+  },
+  {
+    "id": 4,
+    "name": "Marcus Delgado",
+    "title": "Senior Partner",
+    "department": "Intellectual Property",
+    "email": "m.delgado@blackstone-legal.com",
+    "managerId": 1
+  },
+  {
+    "id": 5,
+    "name": "Rebecca Thornton",
+    "title": "Partner",
+    "department": "Corporate Law",
+    "email": "r.thornton@blackstone-legal.com",
+    "managerId": 2
+  },
+  {
+    "id": 6,
+    "name": "Jonathan Ashford",
+    "title": "Partner",
+    "department": "Corporate Law",
+    "email": "j.ashford@blackstone-legal.com",
+    "managerId": 2
+  },
+  {
+    "id": 7,
+    "name": "Diana Castellanos",
+    "title": "Partner",
+    "department": "Litigation",
+    "email": "d.castellanos@blackstone-legal.com",
+    "managerId": 3
+  },
+  {
+    "id": 8,
+    "name": "William Cho",
+    "title": "Partner",
+    "department": "Litigation",
+    "email": "w.cho@blackstone-legal.com",
+    "managerId": 3
+  },
+  {
+    "id": 9,
+    "name": "Natasha Okonkwo",
+    "title": "Partner",
+    "department": "Intellectual Property",
+    "email": "n.okonkwo@blackstone-legal.com",
+    "managerId": 4
+  },
+  {
+    "id": 10,
+    "name": "Samuel Brennan",
+    "title": "Senior Associate",
+    "department": "Corporate Law",
+    "email": "s.brennan@blackstone-legal.com",
+    "managerId": 5
+  },
+  {
+    "id": 11,
+    "name": "Priya Sharma",
+    "title": "Senior Associate",
+    "department": "Corporate Law",
+    "email": "p.sharma@blackstone-legal.com",
+    "managerId": 6
+  },
+  {
+    "id": 12,
+    "name": "Michael Torres",
+    "title": "Senior Associate",
+    "department": "Litigation",
+    "email": "m.torres@blackstone-legal.com",
+    "managerId": 7
+  },
+  {
+    "id": 13,
+    "name": "Katherine Webb",
+    "title": "Senior Associate",
+    "department": "Litigation",
+    "email": "k.webb@blackstone-legal.com",
+    "managerId": 8
+  },
+  {
+    "id": 14,
+    "name": "David Kim",
+    "title": "Senior Associate",
+    "department": "Intellectual Property",
+    "email": "d.kim@blackstone-legal.com",
+    "managerId": 9
+  },
+  {
+    "id": 15,
+    "name": "Lauren Mitchell",
+    "title": "Associate",
+    "department": "Corporate Law",
+    "email": "l.mitchell@blackstone-legal.com",
+    "managerId": 10
+  },
+  {
+    "id": 16,
+    "name": "Ryan Fitzgerald",
+    "title": "Associate",
+    "department": "Corporate Law",
+    "email": "r.fitzgerald@blackstone-legal.com",
+    "managerId": 10
+  },
+  {
+    "id": 17,
+    "name": "Olivia Chen",
+    "title": "Associate",
+    "department": "Corporate Law",
+    "email": "o.chen@blackstone-legal.com",
+    "managerId": 11
+  },
+  {
+    "id": 18,
+    "name": "James Patterson",
+    "title": "Associate",
+    "department": "Litigation",
+    "email": "j.patterson@blackstone-legal.com",
+    "managerId": 12
+  },
+  {
+    "id": 19,
+    "name": "Sophia Rodriguez",
+    "title": "Associate",
+    "department": "Litigation",
+    "email": "s.rodriguez@blackstone-legal.com",
+    "managerId": 13
+  },
+  {
+    "id": 20,
+    "name": "Benjamin Hayes",
+    "title": "Associate",
+    "department": "Intellectual Property",
+    "email": "b.hayes@blackstone-legal.com",
+    "managerId": 14
+  },
+  {
+    "id": 21,
+    "name": "Emily Nakamura",
+    "title": "Associate",
+    "department": "Intellectual Property",
+    "email": "e.nakamura@blackstone-legal.com",
+    "managerId": 14
+  },
+  {
+    "id": 22,
+    "name": "Thomas Grant",
+    "title": "Paralegal",
+    "department": "Corporate Law",
+    "email": "t.grant@blackstone-legal.com",
+    "managerId": 15
+  },
+  {
+    "id": 23,
+    "name": "Amanda Foster",
+    "title": "Paralegal",
+    "department": "Litigation",
+    "email": "a.foster@blackstone-legal.com",
+    "managerId": 18
+  },
+  {
+    "id": 24,
+    "name": "Daniel Reyes",
+    "title": "Paralegal",
+    "department": "Intellectual Property",
+    "email": "d.reyes@blackstone-legal.com",
+    "managerId": 20
+  },
+  {
+    "id": 25,
+    "name": "Rachel Morgan",
+    "title": "Legal Secretary",
+    "department": "Executive",
+    "email": "r.morgan@blackstone-legal.com",
+    "managerId": 1
+  },
+  {
+    "id": 26,
+    "name": "Christopher Blake",
+    "title": "Legal Secretary",
+    "department": "Corporate Law",
+    "email": "c.blake@blackstone-legal.com",
+    "managerId": 5
+  },
+  {
+    "id": 27,
+    "name": "Jessica Huang",
+    "title": "Legal Secretary",
+    "department": "Litigation",
+    "email": "j.huang@blackstone-legal.com",
+    "managerId": 7
+  },
+  {
+    "id": 28,
+    "name": "Andrew Sullivan",
+    "title": "Office Manager",
+    "department": "Operations",
+    "email": "a.sullivan@blackstone-legal.com",
+    "managerId": 1
+  },
+  {
+    "id": 29,
+    "name": "Michelle Davis",
+    "title": "Receptionist",
+    "department": "Operations",
+    "email": "m.davis@blackstone-legal.com",
+    "managerId": 28
+  },
+  {
+    "id": 30,
+    "name": "Robert Chen",
+    "title": "IT Administrator",
+    "department": "Operations",
+    "email": "r.chen@blackstone-legal.com",
+    "managerId": 28
+  }
+]

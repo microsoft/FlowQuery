@@ -65,17 +65,26 @@ class Pattern extends ASTNode {
         return Array.from(this.values());
     }
     public *values(): Generator<any> {
-        for (const element of this._chain) {
+        for (let i = 0; i < this._chain.length; i++) {
+            const element = this._chain[i];
             if (element instanceof Node) {
+                // Skip node if previous element was a zero-hop relationship (no matches)
+                if (
+                    i > 0 &&
+                    this._chain[i - 1] instanceof Relationship &&
+                    (this._chain[i - 1] as Relationship).matches.length === 0
+                ) {
+                    continue;
+                }
                 yield element.value();
             } else if (element instanceof Relationship) {
-                let i = 0;
+                let j = 0;
                 for (const match of element.matches) {
                     yield match;
-                    if (i < element.matches.length - 1) {
+                    if (j < element.matches.length - 1) {
                         yield match.endNode;
                     }
-                    i++;
+                    j++;
                 }
             }
         }

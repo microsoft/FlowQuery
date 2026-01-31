@@ -89,9 +89,11 @@ class Data {
         }
     }
     public reset(): void {
-        this.layer(0).current = -1;
-        for (const entry of this.layer(0).index.values()) {
-            entry.reset();
+        for (const layer of this._layers.values()) {
+            layer.current = -1;
+            for (const entry of layer.index.values()) {
+                entry.reset();
+            }
         }
     }
     public next(level: number = 0): boolean {

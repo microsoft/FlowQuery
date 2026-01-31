@@ -8,10 +8,8 @@ from ..parsing.ast_node import ASTNode
 from .database import Database
 from .node import Node
 from .node_data import NodeData
-from .node_reference import NodeReference
 from .relationship import Relationship
 from .relationship_data import RelationshipData
-from .relationship_reference import RelationshipReference
 
 
 class Pattern(ASTNode):
@@ -99,7 +97,8 @@ class Pattern(ASTNode):
         """Loads data from the database for all elements."""
         db = Database.get_instance()
         for element in self._chain:
-            if isinstance(element, (NodeReference, RelationshipReference)):
+            # Use type name comparison to avoid issues with module double-loading
+            if type(element).__name__ in ('NodeReference', 'RelationshipReference'):
                 continue
             data = await db.get_data(element)
             if isinstance(element, Node) and isinstance(data, NodeData):

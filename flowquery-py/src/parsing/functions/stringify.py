@@ -3,9 +3,9 @@
 import json
 from typing import Any, List
 
-from .function import Function
 from ..ast_node import ASTNode
 from ..expressions.number import Number
+from .function import Function
 from .function_metadata import FunctionDef
 
 
@@ -20,11 +20,11 @@ from .function_metadata import FunctionDef
 })
 class Stringify(Function):
     """Stringify function.
-    
+
     Converts a value to its JSON string representation.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("stringify")
         self._expected_parameter_count = 2
 

@@ -3,14 +3,14 @@
 from typing import Optional
 
 from .aggregate_function import AggregateFunction
-from .reducer_element import ReducerElement
 from .function_metadata import FunctionDef
+from .reducer_element import ReducerElement
 
 
 class AvgReducerElement(ReducerElement):
     """Reducer element for Avg aggregate function."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._count: int = 0
         self._sum: Optional[float] = None
 
@@ -40,11 +40,11 @@ class AvgReducerElement(ReducerElement):
 })
 class Avg(AggregateFunction):
     """Avg aggregate function.
-    
+
     Calculates the average of numeric values across grouped rows.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("avg")
         self._expected_parameter_count = 1
 

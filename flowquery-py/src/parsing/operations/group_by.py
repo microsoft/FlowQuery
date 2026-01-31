@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Generator, List, Optional
 
-from ..expressions.expression import Expression
+from ..ast_node import ASTNode
 from ..functions.aggregate_function import AggregateFunction
 from ..functions.reducer_element import ReducerElement
 from .projection import Projection
@@ -36,13 +36,13 @@ class GroupByNode:
 class GroupBy(Projection):
     """Implements grouping and aggregation for FlowQuery operations."""
 
-    def __init__(self, expressions: List[Expression]):
+    def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
         self._root = GroupByNode()
         self._current = self._root
-        self._mappers: Optional[List[Expression]] = None
+        self._mappers: Optional[List[Any]] = None
         self._reducers: Optional[List[AggregateFunction]] = None
-        self._where = None
+        self._where: Optional[ASTNode] = None
 
     async def run(self) -> None:
         self._reset_tree()
@@ -71,18 +71,19 @@ class GroupBy(Projection):
         if self._current.elements is None:
             self._current.elements = [reducer.element() for reducer in self.reducers]
         elements = self._current.elements
-        for i, reducer in enumerate(self.reducers):
-            reducer.reduce(elements[i])
+        if elements:
+            for i, reducer in enumerate(self.reducers):
+                reducer.reduce(elements[i])
 
     @property
-    def mappers(self) -> List[Expression]:
+    def mappers(self) -> List[Any]:
         if self._mappers is None:
             self._mappers = list(self._generate_mappers())
         return self._mappers
 
-    def _generate_mappers(self) -> Generator[Expression, None, None]:
+    def _generate_mappers(self) -> Generator[Any, None, None]:
         for expression, _ in self.expressions():
-            if expression.mappable():
+            if hasattr(expression, 'mappable') and expression.mappable():
                 yield expression
 
     @property
@@ -90,17 +91,18 @@ class GroupBy(Projection):
         if self._reducers is None:
             self._reducers = []
             for child in self.children:
-                self._reducers.extend(child.reducers())
+                if hasattr(child, 'reducers'):
+                    self._reducers.extend(child.reducers())
         return self._reducers
 
     def generate_results(
-        self, 
-        mapper_index: int = 0, 
+        self,
+        mapper_index: int = 0,
         node: Optional[GroupByNode] = None
     ) -> Generator[Dict[str, Any], None, None]:
         if node is None:
             node = self._root
-        
+
         if len(node.children) > 0:
             for child in node.children.values():
                 self.mappers[mapper_index].overridden = child.value
@@ -116,15 +118,15 @@ class GroupBy(Projection):
                 yield record
 
     @property
-    def where(self):
+    def where(self) -> Optional[ASTNode]:
         return self._where
 
     @where.setter
-    def where(self, where) -> None:
+    def where(self, where: Optional[ASTNode]) -> None:
         self._where = where
 
     @property
-    def where_condition(self) -> bool:
+    def where_condition(self) -> Any:
         if self._where is None:
             return True
         return self._where.value()

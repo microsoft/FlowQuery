@@ -1,17 +1,14 @@
-"""Node reference for FlowQuery."""
+from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional
 
 from .node import Node
-
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
 
 
 class NodeReference(Node):
     """Represents a reference to an existing node variable."""
 
-    def __init__(self, base: Node, reference: Node):
+    def __init__(self, base: Node, reference: Node) -> None:
         super().__init__(base.identifier, base.label)
         self._reference: Node = reference
         # Copy properties from base
@@ -28,14 +25,16 @@ class NodeReference(Node):
     def referred(self) -> Node:
         return self._reference
 
-    def value(self):
+    def value(self) -> Optional[Any]:
         return self._reference.value() if self._reference else None
 
     async def next(self) -> None:
         """Process next using the referenced node's value."""
-        self.set_value(self._reference.value())
-        if self._outgoing and self._value:
-            await self._outgoing.find(self._value['id'])
+        ref_value = self._reference.value()
+        if ref_value is not None:
+            self.set_value(dict(ref_value))
+            if self._outgoing and self._value:
+                await self._outgoing.find(self._value['id'])
         await self.run_todo_next()
 
     async def find(self, id_: str, hop: int = 0) -> None:
@@ -43,7 +42,7 @@ class NodeReference(Node):
         referenced = self._reference.value()
         if referenced is None or id_ != referenced.get('id'):
             return
-        self.set_value(referenced)
+        self.set_value(dict(referenced))
         if self._outgoing and self._value:
             await self._outgoing.find(self._value['id'], hop)
         await self.run_todo_next()

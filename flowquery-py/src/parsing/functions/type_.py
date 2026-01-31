@@ -21,17 +21,17 @@ from .function_metadata import FunctionDef
 })
 class Type(Function):
     """Type function.
-    
+
     Returns the type of a value as a string.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("type")
         self._expected_parameter_count = 1
 
     def value(self) -> Any:
         val = self.get_children()[0].value()
-        
+
         if val is None:
             return "null"
         if isinstance(val, list):

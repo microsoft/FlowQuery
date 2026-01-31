@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING
 from ..ast_node import ASTNode
 
 if TYPE_CHECKING:
-    from .expression import Expression
+    pass
 
 
 class FString(ASTNode):
     """Represents a formatted string (f-string) in the AST.
-    
+
     F-strings allow embedding expressions within string literals.
     Child nodes represent the parts of the f-string (literal strings and expressions).
-    
+
     Example:
         # For f"Hello {name}!"
         fstr = FString()

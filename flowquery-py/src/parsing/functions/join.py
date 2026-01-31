@@ -2,9 +2,9 @@
 
 from typing import Any, List
 
-from .function import Function
 from ..ast_node import ASTNode
 from ..expressions.string import String
+from .function import Function
 from .function_metadata import FunctionDef
 
 
@@ -20,11 +20,11 @@ from .function_metadata import FunctionDef
 })
 class Join(Function):
     """Join function.
-    
+
     Joins an array of strings with a delimiter.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("join")
         self._expected_parameter_count = 2
 

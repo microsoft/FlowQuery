@@ -1,21 +1,24 @@
 """Represents an expression in the FlowQuery AST."""
 
-from typing import Any, List, Optional, Generator, TYPE_CHECKING
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Generator, List, Optional
 
 from ..ast_node import ASTNode
+from ..functions.aggregate_function import AggregateFunction
+from .reference import Reference
 
 if TYPE_CHECKING:
-    from ..functions.aggregate_function import AggregateFunction
     from ...graph.pattern_expression import PatternExpression
 
 
 class Expression(ASTNode):
     """Represents an expression in the FlowQuery AST.
-    
+
     Expressions are built using the Shunting Yard algorithm to handle operator
     precedence and associativity. They can contain operands (numbers, strings, identifiers)
     and operators (arithmetic, logical, comparison).
-    
+
     Example:
         expr = Expression()
         expr.add_node(number_node)
@@ -24,7 +27,7 @@ class Expression(ASTNode):
         expr.finish()
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._operators: List[ASTNode] = []
         self._output: List[ASTNode] = []
@@ -35,9 +38,9 @@ class Expression(ASTNode):
 
     def add_node(self, node: ASTNode) -> None:
         """Adds a node (operand or operator) to the expression.
-        
+
         Uses the Shunting Yard algorithm to maintain correct operator precedence.
-        
+
         Args:
             node: The AST node to add (operand or operator)
         """
@@ -58,7 +61,7 @@ class Expression(ASTNode):
 
     def finish(self) -> None:
         """Finalizes the expression by converting it to a tree structure.
-        
+
         Should be called after all nodes have been added.
         """
         while self._operators:
@@ -91,9 +94,9 @@ class Expression(ASTNode):
 
     @property
     def alias(self) -> Optional[str]:
-        from .reference import Reference
-        if isinstance(self.first_child(), Reference) and self._alias is None:
-            return self.first_child().identifier
+        first = self.first_child()
+        if isinstance(first, Reference) and self._alias is None:
+            return first.identifier
         return self._alias
 
     @alias.setter
@@ -106,14 +109,14 @@ class Expression(ASTNode):
         return "Expression"
 
     def reducers(self) -> List['AggregateFunction']:
+        from ..functions.aggregate_function import AggregateFunction
         if self._reducers is None:
-            from ..functions.aggregate_function import AggregateFunction
             self._reducers = list(self._extract(self, AggregateFunction))
         return self._reducers
 
     def patterns(self) -> List['PatternExpression']:
+        from ...graph.pattern_expression import PatternExpression
         if self._patterns is None:
-            from ...graph.pattern_expression import PatternExpression
             self._patterns = list(self._extract(self, PatternExpression))
         return self._patterns
 

@@ -1,6 +1,6 @@
 """Range function."""
 
-from typing import Any, List
+from typing import Any
 
 from .function import Function
 from .function_metadata import FunctionDef
@@ -13,16 +13,21 @@ from .function_metadata import FunctionDef
         {"name": "start", "description": "Starting number (inclusive)", "type": "number"},
         {"name": "end", "description": "Ending number (inclusive)", "type": "number"}
     ],
-    "output": {"description": "Array of integers from start to end", "type": "array", "items": {"type": "number"}, "example": [1, 2, 3, 4, 5]},
+    "output": {
+        "description": "Array of integers from start to end",
+        "type": "array",
+        "items": {"type": "number"},
+        "example": [1, 2, 3, 4, 5]
+    },
     "examples": ["WITH range(1, 5) AS nums RETURN nums"]
 })
 class Range(Function):
     """Range function.
-    
+
     Generates an array of sequential integers.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("range")
         self._expected_parameter_count = 2
 

@@ -1,16 +1,16 @@
 """Base class for all functions in FlowQuery."""
 
-from typing import List, Optional, Any
+from typing import List, Optional
 
 from ..ast_node import ASTNode
 
 
 class Function(ASTNode):
     """Base class for all functions in FlowQuery.
-    
+
     Functions can have parameters and may support the DISTINCT modifier.
     Subclasses implement specific function logic.
-    
+
     Example:
         func = FunctionFactory.create("sum")
         func.parameters = [expression1, expression2]
@@ -18,7 +18,7 @@ class Function(ASTNode):
 
     def __init__(self, name: Optional[str] = None):
         """Creates a new Function with the given name.
-        
+
         Args:
             name: The function name
         """
@@ -35,10 +35,10 @@ class Function(ASTNode):
     @parameters.setter
     def parameters(self, nodes: List[ASTNode]) -> None:
         """Sets the function parameters.
-        
+
         Args:
             nodes: Array of AST nodes representing the function arguments
-            
+
         Raises:
             ValueError: If the number of parameters doesn't match expected count
         """

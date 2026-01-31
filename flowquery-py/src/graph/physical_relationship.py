@@ -1,18 +1,17 @@
 """Physical relationship representation for FlowQuery."""
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from typing import Any, Dict, List, Optional
+
+from ..parsing.ast_node import ASTNode
 from .relationship import Relationship
-
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
 
 
 class PhysicalRelationship(Relationship):
     """Represents a physical relationship in the graph database."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._statement: Optional[ASTNode] = None
 
@@ -30,6 +29,7 @@ class PhysicalRelationship(Relationship):
         """Execute the statement and return results."""
         if self._statement is None:
             raise ValueError("Statement is null")
+        # Import at runtime to avoid circular dependency
         from ..compute.runner import Runner
         runner = Runner(None, self._statement)
         await runner.run()

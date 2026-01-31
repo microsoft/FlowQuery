@@ -5,10 +5,10 @@ from ..utils.string_utils import StringUtils
 
 class StringWalker:
     """Utility class for walking through a string character by character during tokenization.
-    
+
     Provides methods to check for specific character patterns, move through the string,
     and extract substrings. Used by the Tokenizer to process input text.
-    
+
     Example:
         walker = StringWalker("WITH x as variable")
         while not walker.is_at_end:
@@ -17,7 +17,7 @@ class StringWalker:
 
     def __init__(self, text: str):
         """Creates a new StringWalker for the given text.
-        
+
         Args:
             text: The input text to walk through
         """
@@ -89,7 +89,7 @@ class StringWalker:
         return self.current_char == '\\' and self.next_char == char
 
     def escaped_brace(self) -> bool:
-        return ((self.current_char == '{' and self.next_char == '{') or 
+        return ((self.current_char == '{' and self.next_char == '{') or
                 (self.current_char == '}' and self.next_char == '}'))
 
     def opening_brace(self) -> bool:

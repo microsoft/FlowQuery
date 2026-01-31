@@ -1,26 +1,26 @@
 """Expression map for managing named expressions."""
 
-from typing import Optional, List, TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from .expression import Expression
+from typing import Any, List, Optional
 
 
 class ExpressionMap:
     """Maps expression aliases to their corresponding Expression objects."""
 
-    def __init__(self):
-        self._map: dict[str, Expression] = {}
+    def __init__(self) -> None:
+        self._map: dict[str, Any] = {}
 
-    def get(self, alias: str) -> Optional['Expression']:
+    def get(self, alias: str) -> Optional[Any]:
         return self._map.get(alias)
 
     def has(self, alias: str) -> bool:
         return alias in self._map
 
-    def set_map(self, expressions: List['Expression']) -> None:
+    def set_map(self, expressions: List[Any]) -> None:
         self._map.clear()
         for expr in expressions:
-            if expr.alias is None:
+            alias = getattr(expr, 'alias', None)
+            if alias is None:
                 continue
-            self._map[expr.alias] = expr
+            self._map[alias] = expr

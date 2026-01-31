@@ -8,16 +8,16 @@ from ..expressions.string import String
 
 class KeyValuePair(ASTNode):
     """Represents a key-value pair in an associative array.
-    
+
     Used to build object literals in FlowQuery.
-    
+
     Example:
         kvp = KeyValuePair("name", String("Alice"))
     """
 
     def __init__(self, key: str, value: ASTNode):
         """Creates a new key-value pair.
-        
+
         Args:
             key: The key string
             value: The AST node representing the value
@@ -27,7 +27,7 @@ class KeyValuePair(ASTNode):
         self.add_child(value)
 
     @property
-    def key(self) -> str:
+    def key(self) -> Any:
         return self.children[0].value()
 
     @property

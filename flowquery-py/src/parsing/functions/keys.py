@@ -1,6 +1,6 @@
 """Keys function."""
 
-from typing import Any, List
+from typing import Any
 
 from .function import Function
 from .function_metadata import FunctionDef
@@ -17,11 +17,11 @@ from .function_metadata import FunctionDef
 })
 class Keys(Function):
     """Keys function.
-    
+
     Returns the keys of an object (associative array) as an array.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("keys")
         self._expected_parameter_count = 1
 

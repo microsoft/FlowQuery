@@ -1,17 +1,17 @@
 """Collect aggregate function."""
 
-from typing import Any, Dict, List, Union
 import json
+from typing import Any, Dict, List, Union
 
 from .aggregate_function import AggregateFunction
-from .reducer_element import ReducerElement
 from .function_metadata import FunctionDef
+from .reducer_element import ReducerElement
 
 
 class CollectReducerElement(ReducerElement):
     """Reducer element for Collect aggregate function."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._value: List[Any] = []
 
     @property
@@ -26,7 +26,7 @@ class CollectReducerElement(ReducerElement):
 class DistinctCollectReducerElement(ReducerElement):
     """Reducer element for Collect aggregate function with DISTINCT."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._value: Dict[str, Any] = {}
 
     @property
@@ -51,11 +51,11 @@ class DistinctCollectReducerElement(ReducerElement):
 })
 class Collect(AggregateFunction):
     """Collect aggregate function.
-    
+
     Collects values into an array across grouped rows.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("collect")
         self._expected_parameter_count = 1
         self._distinct: bool = False

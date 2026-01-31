@@ -1,8 +1,7 @@
 """Function metadata and decorator for FlowQuery functions."""
 
-from typing import Any, Callable, Dict, List, Optional, TypedDict, Union
 from dataclasses import dataclass
-
+from typing import Any, Callable, Dict, List, Optional, TypedDict, cast
 
 # Type definitions
 FunctionCategory = str  # "scalar" | "aggregate" | "predicate" | "async" | string
@@ -54,7 +53,7 @@ class FunctionDefOptions(TypedDict, total=False):
 
 class FunctionRegistry:
     """Centralized registry for function metadata, factories, and async providers."""
-    
+
     _metadata: Dict[str, FunctionMetadata] = {}
     _factories: Dict[str, Callable[[], Any]] = {}
 
@@ -71,15 +70,15 @@ class FunctionRegistry:
             description=options.get('description', ''),
             category=options.get('category', 'scalar'),
             parameters=options.get('parameters', []),
-            output=options.get('output', {'description': '', 'type': 'any'}),
+            output=cast(OutputSchema, options.get('output', {'description': '', 'type': 'any'})),
             examples=options.get('examples'),
             notes=options.get('notes'),
         )
         cls._metadata[registry_key] = metadata
 
         if category != 'predicate':
-            cls._factories[display_name] = lambda c=constructor: c()
-        cls._factories[registry_key] = lambda c=constructor: c()
+            cls._factories[display_name] = lambda c=constructor: c()  # type: ignore[misc]
+        cls._factories[registry_key] = lambda c=constructor: c()  # type: ignore[misc]
 
     @classmethod
     def get_all_metadata(cls) -> List[FunctionMetadata]:
@@ -103,17 +102,17 @@ class FunctionRegistry:
         return cls._factories.get(lower_name)
 
 
-def FunctionDef(options: FunctionDefOptions):
+def FunctionDef(options: FunctionDefOptions) -> Callable[[type], type]:
     """Class decorator that registers function metadata.
-    
+
     The function name is derived from the class's constructor.
-    
+
     Args:
         options: Function metadata (excluding name)
-        
+
     Returns:
         Class decorator
-        
+
     Example:
         @FunctionDef({
             'description': "Adds two numbers",

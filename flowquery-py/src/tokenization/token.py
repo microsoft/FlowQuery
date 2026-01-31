@@ -1,25 +1,24 @@
 """Represents a single token in the FlowQuery language."""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Optional, Any
 
-from .token_type import TokenType
+from typing import Optional
+
+from ..parsing.ast_node import ASTNode
+from ..utils.string_utils import StringUtils
 from .keyword import Keyword
 from .operator import Operator
 from .symbol import Symbol
-from ..utils.string_utils import StringUtils
-
-if TYPE_CHECKING:
-    from ..parsing.ast_node import ASTNode
+from .token_type import TokenType
 
 
 class Token:
     """Represents a single token in the FlowQuery language.
-    
+
     Tokens are the atomic units of lexical analysis, produced by the tokenizer
     and consumed by the parser. Each token has a type (keyword, operator, identifier, etc.)
     and an optional value.
-    
+
     Example:
         with_token = Token.WITH()
         ident_token = Token.IDENTIFIER("myVar")
@@ -28,7 +27,7 @@ class Token:
 
     def __init__(self, type_: TokenType, value: Optional[str] = None):
         """Creates a new Token instance.
-        
+
         Args:
             type_: The type of the token
             value: The optional value associated with the token
@@ -41,10 +40,10 @@ class Token:
 
     def equals(self, other: Token) -> bool:
         """Checks if this token equals another token.
-        
+
         Args:
             other: The token to compare against
-            
+
         Returns:
             True if tokens are equal, False otherwise
         """
@@ -82,6 +81,7 @@ class Token:
 
     @property
     def node(self) -> ASTNode:
+        # Import at runtime to avoid circular dependency
         from ..parsing.token_to_node import TokenToNode
         return TokenToNode.convert(self)
 

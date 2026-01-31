@@ -8,7 +8,7 @@ from ..tokenization.tokenizer import Tokenizer
 
 class BaseParser:
     """Base class for parsers providing common token manipulation functionality.
-    
+
     This class handles tokenization and provides utility methods for navigating
     through tokens, peeking ahead, and checking token sequences.
     """
@@ -19,7 +19,7 @@ class BaseParser:
 
     def tokenize(self, statement: str) -> None:
         """Tokenizes a statement and initializes the token array.
-        
+
         Args:
             statement: The input statement to tokenize
         """
@@ -32,7 +32,7 @@ class BaseParser:
 
     def peek(self) -> Optional[Token]:
         """Peeks at the next token without advancing the current position.
-        
+
         Returns:
             The next token, or None if at the end of the token stream
         """
@@ -42,11 +42,11 @@ class BaseParser:
 
     def ahead(self, tokens: List[Token], skip_whitespace_and_comments: bool = True) -> bool:
         """Checks if a sequence of tokens appears ahead in the token stream.
-        
+
         Args:
             tokens: The sequence of tokens to look for
             skip_whitespace_and_comments: Whether to skip whitespace and comments when matching
-            
+
         Returns:
             True if the token sequence is found ahead, False otherwise
         """
@@ -64,7 +64,7 @@ class BaseParser:
     @property
     def token(self) -> Token:
         """Gets the current token.
-        
+
         Returns:
             The current token, or EOF if at the end
         """
@@ -75,7 +75,7 @@ class BaseParser:
     @property
     def previous_token(self) -> Token:
         """Gets the previous token.
-        
+
         Returns:
             The previous token, or EOF if at the beginning
         """

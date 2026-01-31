@@ -1,20 +1,22 @@
 """Graph relationship representation for FlowQuery."""
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from .hops import Hops
+from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
 
 if TYPE_CHECKING:
     from .node import Node
-    from .relationship_data import RelationshipData, RelationshipRecord
 
 
 class Relationship(ASTNode):
     """Represents a relationship in a graph pattern."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._identifier: Optional[str] = None
         self._type: Optional[str] = None
@@ -118,14 +120,14 @@ class Relationship(ASTNode):
             self._source = self._target
         if hop == 0:
             self._data.reset() if self._data else None
-            
+
             # Handle zero-hop case: when min is 0 on a variable-length relationship,
             # match source node as target (no traversal)
             if self._hops and self._hops.multi() and self._hops.min == 0 and self._target:
                 # For zero-hop, target finds the same node as source (left_id)
                 # No relationship match is pushed since no edge is traversed
                 await self._target.find(left_id, hop)
-        
+
         while self._data and self._data.find(left_id, hop):
             data = self._data.current(hop)
             if data and self._hops and hop >= self._hops.min:
@@ -137,6 +139,6 @@ class Relationship(ASTNode):
                 if self._hops and hop + 1 < self._hops.max:
                     await self.find(data['right_id'], hop + 1)
                 self._matches.pop()
-        
+
         # Restore original source node
         self._source = original

@@ -2,9 +2,9 @@
 
 from typing import Any, List
 
-from .function import Function
 from ..ast_node import ASTNode
 from ..expressions.string import String
+from .function import Function
 from .function_metadata import FunctionDef
 
 
@@ -15,16 +15,21 @@ from .function_metadata import FunctionDef
         {"name": "text", "description": "String to split", "type": "string"},
         {"name": "delimiter", "description": "Delimiter to split by", "type": "string"}
     ],
-    "output": {"description": "Array of string parts", "type": "array", "items": {"type": "string"}, "example": ["a", "b", "c"]},
+    "output": {
+        "description": "Array of string parts",
+        "type": "array",
+        "items": {"type": "string"},
+        "example": ["a", "b", "c"]
+    },
     "examples": ["WITH 'a,b,c' AS s RETURN split(s, ',')"]
 })
 class Split(Function):
     """Split function.
-    
+
     Splits a string into an array by a delimiter.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("split")
         self._expected_parameter_count = 2
 

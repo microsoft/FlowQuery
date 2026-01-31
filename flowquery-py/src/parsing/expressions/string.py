@@ -5,7 +5,7 @@ from ..ast_node import ASTNode
 
 class String(ASTNode):
     """Represents a string literal in the AST.
-    
+
     Example:
         s = String("hello")
         print(s.value())  # "hello"
@@ -13,7 +13,7 @@ class String(ASTNode):
 
     def __init__(self, value: str):
         """Creates a new String node with the given value.
-        
+
         Args:
             value: The string value
         """

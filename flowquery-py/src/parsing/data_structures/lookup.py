@@ -7,9 +7,9 @@ from ..ast_node import ASTNode
 
 class Lookup(ASTNode):
     """Represents a lookup operation (array/object indexing) in the AST.
-    
+
     Lookups access elements from arrays or properties from objects using an index or key.
-    
+
     Example:
         # For array[0] or obj.property or obj["key"]
         lookup = Lookup()

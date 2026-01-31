@@ -18,11 +18,11 @@ from .function_metadata import FunctionDef
 })
 class ToJson(Function):
     """ToJson function.
-    
+
     Parses a JSON string into an object.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("tojson")
         self._expected_parameter_count = 1
 

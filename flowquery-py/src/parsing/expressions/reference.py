@@ -8,9 +8,9 @@ from .identifier import Identifier
 
 class Reference(Identifier):
     """Represents a reference to a previously defined variable or expression.
-    
+
     References point to values defined earlier in the query (e.g., in WITH or LOAD statements).
-    
+
     Example:
         ref = Reference("myVar", previous_node)
         print(ref.value())  # Gets value from referred node
@@ -18,7 +18,7 @@ class Reference(Identifier):
 
     def __init__(self, value: str, referred: Optional[ASTNode] = None):
         """Creates a new Reference to a variable.
-        
+
         Args:
             value: The identifier name
             referred: The node this reference points to (optional)

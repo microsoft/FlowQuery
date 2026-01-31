@@ -17,11 +17,11 @@ from .function_metadata import FunctionDef
 })
 class Round(Function):
     """Round function.
-    
+
     Rounds a number to the nearest integer.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("round")
         self._expected_parameter_count = 1
 

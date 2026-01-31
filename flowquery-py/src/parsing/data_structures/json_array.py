@@ -7,9 +7,9 @@ from ..ast_node import ASTNode
 
 class JSONArray(ASTNode):
     """Represents a JSON array in the AST.
-    
+
     JSON arrays are ordered collections of values.
-    
+
     Example:
         # For [1, 2, 3]
         arr = JSONArray()
@@ -20,7 +20,7 @@ class JSONArray(ASTNode):
 
     def add_value(self, value: ASTNode) -> None:
         """Adds a value to the array.
-        
+
         Args:
             value: The AST node representing the value to add
         """

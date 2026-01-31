@@ -9,7 +9,6 @@ from .components.text import Text
 from .expressions.boolean import Boolean
 from .expressions.identifier import Identifier
 from .expressions.number import Number
-from .expressions.string import String
 from .expressions.operator import (
     Add,
     And,
@@ -28,6 +27,7 @@ from .expressions.operator import (
     Power,
     Subtract,
 )
+from .expressions.string import String
 from .logic.else_ import Else
 from .logic.end import End
 from .logic.then import Then
@@ -103,7 +103,7 @@ class TokenToNode:
             elif token.is_null():
                 return Null()
         elif token.is_boolean():
-            return Boolean(token.value)
+            return Boolean(token.value or "")
         else:
             raise ValueError("Unknown token")
         return ASTNode()

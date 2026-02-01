@@ -16,7 +16,7 @@ class RelationshipMatchCollector {
             type: relationship.type!,
             startNode: relationship.source?.value() || {},
             endNode: null,
-            properties: relationship.properties,
+            properties: relationship.getData()?.properties() as Record<string, any>,
         };
         this._matches.push(match);
         this._nodeIds.push(match.startNode.id);

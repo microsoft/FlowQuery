@@ -38,8 +38,25 @@ class Relationship extends ASTNode {
     public get type(): string | null {
         return this._type;
     }
-    public get properties(): Record<string, any> {
-        return this._data?.properties() || {};
+    public get properties(): Map<string, Expression> {
+        return this._properties;
+    }
+    public set properties(properties: Map<string, Expression>) {
+        this._properties = properties;
+    }
+    private _matchesProperties(hop: number = 0): boolean {
+        const data: RelationshipData = this._data!;
+        for (const [key, expression] of this._properties) {
+            const record: RelationshipRecord = data.current(hop)!;
+            if (record === null) {
+                throw new Error("No current relationship data available");
+            }
+            if (!(key in record)) {
+                throw new Error("Relationship does not have property");
+            }
+            return record[key] === expression.value();
+        }
+        return true;
     }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
@@ -106,6 +123,9 @@ class Relationship extends ASTNode {
             const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
             if (hop >= this.hops!.min) {
                 this.setValue(this);
+                if (!this._matchesProperties(hop)) {
+                    continue;
+                }
                 await this._target?.find(data.right_id, hop);
                 if (this._matches.isCircular()) {
                     throw new Error("Circular relationship detected");

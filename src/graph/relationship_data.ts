@@ -22,6 +22,9 @@ class RelationshipData extends Data {
         }
         return null;
     }
+    public current(hop: number = 0): RelationshipRecord | null {
+        return super.current(hop) as RelationshipRecord | null;
+    }
 }
 
 export default RelationshipData;

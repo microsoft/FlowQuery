@@ -1282,3 +1282,25 @@ test("Test equality comparison", async () => {
         }
     }
 });
+
+test("Test match with constraints", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Employee) AS {
+            unwind [
+                {id: 1, name: 'Employee 1'},
+                {id: 2, name: 'Employee 2'},
+                {id: 3, name: 'Employee 3'},
+                {id: 4, name: 'Employee 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    const match = new Runner(`
+        match (e:Employee{name:'Employee 1'})
+        return e.name as name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].name).toBe("Employee 1");
+});

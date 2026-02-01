@@ -760,3 +760,35 @@ test("Test check pattern expression without NodeReference", () => {
         parser.parse("MATCH (a:Person) WHERE (:Person)-[:KNOWS]->(:Person) RETURN a");
     }).toThrow("PatternExpression must contain at least one NodeReference");
 });
+
+test("Test node with properties", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person{value: 'hello'}) return a");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Match\n" +
+        "- Return\n" +
+        "-- Expression (a)\n" +
+        "--- Reference (a)"
+    );
+    const match: Match = ast.firstChild() as Match;
+    const node: Node = match.patterns[0].chain[0] as Node;
+    expect(node.properties.get("value")?.value()).toBe("hello");
+});
+
+test("Test relationship with properties", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (:Person)-[r:LIKES{since: 2022}]->(:Food) return a");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- Match\n" +
+        "- Return\n" +
+        "-- Expression (a)\n" +
+        "--- Reference (a)"
+    );
+    const match: Match = ast.firstChild() as Match;
+    const relationship: Relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.properties.get("since")?.value()).toBe(2022);
+});

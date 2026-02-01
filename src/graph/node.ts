@@ -41,6 +41,23 @@ class Node extends ASTNode {
     public get properties(): Map<string, Expression> {
         return this._properties;
     }
+    public set properties(properties: Map<string, Expression>) {
+        this._properties = properties;
+    }
+    private _matchesProperties(hop: number = 0): boolean {
+        const data: NodeData = this._data!;
+        for (const [key, expression] of this._properties) {
+            const record: NodeRecord = data.current(hop)!;
+            if (record === null) {
+                throw new Error("No current node data available");
+            }
+            if (!(key in record)) {
+                throw new Error("Node does not have property");
+            }
+            return record[key] === expression.value();
+        }
+        return true;
+    }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
     }
@@ -72,6 +89,9 @@ class Node extends ASTNode {
         this._data?.reset();
         while (this._data?.next()) {
             this.setValue(this._data?.current()!);
+            if (!this._matchesProperties()) {
+                continue;
+            }
             await this._outgoing?.find(this._value!.id);
             await this.runTodoNext();
         }
@@ -80,6 +100,9 @@ class Node extends ASTNode {
         this._data?.reset();
         while (this._data?.find(id, hop)) {
             this.setValue(this._data?.current(hop) as NodeRecord);
+            if (!this._matchesProperties(hop)) {
+                continue;
+            }
             this._incoming?.setEndNode(this);
             await this._outgoing?.find(this._value!.id, hop);
             await this.runTodoNext();

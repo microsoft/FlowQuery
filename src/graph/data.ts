@@ -27,13 +27,19 @@ class IndexEntry {
 }
 
 class Layer {
-    private _index: Map<string, IndexEntry> = new Map();
+    private _indexes: Map<string, Map<string, IndexEntry>> = new Map();
     private _current: number = -1;
-    constructor(index: Map<string, IndexEntry>) {
-        this._index = index;
+    constructor(indexes: Map<string, Map<string, IndexEntry>>) {
+        this._indexes = indexes;
     }
-    public get index(): Map<string, IndexEntry> {
-        return this._index;
+    public index(name: string): Map<string, IndexEntry> {
+        if (!this._indexes.has(name)) {
+            this._indexes.set(name, new Map());
+        }
+        return this._indexes.get(name)!;
+    }
+    public get indexes(): Map<string, Map<string, IndexEntry>> {
+        return this._indexes;
     }
     public get current(): number {
         return this._current;
@@ -52,33 +58,41 @@ class Data {
         this._layers.set(0, new Layer(new Map()));
     }
     protected _buildIndex(key: string, level: number = 0): void {
-        this.layer(level).index.clear();
-        this._records.forEach((record, idx) => {
+        const idx = this.layer(level).index(key);
+        idx.clear();
+        this._records.forEach((record, i) => {
             if (record.hasOwnProperty(key)) {
-                if (!this.layer(level).index.has(record[key])) {
-                    this.layer(level).index.set(record[key], new IndexEntry());
+                if (!idx.has(record[key])) {
+                    idx.set(record[key], new IndexEntry());
                 }
-                this.layer(level).index.get(record[key])!.add(idx);
+                idx.get(record[key])!.add(i);
             }
         });
     }
     public layer(level: number = 0): Layer {
         if (!this._layers.has(level)) {
             const first = this._layers.get(0)!;
-            const cloned = new Map<string, IndexEntry>();
-            for (const [key, entry] of first.index) {
-                cloned.set(key, entry.clone());
+            const clonedIndexes = new Map<string, Map<string, IndexEntry>>();
+            for (const [name, indexMap] of first.indexes) {
+                const clonedMap = new Map<string, IndexEntry>();
+                for (const [key, entry] of indexMap) {
+                    clonedMap.set(key, entry.clone());
+                }
+                clonedIndexes.set(name, clonedMap);
             }
-            this._layers.set(level, new Layer(cloned));
+            this._layers.set(level, new Layer(clonedIndexes));
         }
         return this._layers.get(level)!;
     }
-    protected _find(key: string, level: number = 0): boolean {
-        if (!this.layer(level).index.has(key)) {
+    protected _find(key: string, level: number = 0, indexName?: string): boolean {
+        const idx = indexName
+            ? this.layer(level).index(indexName)
+            : this.layer(level).indexes.values().next().value;
+        if (!idx || !idx.has(key)) {
             this.layer(level).current = this._records.length; // Move to end
             return false;
         } else {
-            const entry = this.layer(level).index.get(key)!;
+            const entry = idx.get(key)!;
             const more = entry.next();
             if (!more) {
                 this.layer(level).current = this._records.length; // Move to end
@@ -91,8 +105,10 @@ class Data {
     public reset(): void {
         for (const layer of this._layers.values()) {
             layer.current = -1;
-            for (const entry of layer.index.values()) {
-                entry.reset();
+            for (const indexMap of layer.indexes.values()) {
+                for (const entry of indexMap.values()) {
+                    entry.reset();
+                }
             }
         }
     }

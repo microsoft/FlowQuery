@@ -12,15 +12,20 @@ class RelationshipRecord(TypedDict, total=False):
 
 
 class RelationshipData(Data):
-    """Relationship data class extending Data with left_id-based indexing."""
+    """Relationship data class extending Data with left_id and right_id indexing."""
 
     def __init__(self, records: Optional[List[Dict[str, Any]]] = None):
         super().__init__(records)
         self._build_index("left_id")
+        self._build_index("right_id")
 
     def find(self, left_id: str, hop: int = 0) -> bool:
         """Find a relationship by start node ID."""
-        return self._find(left_id, hop)
+        return self._find(left_id, hop, "left_id")
+
+    def find_reverse(self, right_id: str, hop: int = 0) -> bool:
+        """Find a relationship by end node ID (reverse direction)."""
+        return self._find(right_id, hop, "right_id")
 
     def properties(self) -> Optional[Dict[str, Any]]:
         """Get properties of current relationship, excluding left_id and right_id."""

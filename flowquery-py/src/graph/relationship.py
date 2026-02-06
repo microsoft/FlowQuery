@@ -23,6 +23,7 @@ class Relationship(ASTNode):
         self._hops: Hops = Hops()
         self._source: Optional['Node'] = None
         self._target: Optional['Node'] = None
+        self._direction: str = "right"
         self._data: Optional['RelationshipData'] = None
         self._value: Optional[Union[RelationshipMatchRecord, List[RelationshipMatchRecord]]] = None
         self._matches: RelationshipMatchCollector = RelationshipMatchCollector()
@@ -54,10 +55,26 @@ class Relationship(ASTNode):
 
     @property
     def properties(self) -> Dict[str, Any]:
-        """Get properties from relationship data."""
-        if self._data:
-            return self._data.properties() or {}
-        return {}
+        return self._properties
+
+    @properties.setter
+    def properties(self, value: Dict[str, Any]) -> None:
+        self._properties = value
+
+    def _matches_properties(self, hop: int = 0) -> bool:
+        """Check if current record matches all constraint properties."""
+        if not self._properties:
+            return True
+        if self._data is None:
+            return True
+        for key, expression in self._properties.items():
+            record = self._data.current(hop)
+            if record is None:
+                raise ValueError("No current relationship data available")
+            if key not in record:
+                raise ValueError("Relationship does not have property")
+            return bool(record[key] == expression.value())
+        return True
 
     @property
     def source(self) -> Optional['Node']:
@@ -74,6 +91,14 @@ class Relationship(ASTNode):
     @target.setter
     def target(self, value: 'Node') -> None:
         self._target = value
+
+    @property
+    def direction(self) -> str:
+        return self._direction
+
+    @direction.setter
+    def direction(self, value: str) -> None:
+        self._direction = value
 
     # Keep start/end aliases for backward compatibility
     @property
@@ -95,6 +120,9 @@ class Relationship(ASTNode):
     def set_data(self, data: Optional['RelationshipData']) -> None:
         self._data = data
 
+    def get_data(self) -> Optional['RelationshipData']:
+        return self._data
+
     def set_value(self, relationship: 'Relationship') -> None:
         """Set value by pushing match to collector."""
         self._matches.push(relationship)
@@ -115,11 +143,13 @@ class Relationship(ASTNode):
         """Find relationships starting from the given node ID."""
         # Save original source node
         original = self._source
+        is_left = self._direction == "left"
         if hop > 0:
             # For hops greater than 0, the source becomes the target of the previous hop
             self._source = self._target
         if hop == 0:
-            self._data.reset() if self._data else None
+            if self._data:
+                self._data.reset()
 
             # Handle zero-hop case: when min is 0 on a variable-length relationship,
             # match source node as target (no traversal)
@@ -128,16 +158,25 @@ class Relationship(ASTNode):
                 # No relationship match is pushed since no edge is traversed
                 await self._target.find(left_id, hop)
 
-        while self._data and self._data.find(left_id, hop):
+        def find_match(id_: str, h: int) -> bool:
+            if self._data is None:
+                return False
+            if is_left:
+                return self._data.find_reverse(id_, h)
+            return self._data.find(id_, h)
+        follow_id = 'left_id' if is_left else 'right_id'
+        while self._data and find_match(left_id, hop):
             data = self._data.current(hop)
             if data and self._hops and hop >= self._hops.min:
                 self.set_value(self)
-                if self._target and 'right_id' in data:
-                    await self._target.find(data['right_id'], hop)
+                if not self._matches_properties(hop):
+                    continue
+                if self._target and follow_id in data:
+                    await self._target.find(data[follow_id], hop)
                 if self._matches.is_circular():
                     raise ValueError("Circular relationship detected")
                 if self._hops and hop + 1 < self._hops.max:
-                    await self.find(data['right_id'], hop + 1)
+                    await self.find(data[follow_id], hop + 1)
                 self._matches.pop()
 
         # Restore original source node

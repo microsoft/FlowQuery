@@ -1304,3 +1304,159 @@ test("Test match with constraints", async () => {
     expect(results.length).toBe(1);
     expect(results[0].name).toBe("Employee 1");
 });
+
+test("Test match with leftward relationship direction", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:REPORTS_TO]-(:Person) AS {
+            unwind [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Rightward: left_id -> right_id (2->1, 3->1)
+    const rightMatch = new Runner(`
+        MATCH (a:Person)-[:REPORTS_TO]->(b:Person)
+        RETURN a.name AS employee, b.name AS manager
+    `);
+    await rightMatch.run();
+    const rightResults = rightMatch.results;
+    expect(rightResults.length).toBe(2);
+    expect(rightResults[0]).toEqual({ employee: "Person 2", manager: "Person 1" });
+    expect(rightResults[1]).toEqual({ employee: "Person 3", manager: "Person 1" });
+
+    // Leftward: right_id -> left_id (1->2, 1->3) — reverse traversal
+    const leftMatch = new Runner(`
+        MATCH (m:Person)<-[:REPORTS_TO]-(e:Person)
+        RETURN m.name AS manager, e.name AS employee
+    `);
+    await leftMatch.run();
+    const leftResults = leftMatch.results;
+    expect(leftResults.length).toBe(2);
+    expect(leftResults[0]).toEqual({ manager: "Person 1", employee: "Person 2" });
+    expect(leftResults[1]).toEqual({ manager: "Person 1", employee: "Person 3" });
+});
+
+test("Test match with leftward direction produces same results as rightward with swapped data", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            unwind [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'},
+                {id: 3, name: 'Chicago'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:ROUTE]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Leftward from destination: find where right_id matches, follow left_id
+    const match = new Runner(`
+        MATCH (dest:City)<-[:ROUTE]-(origin:City)
+        RETURN dest.name AS destination, origin.name AS origin
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ destination: "Boston", origin: "New York" });
+    expect(results[1]).toEqual({ destination: "Chicago", origin: "New York" });
+});
+
+test("Test match with leftward variable-length relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:MANAGES]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Leftward variable-length: traverse from right_id to left_id
+    // Person 3 can reach Person 2 (1 hop) and Person 1 (2 hops)
+    const match = new Runner(`
+        MATCH (a:Person)<-[:MANAGES*]-(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    // Zero-hop results for all 3 persons + multi-hop results
+    // Leftward indexes on right_id. find(id) looks up right_id=id, follows left_id.
+    // right_id=1: no records → Person 1 zero-hop only
+    // right_id=2: record {left_id:1, right_id:2} → Person 2 → Person 1, then recurse find(1) → no more
+    // right_id=3: record {left_id:2, right_id:3} → Person 3 → Person 2, then recurse find(2) → Person 1
+    expect(results.length).toBe(6);
+    // Person 1: zero-hop
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 1" });
+    // Person 2: zero-hop, then reaches Person 1
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 2" });
+    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 1" });
+    // Person 3: zero-hop, then reaches Person 2, then Person 1
+    expect(results[3]).toEqual({ name1: "Person 3", name2: "Person 3" });
+    expect(results[4]).toEqual({ name1: "Person 3", name2: "Person 2" });
+    expect(results[5]).toEqual({ name1: "Person 3", name2: "Person 1" });
+});
+
+test("Test match with leftward double graph pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Leftward chain: (c)<-[:KNOWS]-(b)<-[:KNOWS]-(a)
+    // First rel: find right_id=c, follow left_id to b
+    // Second rel: find right_id=b, follow left_id to a
+    const match = new Runner(`
+        MATCH (c:Person)<-[:KNOWS]-(b:Person)<-[:KNOWS]-(a:Person)
+        RETURN a.name AS name1, b.name AS name2, c.name AS name3
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2", name3: "Person 3" });
+    expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
+});

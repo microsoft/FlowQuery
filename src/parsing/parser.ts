@@ -580,7 +580,9 @@ class Parser extends BaseParser {
     }
 
     private parseRelationship(): Relationship | null {
+        let direction: "left" | "right" = "right";
         if (this.token.isLessThan() && this.peek()?.isSubtract()) {
+            direction = "left";
             this.setNextToken();
             this.setNextToken();
         } else if (this.token.isSubtract()) {
@@ -620,6 +622,7 @@ class Parser extends BaseParser {
             this.setNextToken();
         }
         let relationship = new Relationship();
+        relationship.direction = direction;
         relationship.properties = properties;
         if (type !== null && variable !== null) {
             relationship.identifier = variable;

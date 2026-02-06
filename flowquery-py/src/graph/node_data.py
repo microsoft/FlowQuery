@@ -19,7 +19,7 @@ class NodeData(Data):
 
     def find(self, id_: str, hop: int = 0) -> bool:
         """Find a record by ID."""
-        return self._find(id_, hop)
+        return self._find(id_, hop, "id")
 
     def current(self, hop: int = 0) -> Optional[Dict[str, Any]]:
         """Get the current record."""

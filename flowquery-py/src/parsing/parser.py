@@ -1,7 +1,7 @@
 """Main parser for FlowQuery statements."""
 
 import sys
-from typing import Dict, Iterator, List, Optional, cast
+from typing import Dict, Iterator, List, Optional, Tuple, cast
 
 from ..graph.hops import Hops
 from ..graph.node import Node
@@ -467,6 +467,7 @@ class Parser(BaseParser):
         self._skip_whitespace_and_comments()
         node = Node()
         node.label = label
+        node.properties = dict(self._parse_properties())
         if label is not None and identifier is not None:
             node.identifier = identifier
             self._variables[identifier] = node
@@ -481,7 +482,9 @@ class Parser(BaseParser):
         return node
 
     def _parse_relationship(self) -> Optional[Relationship]:
+        direction = "right"
         if self.token.is_less_than() and self.peek() is not None and self.peek().is_subtract():
+            direction = "left"
             self.set_next_token()
             self.set_next_token()
         elif self.token.is_subtract():
@@ -503,6 +506,7 @@ class Parser(BaseParser):
         rel_type: str = self.token.value or ""
         self.set_next_token()
         hops = self._parse_relationship_hops()
+        properties: Dict[str, Expression] = dict(self._parse_properties())
         if not self.token.is_closing_bracket():
             raise ValueError("Expected closing bracket for relationship definition")
         self.set_next_token()
@@ -512,6 +516,8 @@ class Parser(BaseParser):
         if self.token.is_greater_than():
             self.set_next_token()
         relationship = Relationship()
+        relationship.direction = direction
+        relationship.properties = properties
         if rel_type is not None and variable is not None:
             relationship.identifier = variable
             self._variables[variable] = relationship
@@ -524,6 +530,39 @@ class Parser(BaseParser):
             relationship.hops = hops
         relationship.type = rel_type
         return relationship
+
+    def _parse_properties(self) -> Iterator[Tuple[str, Expression]]:
+        parts: int = 0
+        while True:
+            self._skip_whitespace_and_comments()
+            if not self.token.is_opening_brace() and parts == 0:
+                return
+            elif not self.token.is_opening_brace() and parts > 0:
+                raise ValueError("Expected opening brace")
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if not self.token.is_identifier():
+                raise ValueError("Expected identifier")
+            key: str = self.token.value or ""
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if not self.token.is_colon():
+                raise ValueError("Expected colon")
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            expression = self._parse_expression()
+            if expression is None:
+                raise ValueError("Expected expression")
+            self._skip_whitespace_and_comments()
+            if not self.token.is_closing_brace():
+                raise ValueError("Expected closing brace")
+            self.set_next_token()
+            yield (key, expression)
+            self._skip_whitespace_and_comments()
+            if not self.token.is_comma():
+                break
+            self.set_next_token()
+            parts += 1
 
     def _parse_relationship_hops(self) -> Optional[Hops]:
         if not self.token.is_multiply():

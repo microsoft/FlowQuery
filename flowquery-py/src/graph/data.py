@@ -38,14 +38,20 @@ class IndexEntry:
 class Layer:
     """Layer for managing index state at a specific level."""
 
-    def __init__(self, index: Dict[str, IndexEntry]):
-        self._index: Dict[str, IndexEntry] = index
+    def __init__(self, indexes: Dict[str, Dict[str, IndexEntry]]):
+        self._indexes: Dict[str, Dict[str, IndexEntry]] = indexes
         self._current: int = -1
 
+    def index(self, name: str) -> Dict[str, IndexEntry]:
+        """Get or create an index by name."""
+        if name not in self._indexes:
+            self._indexes[name] = {}
+        return self._indexes[name]
+
     @property
-    def index(self) -> Dict[str, IndexEntry]:
-        """Get the index dictionary."""
-        return self._index
+    def indexes(self) -> Dict[str, Dict[str, IndexEntry]]:
+        """Get all indexes."""
+        return self._indexes
 
     @property
     def current(self) -> int:
@@ -67,30 +73,40 @@ class Data:
 
     def _build_index(self, key: str, level: int = 0) -> None:
         """Build an index for the given key at the specified level."""
-        self.layer(level).index.clear()
-        for idx, record in enumerate(self._records):
+        idx = self.layer(level).index(key)
+        idx.clear()
+        for i, record in enumerate(self._records):
             if key in record:
-                if record[key] not in self.layer(level).index:
-                    self.layer(level).index[record[key]] = IndexEntry()
-                self.layer(level).index[record[key]].add(idx)
+                if record[key] not in idx:
+                    idx[record[key]] = IndexEntry()
+                idx[record[key]].add(i)
 
     def layer(self, level: int = 0) -> Layer:
         """Get or create a layer at the specified level."""
         if level not in self._layers:
             first = self._layers[0]
-            cloned = {}
-            for key, entry in first.index.items():
-                cloned[key] = entry.clone()
-            self._layers[level] = Layer(cloned)
+            cloned_indexes = {}
+            for name, index_map in first.indexes.items():
+                cloned_map = {}
+                for key, entry in index_map.items():
+                    cloned_map[key] = entry.clone()
+                cloned_indexes[name] = cloned_map
+            self._layers[level] = Layer(cloned_indexes)
         return self._layers[level]
 
-    def _find(self, key: str, level: int = 0) -> bool:
+    def _find(self, key: str, level: int = 0, index_name: Optional[str] = None) -> bool:
         """Find the next record with the given key value."""
-        if key not in self.layer(level).index:
+        idx: Optional[Dict[str, IndexEntry]] = None
+        if index_name:
+            idx = self.layer(level).index(index_name)
+        else:
+            indexes = self.layer(level).indexes
+            idx = next(iter(indexes.values())) if indexes else None
+        if not idx or key not in idx:
             self.layer(level).current = len(self._records)  # Move to end
             return False
         else:
-            entry = self.layer(level).index[key]
+            entry = idx[key]
             more = entry.next()
             if not more:
                 self.layer(level).current = len(self._records)  # Move to end
@@ -102,8 +118,9 @@ class Data:
         """Reset iteration to the beginning."""
         for layer in self._layers.values():
             layer.current = -1
-            for entry in layer.index.values():
-                entry.reset()
+            for index_map in layer.indexes.values():
+                for entry in index_map.values():
+                    entry.reset()
 
     def next(self, level: int = 0) -> bool:
         """Move to the next record. Returns True if successful."""

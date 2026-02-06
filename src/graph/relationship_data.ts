@@ -6,9 +6,13 @@ class RelationshipData extends Data {
     constructor(records: RelationshipRecord[] = []) {
         super(records);
         super._buildIndex("left_id");
+        super._buildIndex("right_id");
     }
     public find(left_id: string, hop: number = 0): boolean {
-        return super._find(left_id, hop);
+        return super._find(left_id, hop, "left_id");
+    }
+    public findReverse(right_id: string, hop: number = 0): boolean {
+        return super._find(right_id, hop, "right_id");
     }
     /*
     ** Get the properties of the current relationship record

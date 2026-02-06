@@ -5,6 +5,9 @@ from typing import AsyncIterator
 from flowquery.parsing.parser import Parser
 from flowquery.parsing.functions.async_function import AsyncFunction
 from flowquery.parsing.functions.function_metadata import FunctionDef
+from flowquery.parsing.operations.match import Match
+from flowquery.graph.node import Node
+from flowquery.graph.relationship import Relationship
 
 
 # Test async function for CALL operation parsing test
@@ -678,3 +681,41 @@ class TestParser:
         parser = Parser()
         with pytest.raises(Exception, match="PatternExpression must contain at least one NodeReference"):
             parser.parse("MATCH (a:Person) WHERE (:Person)-[:KNOWS]->(:Person) RETURN a")
+
+    def test_node_with_properties(self):
+        """Test node with properties."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person{value: 'hello'}) return a")
+        expected = (
+            "ASTNode\n"
+            "- Match\n"
+            "- Return\n"
+            "-- Expression (a)\n"
+            "--- Reference (a)"
+        )
+        assert ast.print() == expected
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        node = match_op.patterns[0].chain[0]
+        assert isinstance(node, Node)
+        assert node.properties.get("value") is not None
+        assert node.properties["value"].value() == "hello"
+
+    def test_relationship_with_properties(self):
+        """Test relationship with properties."""
+        parser = Parser()
+        ast = parser.parse("MATCH (:Person)-[r:LIKES{since: 2022}]->(:Food) return a")
+        expected = (
+            "ASTNode\n"
+            "- Match\n"
+            "- Return\n"
+            "-- Expression (a)\n"
+            "--- Reference (a)"
+        )
+        assert ast.print() == expected
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        relationship = match_op.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.properties.get("since") is not None
+        assert relationship.properties["since"].value() == 2022

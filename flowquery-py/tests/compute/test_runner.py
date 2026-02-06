@@ -1336,3 +1336,207 @@ class TestRunner:
         # With * meaning 0+ hops, Employee 1 (CEO) also matches itself (zero-hop)
         # Employee 1→1 (zero-hop), 2→1, 3→2→1, 4→2→1 = 4 results
         assert len(results) == 4
+
+    @pytest.mark.asyncio
+    async def test_match_with_leftward_relationship_direction(self):
+        """Test match with leftward relationship direction."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirPerson)-[:REPORTS_TO]-(:DirPerson) AS {
+                unwind [
+                    {left_id: 2, right_id: 1},
+                    {left_id: 3, right_id: 1}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Rightward: left_id -> right_id (2->1, 3->1)
+        right_match = Runner(
+            """
+            MATCH (a:DirPerson)-[:REPORTS_TO]->(b:DirPerson)
+            RETURN a.name AS employee, b.name AS manager
+            """
+        )
+        await right_match.run()
+        right_results = right_match.results
+        assert len(right_results) == 2
+        assert right_results[0] == {"employee": "Person 2", "manager": "Person 1"}
+        assert right_results[1] == {"employee": "Person 3", "manager": "Person 1"}
+
+        # Leftward: right_id -> left_id (1->2, 1->3) - reverse traversal
+        left_match = Runner(
+            """
+            MATCH (m:DirPerson)<-[:REPORTS_TO]-(e:DirPerson)
+            RETURN m.name AS manager, e.name AS employee
+            """
+        )
+        await left_match.run()
+        left_results = left_match.results
+        assert len(left_results) == 2
+        assert left_results[0] == {"manager": "Person 1", "employee": "Person 2"}
+        assert left_results[1] == {"manager": "Person 1", "employee": "Person 3"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_leftward_direction_swapped_data(self):
+        """Test match with leftward direction produces same results as rightward with swapped data."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirCity) AS {
+                unwind [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'},
+                    {id: 3, name: 'Chicago'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirCity)-[:ROUTE]-(:DirCity) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Leftward from destination: find where right_id matches, follow left_id
+        match = Runner(
+            """
+            MATCH (dest:DirCity)<-[:ROUTE]-(origin:DirCity)
+            RETURN dest.name AS destination, origin.name AS origin
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"destination": "Boston", "origin": "New York"}
+        assert results[1] == {"destination": "Chicago", "origin": "New York"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_leftward_variable_length(self):
+        """Test match with leftward variable-length relationships."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirVarPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirVarPerson)-[:MANAGES]-(:DirVarPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Leftward variable-length: traverse from right_id to left_id
+        match = Runner(
+            """
+            MATCH (a:DirVarPerson)<-[:MANAGES*]-(b:DirVarPerson)
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await match.run()
+        results = match.results
+        # Leftward indexes on right_id. find(id) looks up right_id=id, follows left_id.
+        # Person 1: zero-hop only (no right_id=1)
+        # Person 2: zero-hop, then left_id=1 (1 hop)
+        # Person 3: zero-hop, then left_id=2 (1 hop), then left_id=1 (2 hops)
+        assert len(results) == 6
+        assert results[0] == {"name1": "Person 1", "name2": "Person 1"}
+        assert results[1] == {"name1": "Person 2", "name2": "Person 2"}
+        assert results[2] == {"name1": "Person 2", "name2": "Person 1"}
+        assert results[3] == {"name1": "Person 3", "name2": "Person 3"}
+        assert results[4] == {"name1": "Person 3", "name2": "Person 2"}
+        assert results[5] == {"name1": "Person 3", "name2": "Person 1"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_leftward_double_graph_pattern(self):
+        """Test match with leftward double graph pattern."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirDoublePerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:DirDoublePerson)-[:KNOWS]-(:DirDoublePerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Leftward chain: (c)<-[:KNOWS]-(b)<-[:KNOWS]-(a)
+        match = Runner(
+            """
+            MATCH (c:DirDoublePerson)<-[:KNOWS]-(b:DirDoublePerson)<-[:KNOWS]-(a:DirDoublePerson)
+            RETURN a.name AS name1, b.name AS name2, c.name AS name3
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"name1": "Person 1", "name2": "Person 2", "name3": "Person 3"}
+        assert results[1] == {"name1": "Person 2", "name2": "Person 3", "name3": "Person 4"}
+
+    async def test_match_with_constraints(self):
+        await Runner(
+            """
+            CREATE VIRTUAL (:ConstraintEmployee) AS {
+                unwind [
+                    {id: 1, name: 'Employee 1'},
+                    {id: 2, name: 'Employee 2'},
+                    {id: 3, name: 'Employee 3'},
+                    {id: 4, name: 'Employee 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            match (e:ConstraintEmployee{name:'Employee 1'})
+            return e.name as name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0]["name"] == "Employee 1"

@@ -27,11 +27,13 @@ class RelationshipMatchCollector:
     def push(self, relationship: 'Relationship') -> RelationshipMatchRecord:
         """Push a new match onto the collector."""
         start_node_value = relationship.source.value() if relationship.source else None
+        rel_data = relationship.get_data()
+        rel_props: Dict[str, Any] = (rel_data.properties() or {}) if rel_data else {}
         match: RelationshipMatchRecord = {
             "type": relationship.type or "",
             "startNode": start_node_value or {},
             "endNode": None,
-            "properties": relationship.properties,
+            "properties": rel_props,
         }
         self._matches.append(match)
         if isinstance(start_node_value, dict):

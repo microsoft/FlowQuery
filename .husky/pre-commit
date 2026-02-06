@@ -22,6 +22,6 @@ fi
 for notebook in $(git ls-files 'flowquery-py/**/*.ipynb'); do
     if [ -f "$notebook" ]; then
         echo "Stripping outputs from: $notebook"
-        "C:/Users/niclask/AppData/Local/miniconda3/envs/flowquery/python.exe" -m nbstripout "$notebook"
+        python -m nbstripout "$notebook"
     fi
 done

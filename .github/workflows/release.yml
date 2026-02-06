@@ -68,11 +68,11 @@ jobs:
 
           # Commit the version bump
           git add package.json package-lock.json docs/flowquery.min.js
-          git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+          git commit --no-verify -m "chore: bump version to ${NEW_VERSION} [skip ci]"
 
           # Include any changes from formatters/linters in the commit
           git add -A
-          git diff --cached --quiet || git commit --amend --no-edit
+          git diff --cached --quiet || git commit --amend --no-verify --no-edit
 
           # Pull latest changes and rebase our commit on top
           git pull --rebase origin main

@@ -18,6 +18,7 @@ import "./rand";
 import "./range";
 import "./replace";
 import "./round";
+import "./schema";
 import "./size";
 import "./split";
 import "./stringify";

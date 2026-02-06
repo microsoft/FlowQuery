@@ -1460,3 +1460,43 @@ test("Test match with leftward double graph pattern", async () => {
     expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2", name3: "Person 3" });
     expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
 });
+
+test("Test schema() returns nodes and relationships with sample data", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Animal) AS {
+            UNWIND [
+                {id: 1, species: 'Cat', legs: 4},
+                {id: 2, species: 'Dog', legs: 4}
+            ] AS record
+            RETURN record.id AS id, record.species AS species, record.legs AS legs
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Animal)-[:CHASES]-(:Animal) AS {
+            UNWIND [
+                {left_id: 2, right_id: 1, speed: 'fast'}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id, record.speed AS speed
+        }
+    `).run();
+
+    const runner = new Runner(
+        "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+    );
+    await runner.run();
+    const results = runner.results;
+
+    const animal = results.find((r: any) => r.kind === "node" && r.label === "Animal");
+    expect(animal).toBeDefined();
+    expect(animal.sample).toBeDefined();
+    expect(animal.sample).not.toHaveProperty("id");
+    expect(animal.sample).toHaveProperty("species");
+    expect(animal.sample).toHaveProperty("legs");
+
+    const chases = results.find((r: any) => r.kind === "relationship" && r.type === "CHASES");
+    expect(chases).toBeDefined();
+    expect(chases.sample).toBeDefined();
+    expect(chases.sample).not.toHaveProperty("left_id");
+    expect(chases.sample).not.toHaveProperty("right_id");
+    expect(chases.sample).toHaveProperty("speed");
+});

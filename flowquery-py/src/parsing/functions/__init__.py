@@ -27,6 +27,7 @@ from .range_ import Range
 from .reducer_element import ReducerElement
 from .replace import Replace
 from .round_ import Round
+from .schema import Schema
 from .size import Size
 from .split import Split
 from .stringify import Stringify
@@ -71,5 +72,6 @@ __all__ = [
     "ToJson",
     "Type",
     "Functions",
+    "Schema",
     "PredicateSum",
 ]

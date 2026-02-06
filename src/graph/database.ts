@@ -39,6 +39,36 @@ class Database {
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         return Database.relationships.get(relationship.type!) || null;
     }
+    public async schema(): Promise<Record<string, any>[]> {
+        const result: Record<string, any>[] = [];
+
+        for (const [label, physical] of Database.nodes) {
+            const records = await physical.data();
+            const entry: Record<string, any> = { kind: "node", label };
+            if (records.length > 0) {
+                const { id, ...sample } = records[0];
+                if (Object.keys(sample).length > 0) {
+                    entry.sample = sample;
+                }
+            }
+            result.push(entry);
+        }
+
+        for (const [type, physical] of Database.relationships) {
+            const records = await physical.data();
+            const entry: Record<string, any> = { kind: "relationship", type };
+            if (records.length > 0) {
+                const { left_id, right_id, ...sample } = records[0];
+                if (Object.keys(sample).length > 0) {
+                    entry.sample = sample;
+                }
+            }
+            result.push(entry);
+        }
+
+        return result;
+    }
+
     public async getData(element: Node | Relationship): Promise<NodeData | RelationshipData> {
         if (element instanceof Node) {
             const node = this.getNode(element);

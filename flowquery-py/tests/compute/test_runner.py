@@ -1540,3 +1540,48 @@ class TestRunner:
         results = match.results
         assert len(results) == 1
         assert results[0]["name"] == "Employee 1"
+
+    @pytest.mark.asyncio
+    async def test_schema_returns_nodes_and_relationships_with_sample_data(self):
+        """Test schema() returns nodes and relationships with sample data."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Animal) AS {
+                UNWIND [
+                    {id: 1, species: 'Cat', legs: 4},
+                    {id: 2, species: 'Dog', legs: 4}
+                ] AS record
+                RETURN record.id AS id, record.species AS species, record.legs AS legs
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:Animal)-[:CHASES]-(:Animal) AS {
+                UNWIND [
+                    {left_id: 2, right_id: 1, speed: 'fast'}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id, record.speed AS speed
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+        )
+        await runner.run()
+        results = runner.results
+
+        animal = next((r for r in results if r.get("kind") == "node" and r.get("label") == "Animal"), None)
+        assert animal is not None
+        assert animal["sample"] is not None
+        assert "id" not in animal["sample"]
+        assert "species" in animal["sample"]
+        assert "legs" in animal["sample"]
+
+        chases = next((r for r in results if r.get("kind") == "relationship" and r.get("type") == "CHASES"), None)
+        assert chases is not None
+        assert chases["sample"] is not None
+        assert "left_id" not in chases["sample"]
+        assert "right_id" not in chases["sample"]
+        assert "speed" in chases["sample"]

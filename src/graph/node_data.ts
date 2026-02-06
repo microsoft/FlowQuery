@@ -8,7 +8,7 @@ class NodeData extends Data {
         super._buildIndex("id");
     }
     public find(id: string, hop: number = 0): boolean {
-        return super._find(id, hop);
+        return super._find(id, hop, "id");
     }
     public current(hop: number = 0): NodeRecord | null {
         return super.current(hop) as NodeRecord | null;

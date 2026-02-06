@@ -50,11 +50,30 @@ class Node(ASTNode):
     def properties(self) -> Dict[str, Expression]:
         return self._properties
 
+    @properties.setter
+    def properties(self, value: Dict[str, Expression]) -> None:
+        self._properties = value
+
     def set_property(self, key: str, value: Expression) -> None:
         self._properties[key] = value
 
     def get_property(self, key: str) -> Optional[Expression]:
         return self._properties.get(key)
+
+    def _matches_properties(self, hop: int = 0) -> bool:
+        """Check if current record matches all constraint properties."""
+        if not self._properties:
+            return True
+        if self._data is None:
+            return True
+        for key, expression in self._properties.items():
+            record = self._data.current(hop)
+            if record is None:
+                raise ValueError("No current node data available")
+            if key not in record:
+                raise ValueError("Node does not have property")
+            return bool(record[key] == expression.value())
+        return True
 
     def set_value(self, value: Dict[str, Any]) -> None:
         self._value = value  # type: ignore[assignment]
@@ -88,6 +107,8 @@ class Node(ASTNode):
                 current = self._data.current()
                 if current is not None:
                     self.set_value(current)
+                    if not self._matches_properties():
+                        continue
                     if self._outgoing and self._value:
                         await self._outgoing.find(self._value['id'])
                     await self.run_todo_next()
@@ -99,6 +120,8 @@ class Node(ASTNode):
                 current = self._data.current(hop)
                 if current is not None:
                     self.set_value(current)
+                    if not self._matches_properties(hop):
+                        continue
                     if self._incoming:
                         self._incoming.set_end_node(self)
                     if self._outgoing and self._value:

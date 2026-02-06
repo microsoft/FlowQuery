@@ -431,6 +431,7 @@ class Parser extends BaseParser {
         }
         this.skipWhitespaceAndComments();
         let node = new Node();
+        node.properties = new Map(this.parseProperties());
         node.label = label!;
         if (label !== null && identifier !== null) {
             node.identifier = identifier;
@@ -447,6 +448,47 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         return node;
+    }
+
+    private *parseProperties(): Iterable<[string, Expression]> {
+        let parts: number = 0;
+        while (true) {
+            this.skipWhitespaceAndComments();
+            if (!this.token.isOpeningBrace() && parts == 0) {
+                return;
+            } else if (!this.token.isOpeningBrace() && parts > 0) {
+                throw new Error("Expected opening brace");
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (!this.token.isIdentifier()) {
+                throw new Error("Expected identifier");
+            }
+            const key: string = this.token.value!;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (!this.token.isColon()) {
+                throw new Error("Expected colon");
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            const expression: Expression | null = this.parseExpression();
+            if (expression === null) {
+                throw new Error("Expected expression");
+            }
+            this.skipWhitespaceAndComments();
+            if (!this.token.isClosingBrace()) {
+                throw new Error("Expected closing brace");
+            }
+            this.setNextToken();
+            yield [key, expression];
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            parts++;
+        }
     }
 
     private *parsePatterns(): IterableIterator<Pattern> {
@@ -538,7 +580,9 @@ class Parser extends BaseParser {
     }
 
     private parseRelationship(): Relationship | null {
+        let direction: "left" | "right" = "right";
         if (this.token.isLessThan() && this.peek()?.isSubtract()) {
+            direction = "left";
             this.setNextToken();
             this.setNextToken();
         } else if (this.token.isSubtract()) {
@@ -565,6 +609,7 @@ class Parser extends BaseParser {
         const type: string = this.token.value || "";
         this.setNextToken();
         const hops: Hops | null = this.parseRelationshipHops();
+        const properties: Map<string, Expression> = new Map(this.parseProperties());
         if (!this.token.isClosingBracket()) {
             throw new Error("Expected closing bracket for relationship definition");
         }
@@ -577,6 +622,8 @@ class Parser extends BaseParser {
             this.setNextToken();
         }
         let relationship = new Relationship();
+        relationship.direction = direction;
+        relationship.properties = properties;
         if (type !== null && variable !== null) {
             relationship.identifier = variable;
             this.variables.set(variable, relationship);

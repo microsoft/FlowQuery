@@ -17,7 +17,8 @@ class RelationshipReference extends Relationship {
         const data: RelationshipRecord = this._reference!.getData()?.current(
             hop
         ) as RelationshipRecord;
-        await this._target?.find(data.right_id, hop);
+        const followId = this._direction === "left" ? "left_id" : "right_id";
+        await this._target?.find(data[followId], hop);
     }
 }
 

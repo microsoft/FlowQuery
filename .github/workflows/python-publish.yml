@@ -6,11 +6,6 @@ on:
       - main
     paths:
       - "flowquery-py/src/**"
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "flowquery-py/src/**"
   release:
     types: [published]
   workflow_dispatch:

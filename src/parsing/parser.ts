@@ -798,12 +798,7 @@ class Parser extends BaseParser {
                 expression.addNode(lookup);
                 return true;
             }
-        } else if (
-            this.token.isLeftParenthesis() &&
-            (this.peek()?.isIdentifierOrKeyword() ||
-                this.peek()?.isColon() ||
-                this.peek()?.isRightParenthesis())
-        ) {
+        } else if (this.token.isLeftParenthesis() && this.looksLikeNodePattern()) {
             // Possible graph pattern expression
             const pattern = this.parsePatternExpression();
             if (pattern !== null) {
@@ -862,6 +857,42 @@ class Parser extends BaseParser {
             expression.addNode(not);
             return true;
         }
+        return false;
+    }
+
+    /**
+     * Peeks ahead from a left parenthesis to determine whether the
+     * upcoming tokens form a graph-node pattern (e.g. (n:Label), (n),
+     * (:Label), ()) rather than a parenthesised expression (e.g.
+     * (variable.property), (a + b)).
+     *
+     * The heuristic is:
+     *   • ( followed by `:` or `)` → node pattern
+     *   • ( identifier, then `:` or `{` or `)` → node pattern
+     *   • anything else → parenthesised expression
+     */
+    private looksLikeNodePattern(): boolean {
+        const savedIndex = this.tokenIndex;
+        this.setNextToken(); // skip '('
+        this.skipWhitespaceAndComments();
+
+        if (this.token.isColon() || this.token.isRightParenthesis()) {
+            this.tokenIndex = savedIndex;
+            return true;
+        }
+
+        if (this.token.isIdentifierOrKeyword()) {
+            this.setNextToken(); // skip identifier
+            this.skipWhitespaceAndComments();
+            const result =
+                this.token.isColon() ||
+                this.token.isOpeningBrace() ||
+                this.token.isRightParenthesis();
+            this.tokenIndex = savedIndex;
+            return result;
+        }
+
+        this.tokenIndex = savedIndex;
         return false;
     }
 

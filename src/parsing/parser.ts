@@ -24,7 +24,7 @@ import RangeLookup from "./data_structures/range_lookup";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
-import { Not } from "./expressions/operator";
+import { Is, IsNot, Not } from "./expressions/operator";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
 import AggregateFunction from "./functions/aggregate_function";
@@ -853,7 +853,11 @@ class Parser extends BaseParser {
             }
             this.skipWhitespaceAndComments();
             if (this.token.isOperator()) {
-                expression.addNode(this.token.node);
+                if (this.token.isIs()) {
+                    expression.addNode(this.parseIsOperator());
+                } else {
+                    expression.addNode(this.token.node);
+                }
             } else {
                 break;
             }
@@ -864,6 +868,19 @@ class Parser extends BaseParser {
             return expression;
         }
         return null;
+    }
+
+    private parseIsOperator(): Is | IsNot {
+        // Current token is IS. Look ahead for NOT to produce IS NOT.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isNot()) {
+            return new IsNot();
+        }
+        // Not IS NOT — restore position to IS so the outer loop's setNextToken advances past it.
+        this.tokenIndex = savedIndex;
+        return new Is();
     }
 
     private parseLookup(node: ASTNode): ASTNode {

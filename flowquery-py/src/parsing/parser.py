@@ -29,7 +29,7 @@ from .data_structures.range_lookup import RangeLookup
 from .expressions.expression import Expression
 from .expressions.f_string import FString
 from .expressions.identifier import Identifier
-from .expressions.operator import Not
+from .expressions.operator import Is, IsNot, Not
 from .expressions.reference import Reference
 from .expressions.string import String
 from .functions.aggregate_function import AggregateFunction
@@ -731,7 +731,10 @@ class Parser(BaseParser):
                     break
             self._skip_whitespace_and_comments()
             if self.token.is_operator():
-                expression.add_node(self.token.node)
+                if self.token.is_is():
+                    expression.add_node(self._parse_is_operator())
+                else:
+                    expression.add_node(self.token.node)
             else:
                 break
             self.set_next_token()
@@ -740,6 +743,18 @@ class Parser(BaseParser):
             expression.finish()
             return expression
         return None
+
+    def _parse_is_operator(self) -> ASTNode:
+        """Parse IS or IS NOT operator."""
+        # Current token is IS. Look ahead for NOT to produce IS NOT.
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_not():
+            return IsNot()
+        # Not IS NOT — restore position to IS so the outer loop's set_next_token advances past it.
+        self._token_index = saved_index
+        return Is()
 
     def _parse_lookup(self, node: ASTNode) -> ASTNode:
         variable = node

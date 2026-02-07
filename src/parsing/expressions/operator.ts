@@ -172,7 +172,16 @@ class Is extends Operator {
         super(-1, true);
     }
     public value(): number {
-        return this.lhs.value() === this.rhs.value() ? 1 : 0;
+        return this.lhs.value() == this.rhs.value() ? 1 : 0;
+    }
+}
+
+class IsNot extends Operator {
+    constructor() {
+        super(-1, true);
+    }
+    public value(): number {
+        return this.lhs.value() != this.rhs.value() ? 1 : 0;
     }
 }
 
@@ -194,4 +203,5 @@ export {
     Or,
     Not,
     Is,
+    IsNot,
 };

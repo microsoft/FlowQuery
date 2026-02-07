@@ -1842,3 +1842,46 @@ class TestRunner:
         assert len(results) == 2
         assert results[0] == {"ceo": "Alice", "dr1": "Bob", "dr2": "Carol"}
         assert results[1] == {"ceo": "Alice", "dr1": "Carol", "dr2": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_null(self):
+        """Test WHERE with IS NULL."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}] as person
+            with person.name as name, person.age as age
+            where age IS NULL
+            return name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_not_null(self):
+        """Test WHERE with IS NOT NULL."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}] as person
+            with person.name as name, person.age as age
+            where age IS NOT NULL
+            return name, age
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Alice", "age": 30}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_not_null_multiple_results(self):
+        """Test WHERE with IS NOT NULL filters multiple results."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}, {name: 'Carol', age: 25}] as person
+            with person.name as name, person.age as age
+            where age IS NOT NULL
+            return name, age
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice", "age": 30}
+        assert results[1] == {"name": "Carol", "age": 25}

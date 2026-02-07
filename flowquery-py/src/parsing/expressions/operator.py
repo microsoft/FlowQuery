@@ -167,3 +167,11 @@ class Is(Operator):
 
     def value(self) -> int:
         return 1 if self.lhs.value() == self.rhs.value() else 0
+
+
+class IsNot(Operator):
+    def __init__(self) -> None:
+        super().__init__(-1, True)
+
+    def value(self) -> int:
+        return 1 if self.lhs.value() != self.rhs.value() else 0

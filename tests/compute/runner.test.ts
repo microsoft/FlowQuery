@@ -1720,3 +1720,43 @@ test("Test match with node reference reuse with label", async () => {
     expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
     expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
 });
+
+test("Test WHERE with IS NULL", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}] as person
+        with person.name as name, person.age as age
+        where age IS NULL
+        return name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Bob" });
+});
+
+test("Test WHERE with IS NOT NULL", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}] as person
+        with person.name as name, person.age as age
+        where age IS NOT NULL
+        return name, age
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Alice", age: 30 });
+});
+
+test("Test WHERE with IS NOT NULL filters multiple results", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}, {name: 'Carol', age: 25}] as person
+        with person.name as name, person.age as age
+        where age IS NOT NULL
+        return name, age
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice", age: 30 });
+    expect(results[1]).toEqual({ name: "Carol", age: 25 });
+});

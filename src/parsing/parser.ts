@@ -171,11 +171,17 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let distinct = false;
+        if (this.token.isDistinct()) {
+            distinct = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         const expressions = Array.from(this.parseExpressions(AliasOption.REQUIRED));
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
-        if (expressions.some((expression: Expression) => expression.has_reducers())) {
+        if (distinct || expressions.some((expression: Expression) => expression.has_reducers())) {
             return new AggregatedWith(expressions);
         }
         return new With(expressions);
@@ -220,11 +226,17 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let distinct = false;
+        if (this.token.isDistinct()) {
+            distinct = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         const expressions = Array.from(this.parseExpressions(AliasOption.OPTIONAL));
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
-        if (expressions.some((expression: Expression) => expression.has_reducers())) {
+        if (distinct || expressions.some((expression: Expression) => expression.has_reducers())) {
             return new AggregatedReturn(expressions);
         }
         this._returns++;

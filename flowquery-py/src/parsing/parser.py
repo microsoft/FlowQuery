@@ -167,10 +167,15 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        distinct = False
+        if self.token.is_distinct():
+            distinct = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         expressions = list(self._parse_expressions(AliasOption.REQUIRED))
         if len(expressions) == 0:
             raise ValueError("Expected expression")
-        if any(expr.has_reducers() for expr in expressions):
+        if distinct or any(expr.has_reducers() for expr in expressions):
             return AggregatedWith(expressions)  # type: ignore[return-value]
         return With(expressions)
 
@@ -202,10 +207,15 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        distinct = False
+        if self.token.is_distinct():
+            distinct = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
         if len(expressions) == 0:
             raise ValueError("Expected expression")
-        if any(expr.has_reducers() for expr in expressions):
+        if distinct or any(expr.has_reducers() for expr in expressions):
             return AggregatedReturn(expressions)
         self._returns += 1
         return Return(expressions)

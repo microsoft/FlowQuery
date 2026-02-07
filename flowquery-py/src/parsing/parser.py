@@ -683,12 +683,7 @@ class Parser(BaseParser):
                 return True
         elif (
             self.token.is_left_parenthesis()
-            and self.peek() is not None
-            and (
-                self.peek().is_identifier_or_keyword()
-                or self.peek().is_colon()
-                or self.peek().is_right_parenthesis()
-            )
+            and self._looks_like_node_pattern()
         ):
             # Possible graph pattern expression
             pattern = self._parse_pattern_expression()
@@ -778,6 +773,34 @@ class Parser(BaseParser):
             expression.finish()
             return expression
         return None
+
+    def _looks_like_node_pattern(self) -> bool:
+        """Peek ahead from a left parenthesis to determine whether the
+        upcoming tokens form a graph-node pattern (e.g. (n:Label), (n),
+        (:Label), ()) rather than a parenthesised expression (e.g.
+        (variable.property), (a + b)).
+        """
+        saved_index = self._token_index
+        self.set_next_token()  # skip '('
+        self._skip_whitespace_and_comments()
+
+        if self.token.is_colon() or self.token.is_right_parenthesis():
+            self._token_index = saved_index
+            return True
+
+        if self.token.is_identifier_or_keyword():
+            self.set_next_token()  # skip identifier
+            self._skip_whitespace_and_comments()
+            result = (
+                self.token.is_colon()
+                or self.token.is_opening_brace()
+                or self.token.is_right_parenthesis()
+            )
+            self._token_index = saved_index
+            return result
+
+        self._token_index = saved_index
+        return False
 
     def _parse_is_operator(self) -> ASTNode:
         """Parse IS or IS NOT operator."""

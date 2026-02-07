@@ -1,7 +1,5 @@
 """String distance function using Levenshtein distance."""
 
-from typing import Any
-
 from .function import Function
 from .function_metadata import FunctionDef
 
@@ -82,7 +80,7 @@ class StringDistance(Function):
         super().__init__("string_distance")
         self._expected_parameter_count = 2
 
-    def value(self) -> Any:
+    def value(self) -> float:
         str1 = self.get_children()[0].value()
         str2 = self.get_children()[1].value()
         if not isinstance(str1, str) or not isinstance(str2, str):

@@ -29,7 +29,19 @@ from .data_structures.range_lookup import RangeLookup
 from .expressions.expression import Expression
 from .expressions.f_string import FString
 from .expressions.identifier import Identifier
-from .expressions.operator import Not
+from .expressions.operator import (
+    Contains,
+    EndsWith,
+    In,
+    Is,
+    IsNot,
+    Not,
+    NotContains,
+    NotEndsWith,
+    NotIn,
+    NotStartsWith,
+    StartsWith,
+)
 from .expressions.reference import Reference
 from .expressions.string import String
 from .functions.aggregate_function import AggregateFunction
@@ -469,10 +481,7 @@ class Parser(BaseParser):
         node = Node()
         node.label = label
         node.properties = dict(self._parse_properties())
-        if label is not None and identifier is not None:
-            node.identifier = identifier
-            self._variables[identifier] = node
-        elif identifier is not None:
+        if identifier is not None and identifier in self._variables:
             reference = self._variables.get(identifier)
             # Resolve through Expression -> Reference -> Node (e.g., after WITH)
             ref_child = reference.first_child() if isinstance(reference, Expression) else None
@@ -483,6 +492,9 @@ class Parser(BaseParser):
             if reference is None or not isinstance(reference, Node):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
+        elif identifier is not None:
+            node.identifier = identifier
+            self._variables[identifier] = node
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected closing parenthesis for node definition")
         self.set_next_token()
@@ -525,21 +537,20 @@ class Parser(BaseParser):
         relationship = Relationship()
         relationship.direction = direction
         relationship.properties = properties
-        if rel_type is not None and variable is not None:
-            relationship.identifier = variable
-            self._variables[variable] = relationship
-        elif variable is not None:
+        if variable is not None and variable in self._variables:
             reference = self._variables.get(variable)
             # Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
-            if isinstance(reference, Expression) and isinstance(
-                reference.first_child(), Reference
-            ):
-                inner = reference.first_child().referred
+            first = reference.first_child() if isinstance(reference, Expression) else None
+            if isinstance(first, Reference):
+                inner = first.referred
                 if isinstance(inner, Relationship):
                     reference = inner
             if reference is None or not isinstance(reference, Relationship):
                 raise ValueError(f"Undefined relationship reference: {variable}")
             relationship = RelationshipReference(relationship, reference)
+        elif variable is not None:
+            relationship.identifier = variable
+            self._variables[variable] = relationship
         if hops is not None:
             relationship.hops = hops
         relationship.type = rel_type
@@ -732,7 +743,23 @@ class Parser(BaseParser):
                     break
             self._skip_whitespace_and_comments()
             if self.token.is_operator():
-                expression.add_node(self.token.node)
+                if self.token.is_is():
+                    expression.add_node(self._parse_is_operator())
+                else:
+                    expression.add_node(self.token.node)
+            elif self.token.is_in():
+                expression.add_node(self._parse_in_operator())
+            elif self.token.is_contains():
+                expression.add_node(self._parse_contains_operator())
+            elif self.token.is_starts():
+                expression.add_node(self._parse_starts_with_operator())
+            elif self.token.is_ends():
+                expression.add_node(self._parse_ends_with_operator())
+            elif self.token.is_not():
+                not_op = self._parse_not_operator()
+                if not_op is None:
+                    break
+                expression.add_node(not_op)
             else:
                 break
             self.set_next_token()
@@ -740,6 +767,76 @@ class Parser(BaseParser):
         if expression.nodes_added():
             expression.finish()
             return expression
+        return None
+
+    def _parse_is_operator(self) -> ASTNode:
+        """Parse IS or IS NOT operator."""
+        # Current token is IS. Look ahead for NOT to produce IS NOT.
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_not():
+            return IsNot()
+        # Not IS NOT — restore position to IS so the outer loop's set_next_token advances past it.
+        self._token_index = saved_index
+        return Is()
+
+    def _parse_in_operator(self) -> In:
+        """Parse IN operator."""
+        # Current token is IN. Advance past it so the outer loop's set_next_token moves correctly.
+        return In()
+
+    def _parse_contains_operator(self) -> Contains:
+        """Parse CONTAINS operator."""
+        return Contains()
+
+    def _parse_starts_with_operator(self) -> StartsWith:
+        """Parse STARTS WITH operator."""
+        # Current token is STARTS. Look ahead for WITH.
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_with():
+            return StartsWith()
+        self._token_index = saved_index
+        raise ValueError("Expected WITH after STARTS")
+
+    def _parse_ends_with_operator(self) -> EndsWith:
+        """Parse ENDS WITH operator."""
+        # Current token is ENDS. Look ahead for WITH.
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_with():
+            return EndsWith()
+        self._token_index = saved_index
+        raise ValueError("Expected WITH after ENDS")
+
+    def _parse_not_operator(self) -> NotIn | NotContains | NotStartsWith | NotEndsWith | None:
+        """Parse NOT IN, NOT CONTAINS, NOT STARTS WITH, or NOT ENDS WITH operator."""
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_in():
+            return NotIn()
+        if self.token.is_contains():
+            return NotContains()
+        if self.token.is_starts():
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_with():
+                return NotStartsWith()
+            self._token_index = saved_index
+            return None
+        if self.token.is_ends():
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_with():
+                return NotEndsWith()
+            self._token_index = saved_index
+            return None
+        # Not a recognized NOT operator — restore position and let the outer loop break.
+        self._token_index = saved_index
         return None
 
     def _parse_lookup(self, node: ASTNode) -> ASTNode:

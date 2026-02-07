@@ -46,3 +46,6 @@ class Keyword(Enum):
     END = "END"
     NULL = "NULL"
     IN = "IN"
+    CONTAINS = "CONTAINS"
+    STARTS = "STARTS"
+    ENDS = "ENDS"

@@ -13,6 +13,7 @@ from .operator import (
     Equals,
     GreaterThan,
     GreaterThanOrEqual,
+    In,
     Is,
     LessThan,
     LessThanOrEqual,
@@ -20,6 +21,7 @@ from .operator import (
     Multiply,
     Not,
     NotEquals,
+    NotIn,
     Operator,
     Or,
     Power,
@@ -54,4 +56,6 @@ __all__ = [
     "Or",
     "Not",
     "Is",
+    "In",
+    "NotIn",
 ]

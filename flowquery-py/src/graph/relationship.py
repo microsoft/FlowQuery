@@ -167,7 +167,7 @@ class Relationship(ASTNode):
         follow_id = 'left_id' if is_left else 'right_id'
         while self._data and find_match(left_id, hop):
             data = self._data.current(hop)
-            if data and self._hops and hop >= self._hops.min:
+            if data and self._hops and hop + 1 >= self._hops.min:
                 self.set_value(self)
                 if not self._matches_properties(hop):
                     continue
@@ -178,6 +178,10 @@ class Relationship(ASTNode):
                 if self._hops and hop + 1 < self._hops.max:
                     await self.find(data[follow_id], hop + 1)
                 self._matches.pop()
+            elif data and self._hops:
+                # Below minimum hops: traverse the edge without yielding a match
+                if follow_id in data:
+                    await self.find(data[follow_id], hop + 1)
 
         # Restore original source node
         self._source = original

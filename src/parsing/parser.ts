@@ -24,7 +24,19 @@ import RangeLookup from "./data_structures/range_lookup";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
-import { Not } from "./expressions/operator";
+import {
+    Contains,
+    EndsWith,
+    In,
+    Is,
+    IsNot,
+    Not,
+    NotContains,
+    NotEndsWith,
+    NotIn,
+    NotStartsWith,
+    StartsWith,
+} from "./expressions/operator";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
 import AggregateFunction from "./functions/aggregate_function";
@@ -434,10 +446,7 @@ class Parser extends BaseParser {
         let node = new Node();
         node.properties = new Map(this.parseProperties());
         node.label = label!;
-        if (label !== null && identifier !== null) {
-            node.identifier = identifier;
-            this.variables.set(identifier, node);
-        } else if (identifier !== null) {
+        if (identifier !== null && this.variables.has(identifier)) {
             let reference = this.variables.get(identifier);
             // Resolve through Expression -> Reference -> Node (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
@@ -450,6 +459,9 @@ class Parser extends BaseParser {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }
             node = new NodeReference(node, reference);
+        } else if (identifier !== null) {
+            node.identifier = identifier;
+            this.variables.set(identifier, node);
         }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
@@ -632,10 +644,7 @@ class Parser extends BaseParser {
         let relationship = new Relationship();
         relationship.direction = direction;
         relationship.properties = properties;
-        if (type !== null && variable !== null) {
-            relationship.identifier = variable;
-            this.variables.set(variable, relationship);
-        } else if (variable !== null) {
+        if (variable !== null && this.variables.has(variable)) {
             let reference = this.variables.get(variable);
             // Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
@@ -648,6 +657,9 @@ class Parser extends BaseParser {
                 throw new Error(`Undefined relationship reference: ${variable}`);
             }
             relationship = new RelationshipReference(relationship, reference);
+        } else if (variable !== null) {
+            relationship.identifier = variable;
+            this.variables.set(variable, relationship);
         }
         if (hops !== null) {
             relationship.hops = hops;
@@ -853,7 +865,25 @@ class Parser extends BaseParser {
             }
             this.skipWhitespaceAndComments();
             if (this.token.isOperator()) {
-                expression.addNode(this.token.node);
+                if (this.token.isIs()) {
+                    expression.addNode(this.parseIsOperator());
+                } else {
+                    expression.addNode(this.token.node);
+                }
+            } else if (this.token.isIn()) {
+                expression.addNode(this.parseInOperator());
+            } else if (this.token.isContains()) {
+                expression.addNode(this.parseContainsOperator());
+            } else if (this.token.isStarts()) {
+                expression.addNode(this.parseStartsWithOperator());
+            } else if (this.token.isEnds()) {
+                expression.addNode(this.parseEndsWithOperator());
+            } else if (this.token.isNot()) {
+                const notOp = this.parseNotOperator();
+                if (notOp === null) {
+                    break;
+                }
+                expression.addNode(notOp);
             } else {
                 break;
             }
@@ -863,6 +893,86 @@ class Parser extends BaseParser {
             expression.finish();
             return expression;
         }
+        return null;
+    }
+
+    private parseIsOperator(): Is | IsNot {
+        // Current token is IS. Look ahead for NOT to produce IS NOT.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isNot()) {
+            return new IsNot();
+        }
+        // Not IS NOT — restore position to IS so the outer loop's setNextToken advances past it.
+        this.tokenIndex = savedIndex;
+        return new Is();
+    }
+
+    private parseInOperator(): In | NotIn {
+        // Current token is IN. Advance past it so the outer loop's setNextToken moves correctly.
+        return new In();
+    }
+
+    private parseContainsOperator(): Contains {
+        return new Contains();
+    }
+
+    private parseStartsWithOperator(): StartsWith {
+        // Current token is STARTS. Look ahead for WITH.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isWith()) {
+            return new StartsWith();
+        }
+        this.tokenIndex = savedIndex;
+        throw new Error("Expected WITH after STARTS");
+    }
+
+    private parseEndsWithOperator(): EndsWith {
+        // Current token is ENDS. Look ahead for WITH.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isWith()) {
+            return new EndsWith();
+        }
+        this.tokenIndex = savedIndex;
+        throw new Error("Expected WITH after ENDS");
+    }
+
+    private parseNotOperator(): NotIn | NotContains | NotStartsWith | NotEndsWith | null {
+        // Current token is NOT. Look ahead for IN, CONTAINS, STARTS WITH, or ENDS WITH.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isIn()) {
+            return new NotIn();
+        }
+        if (this.token.isContains()) {
+            return new NotContains();
+        }
+        if (this.token.isStarts()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isWith()) {
+                return new NotStartsWith();
+            }
+            this.tokenIndex = savedIndex;
+            return null;
+        }
+        if (this.token.isEnds()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isWith()) {
+                return new NotEndsWith();
+            }
+            this.tokenIndex = savedIndex;
+            return null;
+        }
+        // Not a recognized NOT operator — restore position and let the outer loop break.
+        this.tokenIndex = savedIndex;
         return null;
     }
 

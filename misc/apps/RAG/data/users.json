@@ -7,7 +7,6 @@
     "department": "Executive",
     "officeLocation": "Seattle HQ - Floor 5",
     "managerId": null,
-    "directReports": ["u-002", "u-003", "u-004"],
     "hireDate": "2019-03-15",
     "skills": ["Leadership", "Strategy", "Cloud Architecture"],
     "phone": "+1-206-555-0100"
@@ -20,7 +19,6 @@
     "department": "Engineering",
     "officeLocation": "Seattle HQ - Floor 4",
     "managerId": "u-001",
-    "directReports": ["u-005", "u-006", "u-007"],
     "hireDate": "2019-06-01",
     "skills": ["Software Architecture", "Agile", "TypeScript", "Azure"],
     "phone": "+1-206-555-0201"
@@ -33,7 +31,6 @@
     "department": "Product",
     "officeLocation": "Seattle HQ - Floor 4",
     "managerId": "u-001",
-    "directReports": ["u-008", "u-009"],
     "hireDate": "2020-01-10",
     "skills": ["Product Management", "UX Research", "Data Analytics"],
     "phone": "+1-206-555-0301"
@@ -46,7 +43,6 @@
     "department": "Sales",
     "officeLocation": "Seattle HQ - Floor 3",
     "managerId": "u-001",
-    "directReports": ["u-010", "u-011"],
     "hireDate": "2020-04-20",
     "skills": ["Sales Strategy", "Enterprise Accounts", "CRM"],
     "phone": "+1-206-555-0401"
@@ -59,7 +55,6 @@
     "department": "Engineering",
     "officeLocation": "Seattle HQ - Floor 4",
     "managerId": "u-002",
-    "directReports": [],
     "hireDate": "2020-08-15",
     "skills": ["React", "TypeScript", "GraphQL", "Node.js"],
     "phone": "+1-206-555-0501"
@@ -72,7 +67,6 @@
     "department": "Engineering",
     "officeLocation": "Portland Office",
     "managerId": "u-002",
-    "directReports": [],
     "hireDate": "2021-02-01",
     "skills": ["Python", "Azure Functions", "CosmosDB", "Docker"],
     "phone": "+1-503-555-0601"
@@ -85,7 +79,6 @@
     "department": "Engineering",
     "officeLocation": "Remote - Denver",
     "managerId": "u-002",
-    "directReports": [],
     "hireDate": "2021-06-15",
     "skills": ["CI/CD", "Kubernetes", "Terraform", "Azure DevOps"],
     "phone": "+1-720-555-0701"
@@ -98,7 +91,6 @@
     "department": "Product",
     "officeLocation": "Seattle HQ - Floor 4",
     "managerId": "u-003",
-    "directReports": [],
     "hireDate": "2021-09-01",
     "skills": ["Roadmap Planning", "User Stories", "Jira", "Figma"],
     "phone": "+1-206-555-0801"
@@ -111,7 +103,6 @@
     "department": "Product",
     "officeLocation": "Seattle HQ - Floor 4",
     "managerId": "u-003",
-    "directReports": [],
     "hireDate": "2022-01-10",
     "skills": ["UI Design", "Figma", "User Research", "Prototyping"],
     "phone": "+1-206-555-0901"
@@ -124,7 +115,6 @@
     "department": "Sales",
     "officeLocation": "Seattle HQ - Floor 3",
     "managerId": "u-004",
-    "directReports": [],
     "hireDate": "2021-11-01",
     "skills": ["Enterprise Sales", "Negotiation", "Salesforce"],
     "phone": "+1-206-555-1001"
@@ -137,7 +127,6 @@
     "department": "Sales",
     "officeLocation": "Remote - Austin",
     "managerId": "u-004",
-    "directReports": [],
     "hireDate": "2022-03-15",
     "skills": ["Content Marketing", "SEO", "Social Media", "HubSpot"],
     "phone": "+1-512-555-1101"
@@ -150,7 +139,6 @@
     "department": "IT",
     "officeLocation": "Seattle HQ - Floor 2",
     "managerId": "u-001",
-    "directReports": [],
     "hireDate": "2020-05-10",
     "skills": ["M365 Administration", "Azure AD", "Security", "Networking"],
     "phone": "+1-206-555-1201"

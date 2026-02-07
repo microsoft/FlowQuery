@@ -17,6 +17,7 @@ export async function initializeGraph(): Promise<void> {
 
     // Create all nodes
     await createUserNodes();
+    await createSkillNodes();
     await createChatNodes();
     await createEmailNodes();
     await createEventNodes();
@@ -24,6 +25,7 @@ export async function initializeGraph(): Promise<void> {
 
     // Create relationships
     await createUserManagesRelationships();
+    await createUserHasSkillRelationships();
     await createChatMemberRelationships();
     await createEmailSentByRelationships();
     await createEmailReceivedByRelationships();
@@ -48,12 +50,23 @@ async function createUserNodes(): Promise<void> {
                 user.id AS id, user.displayName AS displayName, user.mail AS mail, 
                 user.jobTitle AS jobTitle, user.department AS department,
                 user.officeLocation AS officeLocation, user.managerId AS managerId, 
-                user.directReports AS directReports, user.hireDate AS hireDate, 
-                user.skills AS skills, user.phone AS phone
+                user.hireDate AS hireDate, user.phone AS phone
         }
     `);
     await runner.run();
     console.log("Created User nodes");
+}
+
+async function createSkillNodes(): Promise<void> {
+    const runner = new FlowQuery(`
+        CREATE VIRTUAL (:Skill) AS {
+            LOAD JSON FROM '/data/users.json' AS user
+            UNWIND user.skills AS skill
+            RETURN DISTINCT skill AS id, skill AS name
+        }
+    `);
+    await runner.run();
+    console.log("Created Skill nodes");
 }
 
 async function createChatNodes(): Promise<void> {
@@ -131,6 +144,18 @@ async function createUserManagesRelationships(): Promise<void> {
     `);
     await runner.run();
     console.log("Created User-[:MANAGES]->User relationships");
+}
+
+async function createUserHasSkillRelationships(): Promise<void> {
+    const runner = new FlowQuery(`
+        CREATE VIRTUAL (:User)-[:HAS_SKILL]-(:Skill) AS {
+            LOAD JSON FROM '/data/users.json' AS user
+            UNWIND user.skills AS skill
+            RETURN user.id AS left_id, skill AS right_id
+        }
+    `);
+    await runner.run();
+    console.log("Created User-[:HAS_SKILL]->Skill relationships");
 }
 
 async function createChatMemberRelationships(): Promise<void> {

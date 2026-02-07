@@ -140,6 +140,58 @@ test("Test aggregated return with multiple aggregates", async () => {
     expect(results[1]).toEqual({ i: 2, sum: 20, avg: 2.5 });
 });
 
+test("Test count", async () => {
+    const runner = new Runner(
+        "unwind [1, 1, 2, 2] as i unwind [1, 2, 3, 4] as j return i, count(j) as cnt"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, cnt: 8 });
+    expect(results[1]).toEqual({ i: 2, cnt: 8 });
+});
+
+test("Test count distinct", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, 1, 2, 2] as i
+        unwind [1, 2, 1, 2] as j
+        return i, count(distinct j) as cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, cnt: 2 });
+    expect(results[1]).toEqual({ i: 2, cnt: 2 });
+});
+
+test("Test count with strings", async () => {
+    const runner = new Runner(
+        `
+        unwind ["a", "b", "a", "c"] as s
+        return count(s) as cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ cnt: 4 });
+});
+
+test("Test count distinct with strings", async () => {
+    const runner = new Runner(
+        `
+        unwind ["a", "b", "a", "c"] as s
+        return count(distinct s) as cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ cnt: 3 });
+});
+
 test("Test avg with null", async () => {
     const runner = new Runner("return avg(null) as avg");
     await runner.run();

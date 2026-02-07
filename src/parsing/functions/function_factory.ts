@@ -1,6 +1,7 @@
 import AsyncFunction from "./async_function";
 import "./avg";
 import "./collect";
+import "./count";
 import Function from "./function";
 import {
     AsyncDataProvider,

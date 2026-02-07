@@ -167,6 +167,62 @@ class TestRunner:
         assert results[1] == {"i": 2, "sum": 20, "avg": 2.5}
 
     @pytest.mark.asyncio
+    async def test_count(self):
+        """Test count aggregate function."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as i unwind [1, 2, 3, 4] as j return i, count(j) as cnt"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "cnt": 8}
+        assert results[1] == {"i": 2, "cnt": 8}
+
+    @pytest.mark.asyncio
+    async def test_count_distinct(self):
+        """Test count with distinct modifier."""
+        runner = Runner(
+            """
+            unwind [1, 1, 2, 2] as i
+            unwind [1, 2, 1, 2] as j
+            return i, count(distinct j) as cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "cnt": 2}
+        assert results[1] == {"i": 2, "cnt": 2}
+
+    @pytest.mark.asyncio
+    async def test_count_with_strings(self):
+        """Test count with string values."""
+        runner = Runner(
+            """
+            unwind ["a", "b", "a", "c"] as s
+            return count(s) as cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"cnt": 4}
+
+    @pytest.mark.asyncio
+    async def test_count_distinct_with_strings(self):
+        """Test count distinct with string values."""
+        runner = Runner(
+            """
+            unwind ["a", "b", "a", "c"] as s
+            return count(distinct s) as cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"cnt": 3}
+
+    @pytest.mark.asyncio
     async def test_avg_with_null(self):
         """Test avg with null."""
         runner = Runner("return avg(null) as avg")

@@ -155,4 +155,4 @@ class StringWalker:
         if next_pos >= len(self._text):
             return False
         next_char = self._text[next_pos]
-        return next_char in StringUtils.word_valid_chars
+        return next_char.lower() in StringUtils.word_valid_chars

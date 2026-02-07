@@ -1941,3 +1941,101 @@ class TestRunner:
         results = runner.results
         assert len(results) == 3
         assert [r["n"] for r in results] == [10, 15, 20]
+
+    @pytest.mark.asyncio
+    async def test_where_with_contains(self):
+        """Test WHERE with CONTAINS."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_contains(self):
+        """Test WHERE with NOT CONTAINS."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+            with fruit
+            where fruit NOT CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "grape"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_starts_with(self):
+        """Test WHERE with STARTS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+            with fruit
+            where fruit STARTS WITH 'ap'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "apricot"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_starts_with(self):
+        """Test WHERE with NOT STARTS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+            with fruit
+            where fruit NOT STARTS WITH 'ap'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "avocado"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_ends_with(self):
+        """Test WHERE with ENDS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+            with fruit
+            where fruit ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_ends_with(self):
+        """Test WHERE with NOT ENDS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+            with fruit
+            where fruit NOT ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "grape"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_contains_combined_with_and(self):
+        """Test WHERE with CONTAINS combined with AND."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'applesauce', 'banana'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple' AND fruit STARTS WITH 'pine'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "pineapple"

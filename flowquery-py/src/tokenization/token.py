@@ -568,6 +568,27 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.IN.value
 
     @staticmethod
+    def CONTAINS() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.CONTAINS.value)
+
+    def is_contains(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.CONTAINS.value
+
+    @staticmethod
+    def STARTS() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.STARTS.value)
+
+    def is_starts(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.STARTS.value
+
+    @staticmethod
+    def ENDS() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ENDS.value)
+
+    def is_ends(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ENDS.value
+
+    @staticmethod
     def PIPE() -> Token:
         return Token(TokenType.KEYWORD, Operator.PIPE.value)
 

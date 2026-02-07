@@ -627,6 +627,30 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.IN;
     }
 
+    public static get CONTAINS(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.CONTAINS);
+    }
+
+    public isContains(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.CONTAINS;
+    }
+
+    public static get STARTS(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.STARTS);
+    }
+
+    public isStarts(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.STARTS;
+    }
+
+    public static get ENDS(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ENDS);
+    }
+
+    public isEnds(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ENDS;
+    }
+
     public static get PIPE(): Token {
         return new Token(TokenType.KEYWORD, Operator.PIPE);
     }

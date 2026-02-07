@@ -978,3 +978,123 @@ test("Test WHERE with NOT IN list check", () => {
         "--- Reference (n)"
     );
 });
+
+test("Test WHERE with CONTAINS", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s CONTAINS 'ell' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- Contains\n" +
+        "---- Reference (s)\n" +
+        "---- String (ell)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});
+
+test("Test WHERE with NOT CONTAINS", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s NOT CONTAINS 'xyz' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- NotContains\n" +
+        "---- Reference (s)\n" +
+        "---- String (xyz)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});
+
+test("Test WHERE with STARTS WITH", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s STARTS WITH 'hel' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- StartsWith\n" +
+        "---- Reference (s)\n" +
+        "---- String (hel)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});
+
+test("Test WHERE with NOT STARTS WITH", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s NOT STARTS WITH 'xyz' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- NotStartsWith\n" +
+        "---- Reference (s)\n" +
+        "---- String (xyz)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});
+
+test("Test WHERE with ENDS WITH", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s ENDS WITH 'llo' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- EndsWith\n" +
+        "---- Reference (s)\n" +
+        "---- String (llo)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});
+
+test("Test WHERE with NOT ENDS WITH", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 'hello' as s where s NOT ENDS WITH 'xyz' return s");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (s)\n" +
+        "--- String (hello)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- NotEndsWith\n" +
+        "---- Reference (s)\n" +
+        "---- String (xyz)\n" +
+        "- Return\n" +
+        "-- Expression (s)\n" +
+        "--- Reference (s)"
+    );
+});

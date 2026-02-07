@@ -24,7 +24,19 @@ import RangeLookup from "./data_structures/range_lookup";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
-import { In, Is, IsNot, Not, NotIn } from "./expressions/operator";
+import {
+    Contains,
+    EndsWith,
+    In,
+    Is,
+    IsNot,
+    Not,
+    NotContains,
+    NotEndsWith,
+    NotIn,
+    NotStartsWith,
+    StartsWith,
+} from "./expressions/operator";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
 import AggregateFunction from "./functions/aggregate_function";
@@ -860,12 +872,18 @@ class Parser extends BaseParser {
                 }
             } else if (this.token.isIn()) {
                 expression.addNode(this.parseInOperator());
+            } else if (this.token.isContains()) {
+                expression.addNode(this.parseContainsOperator());
+            } else if (this.token.isStarts()) {
+                expression.addNode(this.parseStartsWithOperator());
+            } else if (this.token.isEnds()) {
+                expression.addNode(this.parseEndsWithOperator());
             } else if (this.token.isNot()) {
-                const notIn = this.parseNotInOperator();
-                if (notIn === null) {
+                const notOp = this.parseNotOperator();
+                if (notOp === null) {
                     break;
                 }
-                expression.addNode(notIn);
+                expression.addNode(notOp);
             } else {
                 break;
             }
@@ -896,15 +914,64 @@ class Parser extends BaseParser {
         return new In();
     }
 
-    private parseNotInOperator(): NotIn | null {
-        // Current token is NOT. Look ahead for IN to produce NOT IN.
+    private parseContainsOperator(): Contains {
+        return new Contains();
+    }
+
+    private parseStartsWithOperator(): StartsWith {
+        // Current token is STARTS. Look ahead for WITH.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isWith()) {
+            return new StartsWith();
+        }
+        this.tokenIndex = savedIndex;
+        throw new Error("Expected WITH after STARTS");
+    }
+
+    private parseEndsWithOperator(): EndsWith {
+        // Current token is ENDS. Look ahead for WITH.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isWith()) {
+            return new EndsWith();
+        }
+        this.tokenIndex = savedIndex;
+        throw new Error("Expected WITH after ENDS");
+    }
+
+    private parseNotOperator(): NotIn | NotContains | NotStartsWith | NotEndsWith | null {
+        // Current token is NOT. Look ahead for IN, CONTAINS, STARTS WITH, or ENDS WITH.
         const savedIndex = this.tokenIndex;
         this.setNextToken();
         this.skipWhitespaceAndComments();
         if (this.token.isIn()) {
             return new NotIn();
         }
-        // Not NOT IN — restore position and let the outer loop break.
+        if (this.token.isContains()) {
+            return new NotContains();
+        }
+        if (this.token.isStarts()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isWith()) {
+                return new NotStartsWith();
+            }
+            this.tokenIndex = savedIndex;
+            return null;
+        }
+        if (this.token.isEnds()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isWith()) {
+                return new NotEndsWith();
+            }
+            this.tokenIndex = savedIndex;
+            return null;
+        }
+        // Not a recognized NOT operator — restore position and let the outer loop break.
         this.tokenIndex = savedIndex;
         return null;
     }

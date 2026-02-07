@@ -211,6 +211,90 @@ class NotIn extends Operator {
     }
 }
 
+class Contains extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("CONTAINS requires string operands");
+        }
+        return str.includes(search) ? 1 : 0;
+    }
+}
+
+class NotContains extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("NOT CONTAINS requires string operands");
+        }
+        return str.includes(search) ? 0 : 1;
+    }
+}
+
+class StartsWith extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("STARTS WITH requires string operands");
+        }
+        return str.startsWith(search) ? 1 : 0;
+    }
+}
+
+class NotStartsWith extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("NOT STARTS WITH requires string operands");
+        }
+        return str.startsWith(search) ? 0 : 1;
+    }
+}
+
+class EndsWith extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("ENDS WITH requires string operands");
+        }
+        return str.endsWith(search) ? 1 : 0;
+    }
+}
+
+class NotEndsWith extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public value(): number {
+        const str = this.lhs.value();
+        const search = this.rhs.value();
+        if (typeof str !== "string" || typeof search !== "string") {
+            throw new Error("NOT ENDS WITH requires string operands");
+        }
+        return str.endsWith(search) ? 0 : 1;
+    }
+}
+
 export {
     Operator,
     Add,
@@ -232,4 +316,10 @@ export {
     IsNot,
     In,
     NotIn,
+    Contains,
+    NotContains,
+    StartsWith,
+    NotStartsWith,
+    EndsWith,
+    NotEndsWith,
 };

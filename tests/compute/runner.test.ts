@@ -1812,3 +1812,94 @@ test("Test WHERE with IN combined with AND", async () => {
     expect(results.length).toBe(3);
     expect(results.map((r: any) => r.n)).toEqual([10, 15, 20]);
 });
+
+test("Test WHERE with CONTAINS", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test WHERE with NOT CONTAINS", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+        with fruit
+        where fruit NOT CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "grape"]);
+});
+
+test("Test WHERE with STARTS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+        with fruit
+        where fruit STARTS WITH 'ap'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "apricot"]);
+});
+
+test("Test WHERE with NOT STARTS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+        with fruit
+        where fruit NOT STARTS WITH 'ap'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "avocado"]);
+});
+
+test("Test WHERE with ENDS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+        with fruit
+        where fruit ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test WHERE with NOT ENDS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+        with fruit
+        where fruit NOT ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "grape"]);
+});
+
+test("Test WHERE with CONTAINS combined with AND", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'applesauce', 'banana'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple' AND fruit STARTS WITH 'pine'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("pineapple");
+});

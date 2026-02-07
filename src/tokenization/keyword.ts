@@ -39,6 +39,9 @@ enum Keyword {
     END = "END",
     NULL = "NULL",
     IN = "IN",
+    CONTAINS = "CONTAINS",
+    STARTS = "STARTS",
+    ENDS = "ENDS",
 }
 
 export default Keyword;

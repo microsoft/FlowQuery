@@ -912,3 +912,123 @@ class TestParser:
             "--- Reference (n)"
         )
         assert ast.print() == expected
+
+    def test_where_with_contains(self):
+        """Test WHERE with CONTAINS."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s CONTAINS 'ell' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- Contains\n"
+            "---- Reference (s)\n"
+            "---- String (ell)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_contains(self):
+        """Test WHERE with NOT CONTAINS."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT CONTAINS 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotContains\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_starts_with(self):
+        """Test WHERE with STARTS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s STARTS WITH 'hel' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- StartsWith\n"
+            "---- Reference (s)\n"
+            "---- String (hel)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_starts_with(self):
+        """Test WHERE with NOT STARTS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT STARTS WITH 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotStartsWith\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_ends_with(self):
+        """Test WHERE with ENDS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s ENDS WITH 'llo' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- EndsWith\n"
+            "---- Reference (s)\n"
+            "---- String (llo)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_ends_with(self):
+        """Test WHERE with NOT ENDS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT ENDS WITH 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotEndsWith\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected

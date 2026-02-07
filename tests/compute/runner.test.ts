@@ -1556,3 +1556,49 @@ test("Test reserved keywords as relationship types and labels", async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ name1: "Node 1", name2: "Node 2" });
 });
+
+test("Test match with node reference passed through WITH", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:User) AS {
+            UNWIND [
+                {id: 1, name: 'Alice', mail: 'alice@test.com', jobTitle: 'CEO'},
+                {id: 2, name: 'Bob', mail: 'bob@test.com', jobTitle: 'VP'},
+                {id: 3, name: 'Carol', mail: 'carol@test.com', jobTitle: 'VP'},
+                {id: 4, name: 'Dave', mail: 'dave@test.com', jobTitle: 'Engineer'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.mail AS mail, record.jobTitle AS jobTitle
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:MANAGES]-(:User) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    // Equivalent to:
+    //   MATCH (ceo:User)-[:MANAGES]->(dr1:User)
+    //   WHERE ceo.jobTitle = 'CEO'
+    //   WITH ceo, dr1
+    //   MATCH (ceo)-[:MANAGES]->(dr2:User)
+    //   WHERE dr1.mail <> dr2.mail
+    //   RETURN ceo, dr1, dr2
+    const match = new Runner(`
+        MATCH (ceo:User)-[:MANAGES]->(dr1:User)
+        WHERE ceo.jobTitle = 'CEO'
+        WITH ceo, dr1
+        MATCH (ceo)-[:MANAGES]->(dr2:User)
+        WHERE dr1.mail <> dr2.mail
+        RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+    `);
+    await match.run();
+    const results = match.results;
+    // CEO (Alice) manages Bob and Carol. All distinct pairs:
+    // (Alice, Bob, Carol) and (Alice, Carol, Bob)
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
+    expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
+});

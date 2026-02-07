@@ -474,6 +474,12 @@ class Parser(BaseParser):
             self._variables[identifier] = node
         elif identifier is not None:
             reference = self._variables.get(identifier)
+            # Resolve through Expression -> Reference -> Node (e.g., after WITH)
+            ref_child = reference.first_child() if isinstance(reference, Expression) else None
+            if isinstance(ref_child, Reference):
+                inner = ref_child.referred
+                if isinstance(inner, Node):
+                    reference = inner
             if reference is None or not isinstance(reference, Node):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
@@ -524,6 +530,13 @@ class Parser(BaseParser):
             self._variables[variable] = relationship
         elif variable is not None:
             reference = self._variables.get(variable)
+            # Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
+            if isinstance(reference, Expression) and isinstance(
+                reference.first_child(), Reference
+            ):
+                inner = reference.first_child().referred
+                if isinstance(inner, Relationship):
+                    reference = inner
             if reference is None or not isinstance(reference, Relationship):
                 raise ValueError(f"Undefined relationship reference: {variable}")
             relationship = RelationshipReference(relationship, reference)

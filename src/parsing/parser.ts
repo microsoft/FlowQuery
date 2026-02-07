@@ -438,8 +438,15 @@ class Parser extends BaseParser {
             node.identifier = identifier;
             this.variables.set(identifier, node);
         } else if (identifier !== null) {
-            const reference = this.variables.get(identifier);
-            if (reference === undefined || reference.constructor !== Node) {
+            let reference = this.variables.get(identifier);
+            // Resolve through Expression -> Reference -> Node (e.g., after WITH)
+            if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
+                const inner = (reference.firstChild() as Reference).referred;
+                if (inner instanceof Node) {
+                    reference = inner;
+                }
+            }
+            if (reference === undefined || !(reference instanceof Node)) {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }
             node = new NodeReference(node, reference);
@@ -629,8 +636,15 @@ class Parser extends BaseParser {
             relationship.identifier = variable;
             this.variables.set(variable, relationship);
         } else if (variable !== null) {
-            const reference = this.variables.get(variable);
-            if (reference === undefined || reference.constructor !== Relationship) {
+            let reference = this.variables.get(variable);
+            // Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
+            if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
+                const inner = (reference.firstChild() as Reference).referred;
+                if (inner instanceof Relationship) {
+                    reference = inner;
+                }
+            }
+            if (reference === undefined || !(reference instanceof Relationship)) {
                 throw new Error(`Undefined relationship reference: ${variable}`);
             }
             relationship = new RelationshipReference(relationship, reference);

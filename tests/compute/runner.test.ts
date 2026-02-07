@@ -370,6 +370,38 @@ test("Test replace function", async () => {
     expect(results[0]).toEqual({ replace: "hexxo" });
 });
 
+test("Test string_distance function", async () => {
+    const runner = new Runner('RETURN string_distance("kitten", "sitting") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].dist).toBeCloseTo(3 / 7, 10);
+});
+
+test("Test string_distance function with identical strings", async () => {
+    const runner = new Runner('RETURN string_distance("hello", "hello") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 0 });
+});
+
+test("Test string_distance function with empty string", async () => {
+    const runner = new Runner('RETURN string_distance("", "abc") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 1 });
+});
+
+test("Test string_distance function with both empty strings", async () => {
+    const runner = new Runner('RETURN string_distance("", "") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 0 });
+});
+
 test("Test f-string with escaped braces", async () => {
     const runner = new Runner(
         'with range(1,3) as numbers RETURN f"hello {{sum(n in numbers | n)}}" as f'

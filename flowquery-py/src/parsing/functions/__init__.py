@@ -30,6 +30,7 @@ from .round_ import Round
 from .schema import Schema
 from .size import Size
 from .split import Split
+from .string_distance import StringDistance
 from .stringify import Stringify
 
 # Built-in functions
@@ -68,6 +69,7 @@ __all__ = [
     "Round",
     "Size",
     "Split",
+    "StringDistance",
     "Stringify",
     "ToJson",
     "Type",

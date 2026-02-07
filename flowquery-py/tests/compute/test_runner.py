@@ -419,6 +419,42 @@ class TestRunner:
         assert results[0] == {"replace": "hexxo"}
 
     @pytest.mark.asyncio
+    async def test_string_distance_function(self):
+        """Test string_distance function."""
+        runner = Runner('RETURN string_distance("kitten", "sitting") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["dist"] == pytest.approx(3 / 7)
+
+    @pytest.mark.asyncio
+    async def test_string_distance_identical_strings(self):
+        """Test string_distance function with identical strings."""
+        runner = Runner('RETURN string_distance("hello", "hello") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 0}
+
+    @pytest.mark.asyncio
+    async def test_string_distance_empty_string(self):
+        """Test string_distance function with empty string."""
+        runner = Runner('RETURN string_distance("", "abc") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 1}
+
+    @pytest.mark.asyncio
+    async def test_string_distance_both_empty(self):
+        """Test string_distance function with both empty strings."""
+        runner = Runner('RETURN string_distance("", "") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 0}
+
+    @pytest.mark.asyncio
     async def test_f_string_with_escaped_braces(self):
         """Test f-string with escaped braces."""
         runner = Runner(

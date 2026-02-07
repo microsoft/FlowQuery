@@ -5,10 +5,23 @@ from flowquery.parsing.expressions.expression import Expression
 from flowquery.parsing.expressions.operator import (
     Add, Subtract, Multiply, Power, GreaterThan, And, Is, IsNot,
     Contains, NotContains, StartsWith, NotStartsWith, EndsWith, NotEndsWith,
+    Equals, NotEquals,
 )
 from flowquery.parsing.expressions.number import Number
 from flowquery.parsing.expressions.string import String
 from flowquery.parsing.components.null import Null
+from flowquery.parsing.ast_node import ASTNode
+
+
+class ObjectValue(ASTNode):
+    """Test helper that wraps an arbitrary value as an ASTNode operand."""
+
+    def __init__(self, val):
+        super().__init__()
+        self._val = val
+
+    def value(self):
+        return self._val
 
 
 class TestExpression:
@@ -165,5 +178,71 @@ class TestExpression:
         expression.add_node(String("pineapple"))
         expression.add_node(NotEndsWith())
         expression.add_node(String("banana"))
+        expression.finish()
+        assert expression.value() == 1
+
+    # Equals / NotEquals tests
+
+    def test_equals_with_equal_numbers(self):
+        """Test Equals with equal numbers."""
+        expression = Expression()
+        expression.add_node(Number("42"))
+        expression.add_node(Equals())
+        expression.add_node(Number("42"))
+        expression.finish()
+        assert expression.value() == 1
+
+    def test_equals_with_different_numbers(self):
+        """Test Equals with different numbers."""
+        expression = Expression()
+        expression.add_node(Number("42"))
+        expression.add_node(Equals())
+        expression.add_node(Number("99"))
+        expression.finish()
+        assert expression.value() == 0
+
+    def test_equals_with_structurally_equal_objects(self):
+        """Test Equals with structurally equal objects (different references)."""
+        expression = Expression()
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.add_node(Equals())
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.finish()
+        assert expression.value() == 1
+
+    def test_equals_with_different_objects(self):
+        """Test Equals with different objects."""
+        expression = Expression()
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.add_node(Equals())
+        expression.add_node(ObjectValue({"id": "2", "name": "Bob"}))
+        expression.finish()
+        assert expression.value() == 0
+
+    def test_not_equals_with_structurally_equal_objects(self):
+        """Test NotEquals with structurally equal objects."""
+        expression = Expression()
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.add_node(NotEquals())
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.finish()
+        assert expression.value() == 0
+
+    def test_not_equals_with_different_objects(self):
+        """Test NotEquals with different objects."""
+        expression = Expression()
+        expression.add_node(ObjectValue({"id": "1", "name": "Alice"}))
+        expression.add_node(NotEquals())
+        expression.add_node(ObjectValue({"id": "2", "name": "Bob"}))
+        expression.finish()
+        assert expression.value() == 1
+
+    def test_equals_with_same_reference_object(self):
+        """Test Equals with the same reference object."""
+        obj = {"id": "1", "name": "Alice"}
+        expression = Expression()
+        expression.add_node(ObjectValue(obj))
+        expression.add_node(Equals())
+        expression.add_node(ObjectValue(obj))
         expression.finish()
         assert expression.value() == 1

@@ -4,6 +4,7 @@ from .aggregate_function import AggregateFunction
 from .async_function import AsyncFunction
 from .avg import Avg
 from .collect import Collect
+from .count import Count
 from .function import Function
 from .function_factory import FunctionFactory
 from .function_metadata import (
@@ -61,6 +62,7 @@ __all__ = [
     "Sum",
     "Avg",
     "Collect",
+    "Count",
     "Join",
     "Keys",
     "Rand",

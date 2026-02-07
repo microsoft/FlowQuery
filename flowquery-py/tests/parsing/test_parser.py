@@ -288,6 +288,43 @@ class TestParser:
         _return = ast.first_child()
         assert _return.first_child().value() == 2
 
+    def test_lookup_with_reserved_keyword_property_names(self):
+        """Test lookup with reserved keyword property names like end, null, case."""
+        parser = Parser()
+        ast = parser.parse("with {end: 1, null: 2, case: 3} as x return x.end, x.null, x.case")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (x)\n"
+            "--- AssociativeArray\n"
+            "---- KeyValuePair\n"
+            "----- String (end)\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "---- KeyValuePair\n"
+            "----- String (null)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "---- KeyValuePair\n"
+            "----- String (case)\n"
+            "----- Expression\n"
+            "------ Number (3)\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Lookup\n"
+            "---- Identifier (end)\n"
+            "---- Reference (x)\n"
+            "-- Expression\n"
+            "--- Lookup\n"
+            "---- Identifier (null)\n"
+            "---- Reference (x)\n"
+            "-- Expression\n"
+            "--- Lookup\n"
+            "---- Identifier (case)\n"
+            "---- Reference (x)"
+        )
+        assert ast.print() == expected
+
     def test_load_with_post(self):
         """Test load with post."""
         parser = Parser()

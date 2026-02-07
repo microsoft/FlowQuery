@@ -857,7 +857,7 @@ class Parser extends BaseParser {
         while (true) {
             if (this.token.isDot()) {
                 this.setNextToken();
-                if (!this.token.isIdentifierOrKeyword()) {
+                if (!this.token.isIdentifier() && !this.token.isKeyword()) {
                     throw new Error("Expected identifier");
                 }
                 lookup = new Lookup();

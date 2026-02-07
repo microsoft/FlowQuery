@@ -330,6 +330,83 @@ test("Test collect distinct with associative array", async () => {
     expect(results[1]).toEqual({ i: 2, collected: [{ j: 1 }, { j: 2 }, { j: 3 }] });
 });
 
+test("Test return distinct", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, 1, 2, 2, 3, 3] as i
+        return distinct i
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ i: 1 });
+    expect(results[1]).toEqual({ i: 2 });
+    expect(results[2]).toEqual({ i: 3 });
+});
+
+test("Test return distinct with multiple expressions", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, 1, 2, 2] as i
+        unwind [10, 10, 20, 20] as j
+        return distinct i, j
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    expect(results[0]).toEqual({ i: 1, j: 10 });
+    expect(results[1]).toEqual({ i: 1, j: 20 });
+    expect(results[2]).toEqual({ i: 2, j: 10 });
+    expect(results[3]).toEqual({ i: 2, j: 20 });
+});
+
+test("Test with distinct", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, 1, 2, 2, 3, 3] as i
+        with distinct i as i
+        return i
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ i: 1 });
+    expect(results[1]).toEqual({ i: 2 });
+    expect(results[2]).toEqual({ i: 3 });
+});
+
+test("Test with distinct and aggregation", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, 1, 2, 2] as i
+        with distinct i as i
+        return sum(i) as total
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ total: 3 });
+});
+
+test("Test return distinct with strings", async () => {
+    const runner = new Runner(
+        `
+        unwind ["a", "b", "a", "c", "b"] as x
+        return distinct x
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: "a" });
+    expect(results[1]).toEqual({ x: "b" });
+    expect(results[2]).toEqual({ x: "c" });
+});
+
 test("Test join function", async () => {
     const runner = new Runner('RETURN join(["a", "b", "c"], ",") as join');
     await runner.run();

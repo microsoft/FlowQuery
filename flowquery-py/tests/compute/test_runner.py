@@ -374,6 +374,88 @@ class TestRunner:
         assert results[1] == {"i": 2, "collected": [{"j": 1}, {"j": 2}, {"j": 3}]}
 
     @pytest.mark.asyncio
+    async def test_return_distinct(self):
+        """Test return distinct."""
+        runner = Runner(
+            """
+            unwind [1, 1, 2, 2, 3, 3] as i
+            return distinct i
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"i": 1}
+        assert results[1] == {"i": 2}
+        assert results[2] == {"i": 3}
+
+    @pytest.mark.asyncio
+    async def test_return_distinct_with_multiple_expressions(self):
+        """Test return distinct with multiple expressions."""
+        runner = Runner(
+            """
+            unwind [1, 1, 2, 2] as i
+            unwind [10, 10, 20, 20] as j
+            return distinct i, j
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert results[0] == {"i": 1, "j": 10}
+        assert results[1] == {"i": 1, "j": 20}
+        assert results[2] == {"i": 2, "j": 10}
+        assert results[3] == {"i": 2, "j": 20}
+
+    @pytest.mark.asyncio
+    async def test_with_distinct(self):
+        """Test with distinct."""
+        runner = Runner(
+            """
+            unwind [1, 1, 2, 2, 3, 3] as i
+            with distinct i as i
+            return i
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"i": 1}
+        assert results[1] == {"i": 2}
+        assert results[2] == {"i": 3}
+
+    @pytest.mark.asyncio
+    async def test_with_distinct_and_aggregation(self):
+        """Test with distinct followed by aggregation."""
+        runner = Runner(
+            """
+            unwind [1, 1, 2, 2] as i
+            with distinct i as i
+            return sum(i) as total
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"total": 3}
+
+    @pytest.mark.asyncio
+    async def test_return_distinct_with_strings(self):
+        """Test return distinct with strings."""
+        runner = Runner(
+            """
+            unwind ["a", "b", "a", "c", "b"] as x
+            return distinct x
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": "a"}
+        assert results[1] == {"x": "b"}
+        assert results[2] == {"x": "c"}
+
+    @pytest.mark.asyncio
     async def test_join_function(self):
         """Test join function."""
         runner = Runner('RETURN join(["a", "b", "c"], ",") as join')

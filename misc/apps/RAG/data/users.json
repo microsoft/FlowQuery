@@ -142,5 +142,22 @@
     "hireDate": "2020-05-10",
     "skills": ["M365 Administration", "Azure AD", "Security", "Networking"],
     "phone": "+1-206-555-1201"
+  },
+  {
+    "id": "u-013",
+    "displayName": "Jessica Lawson",
+    "mail": "jessica.lawson@northwindtech.com",
+    "jobTitle": "Executive Assistant",
+    "department": "Executive",
+    "officeLocation": "Seattle HQ - Floor 5",
+    "managerId": "u-001",
+    "hireDate": "2023-05-01",
+    "skills": [
+      "Executive Support",
+      "Calendar Management",
+      "Travel Coordination",
+      "Office Administration"
+    ],
+    "phone": "+1-206-555-1301"
   }
 ]

@@ -1098,3 +1098,61 @@ test("Test WHERE with NOT ENDS WITH", () => {
         "--- Reference (s)"
     );
 });
+
+test("Test parenthesized expression with addition", () => {
+    const parser = new Parser();
+    const ast = parser.parse("WITH 1 AS n RETURN (n + 2)");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (n)\n" +
+        "--- Number (1)\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Expression\n" +
+        "---- Add\n" +
+        "----- Reference (n)\n" +
+        "----- Number (2)"
+    );
+});
+
+test("Test parenthesized expression with property access", () => {
+    const parser = new Parser();
+    const ast = parser.parse("WITH {a: 1} AS obj RETURN (obj.a)");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (obj)\n" +
+        "--- AssociativeArray\n" +
+        "---- KeyValuePair\n" +
+        "----- String (a)\n" +
+        "----- Expression\n" +
+        "------ Number (1)\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Expression\n" +
+        "---- Lookup\n" +
+        "----- Identifier (a)\n" +
+        "----- Reference (obj)"
+    );
+});
+
+test("Test parenthesized expression with multiplication", () => {
+    const parser = new Parser();
+    const ast = parser.parse("WITH 5 AS x RETURN (x * 3)");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (x)\n" +
+        "--- Number (5)\n" +
+        "- Return\n" +
+        "-- Expression\n" +
+        "--- Expression\n" +
+        "---- Multiply\n" +
+        "----- Reference (x)\n" +
+        "----- Number (3)"
+    );
+});

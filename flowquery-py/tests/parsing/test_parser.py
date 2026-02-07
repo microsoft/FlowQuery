@@ -1032,3 +1032,61 @@ class TestParser:
             "--- Reference (s)"
         )
         assert ast.print() == expected
+
+    def test_parenthesized_expression_with_addition(self):
+        """Test that (variable + number) is parsed as a parenthesized expression, not a node."""
+        parser = Parser()
+        ast = parser.parse("WITH 1 AS n RETURN (n + 2)")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (n)\n"
+            "--- Number (1)\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Expression\n"
+            "---- Add\n"
+            "----- Reference (n)\n"
+            "----- Number (2)"
+        )
+        assert ast.print() == expected
+
+    def test_parenthesized_expression_with_property_access(self):
+        """Test that (obj.property) is parsed as a parenthesized expression, not a node."""
+        parser = Parser()
+        ast = parser.parse("WITH {a: 1} AS obj RETURN (obj.a)")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (obj)\n"
+            "--- AssociativeArray\n"
+            "---- KeyValuePair\n"
+            "----- String (a)\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Expression\n"
+            "---- Lookup\n"
+            "----- Identifier (a)\n"
+            "----- Reference (obj)"
+        )
+        assert ast.print() == expected
+
+    def test_parenthesized_expression_with_multiplication(self):
+        """Test that (variable * number) is parsed as a parenthesized expression, not a node."""
+        parser = Parser()
+        ast = parser.parse("WITH 5 AS x RETURN (x * 3)")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (x)\n"
+            "--- Number (5)\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Expression\n"
+            "---- Multiply\n"
+            "----- Reference (x)\n"
+            "----- Number (3)"
+        )
+        assert ast.print() == expected

@@ -61,7 +61,8 @@ FlowQuery is a Cypher-inspired declarative query language for querying graph dat
 ### Pattern Syntax
 
 - **Nodes**: \`(variable:Label)\` or \`(variable)\` or \`(:Label)\`
-- **Relationships**: \`-[:TYPE]-\` (undirected), \`-[:TYPE]->\` (outgoing), \`<-[:TYPE]-\` (incoming)
+- **Relationships**: \`-[:TYPE]->\` (outgoing), \`<-[:TYPE]-\` (incoming), \`-[:TYPE]-\` (either direction)
+  - Relationships are **bi-directional** — they can be traversed in both directions — but a pattern matches only **one direction at a time**. Use \`->\` or \`<-\` to specify which direction, or \`-[:TYPE]-\` to match either direction without specifying.
 - **Variable-length paths**: \`-[:TYPE*1..3]-\` (1 to 3 hops), \`-[:TYPE*]-\` (any number)
 - **Named paths**: \`p=(a)-[:KNOWS]-(b)\`
 

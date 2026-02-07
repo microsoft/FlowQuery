@@ -106,6 +106,24 @@ class Token:
     def is_identifier(self) -> bool:
         return self._type == TokenType.IDENTIFIER or self._type == TokenType.BACKTICK_STRING
 
+    def is_keyword_that_cannot_be_identifier(self) -> bool:
+        """Returns True for keywords that have special expression-level roles
+        and should not be treated as identifiers (NULL, CASE, WHEN, THEN, ELSE, END)."""
+        return self.is_keyword() and (
+            self.is_null()
+            or self.is_case()
+            or self.is_when()
+            or self.is_then()
+            or self.is_else()
+            or self.is_end()
+        )
+
+    def is_identifier_or_keyword(self) -> bool:
+        """Returns True if the token is an identifier or a keyword that can be used as an identifier."""
+        return self.is_identifier() or (
+            self.is_keyword() and not self.is_keyword_that_cannot_be_identifier()
+        )
+
     # String token
 
     @staticmethod

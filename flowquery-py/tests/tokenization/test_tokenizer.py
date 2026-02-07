@@ -162,3 +162,37 @@ class TestTokenizer:
         tokens = tokenizer.tokenize()
         assert tokens is not None
         assert len(tokens) > 0
+
+    def test_reserved_keywords_as_identifiers(self):
+        """Test reserved keywords as identifiers."""
+        tokenizer = Tokenizer("""
+            WITH 1 AS return
+            RETURN return
+        """)
+        tokens = tokenizer.tokenize()
+        assert tokens is not None
+        assert len(tokens) > 0
+
+    def test_reserved_keywords_as_part_of_identifiers(self):
+        """Test reserved keywords as part of identifiers."""
+        tokenizer = Tokenizer("""
+            unwind [
+                {from: "Alice", to: "Bob", organizer: "Charlie"},
+                {from: "Bob", to: "Charlie", organizer: "Alice"},
+                {from: "Charlie", to: "Alice", organizer: "Bob"}
+            ] as data
+            return data.from, data.to
+        """)
+        tokens = tokenizer.tokenize()
+        assert tokens is not None
+        assert len(tokens) > 0
+
+    def test_reserved_keywords_as_relationship_types_and_labels(self):
+        """Test reserved keywords as relationship types and labels."""
+        tokenizer = Tokenizer("""
+            MATCH (a:RETURN)-[r:WITH]->(b:RETURN)
+            RETURN a, b
+        """)
+        tokens = tokenizer.tokenize()
+        assert tokens is not None
+        assert len(tokens) > 0

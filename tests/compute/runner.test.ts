@@ -1500,3 +1500,59 @@ test("Test schema() returns nodes and relationships with sample data", async () 
     expect(chases.sample).not.toHaveProperty("right_id");
     expect(chases.sample).toHaveProperty("speed");
 });
+
+test("Test reserved keywords as identifiers", async () => {
+    const runner = new Runner(`
+        WITH 1 AS return
+        RETURN return
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].return).toBe(1);
+});
+
+test("Test reserved keywords as parts of identifiers", async () => {
+    const runner = new Runner(`
+        unwind [
+            {from: "Alice", to: "Bob", organizer: "Charlie"},
+            {from: "Bob", to: "Charlie", organizer: "Alice"},
+            {from: "Charlie", to: "Alice", organizer: "Bob"}
+        ] as data
+        return data.from as from, data.to as to, data.organizer as organizer
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ from: "Alice", to: "Bob", organizer: "Charlie" });
+    expect(results[1]).toEqual({ from: "Bob", to: "Charlie", organizer: "Alice" });
+    expect(results[2]).toEqual({ from: "Charlie", to: "Alice", organizer: "Bob" });
+});
+
+test("Test reserved keywords as relationship types and labels", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Return) AS {
+            unwind [
+                {id: 1, name: 'Node 1'},
+                {id: 2, name: 'Node 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Return)-[:With]-(:Return) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Return)-[:With]->(b:Return)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name1: "Node 1", name2: "Node 2" });
+});

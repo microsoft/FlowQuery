@@ -2,10 +2,10 @@ import StringUtils from "../utils/string_utils";
 
 /**
  * Utility class for walking through a string character by character during tokenization.
- * 
+ *
  * Provides methods to check for specific character patterns, move through the string,
  * and extract substrings. Used by the Tokenizer to process input text.
- * 
+ *
  * @example
  * ```typescript
  * const walker = new StringWalker("WITH x as variable");
@@ -20,7 +20,7 @@ class StringWalker {
 
     /**
      * Creates a new StringWalker for the given text.
-     * 
+     *
      * @param text - The input text to walk through
      */
     constructor(text: string) {
@@ -81,42 +81,45 @@ class StringWalker {
     }
 
     public singleLineCommentStart(): boolean {
-        return this.currentChar === '/' && this.nextChar === '/';
+        return this.currentChar === "/" && this.nextChar === "/";
     }
 
     public multiLineCommentStart(): boolean {
-        return this.currentChar === '/' && this.nextChar === '*';
+        return this.currentChar === "/" && this.nextChar === "*";
     }
 
     public multiLineCommentEnd(): boolean {
-        return this.currentChar === '*' && this.nextChar === '/';
+        return this.currentChar === "*" && this.nextChar === "/";
     }
 
     public newLine(): boolean {
-        if (this.currentChar === '\n') {
+        if (this.currentChar === "\n") {
             return true;
         }
         return false;
     }
 
     public escaped(char: string): boolean {
-        return this.currentChar === '\\' && this.nextChar === char;
+        return this.currentChar === "\\" && this.nextChar === char;
     }
 
     public escapedBrace(): boolean {
-        return (this.currentChar === '{' && this.nextChar === '{') || (this.currentChar === '}' && this.nextChar === '}');
+        return (
+            (this.currentChar === "{" && this.nextChar === "{") ||
+            (this.currentChar === "}" && this.nextChar === "}")
+        );
     }
 
     public openingBrace(): boolean {
-        return this.currentChar === '{';
+        return this.currentChar === "{";
     }
 
     public closingBrace(): boolean {
-        return this.currentChar === '}';
+        return this.currentChar === "}";
     }
 
     public checkForUnderScore(): boolean {
-        const foundUnderScore = this.currentChar === '_';
+        const foundUnderScore = this.currentChar === "_";
         if (foundUnderScore) {
             this._position++;
         }
@@ -141,7 +144,7 @@ class StringWalker {
 
     public checkForQuote(): string | null {
         const quoteChar = this.currentChar;
-        if (quoteChar === '"' || quoteChar === "'" || quoteChar === '`') {
+        if (quoteChar === '"' || quoteChar === "'" || quoteChar === "`") {
             this._position++;
             return quoteChar;
         }
@@ -163,7 +166,7 @@ class StringWalker {
     }
 
     public checkForFStringStart(): boolean {
-        return this.currentChar.toLowerCase() === 'f' && ['\'', '"', '`'].includes(this.nextChar);
+        return this.currentChar.toLowerCase() === "f" && ["'", '"', "`"].includes(this.nextChar);
     }
 
     public moveNext(): void {
@@ -187,7 +190,7 @@ class StringWalker {
 
     public word_continuation(word: string): boolean {
         const next = this.text[this.position + word.length];
-        return StringUtils.word_valid_chars.includes(next);
+        return next !== undefined && StringUtils.word_valid_chars.includes(next.toLowerCase());
     }
 }
 

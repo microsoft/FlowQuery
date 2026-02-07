@@ -414,7 +414,7 @@ test("Test lookup which is keyword", async () => {
     expect(results[0]).toEqual({ aa: 1 });
 });
 
-test("Test lookup which is keyword", async () => {
+test("Test lookup which is keyword with bracket notation", async () => {
     const runner = new Runner('RETURN {return: 1}["return"] as aa');
     await runner.run();
     const results = runner.results;

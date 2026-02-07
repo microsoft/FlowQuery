@@ -1258,6 +1258,31 @@ class TestRunner:
         assert results[1] == {"name1": "Person 2", "name2": "Person 3"}
         assert results[2] == {"name1": "Person 3", "name2": "Person 4"}
 
+        # Test negative match
+        nomatch = Runner(
+            """
+            MATCH (a:WherePerson), (b:WherePerson)
+            WHERE (a)-[:KNOWS]->(b) <> true
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await nomatch.run()
+        noresults = nomatch.results
+        assert len(noresults) == 13
+        assert noresults[0] == {"name1": "Person 1", "name2": "Person 1"}
+        assert noresults[1] == {"name1": "Person 1", "name2": "Person 3"}
+        assert noresults[2] == {"name1": "Person 1", "name2": "Person 4"}
+        assert noresults[3] == {"name1": "Person 2", "name2": "Person 1"}
+        assert noresults[4] == {"name1": "Person 2", "name2": "Person 2"}
+        assert noresults[5] == {"name1": "Person 2", "name2": "Person 4"}
+        assert noresults[6] == {"name1": "Person 3", "name2": "Person 1"}
+        assert noresults[7] == {"name1": "Person 3", "name2": "Person 2"}
+        assert noresults[8] == {"name1": "Person 3", "name2": "Person 3"}
+        assert noresults[9] == {"name1": "Person 4", "name2": "Person 1"}
+        assert noresults[10] == {"name1": "Person 4", "name2": "Person 2"}
+        assert noresults[11] == {"name1": "Person 4", "name2": "Person 3"}
+        assert noresults[12] == {"name1": "Person 4", "name2": "Person 4"}
+
     @pytest.mark.asyncio
     async def test_person_who_does_not_know_anyone(self):
         """Test person who does not know anyone."""
@@ -1516,6 +1541,7 @@ class TestRunner:
         assert results[0] == {"name1": "Person 1", "name2": "Person 2", "name3": "Person 3"}
         assert results[1] == {"name1": "Person 2", "name2": "Person 3", "name3": "Person 4"}
 
+    @pytest.mark.asyncio
     async def test_match_with_constraints(self):
         await Runner(
             """

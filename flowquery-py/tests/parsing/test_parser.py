@@ -6,6 +6,7 @@ from flowquery.parsing.parser import Parser
 from flowquery.parsing.functions.async_function import AsyncFunction
 from flowquery.parsing.functions.function_metadata import FunctionDef
 from flowquery.parsing.operations.match import Match
+from flowquery.parsing.operations.create_relationship import CreateRelationship
 from flowquery.graph.node import Node
 from flowquery.graph.relationship import Relationship
 
@@ -783,6 +784,23 @@ class TestParser:
         assert isinstance(node, Node)
         assert node.properties.get("value") is not None
         assert node.properties["value"].value() == "hello"
+
+    def test_where_in_create_virtual_sub_query(self):
+        """Test WHERE in CREATE VIRTUAL sub-query."""
+        parser = Parser()
+        ast = parser.parse(
+            "CREATE VIRTUAL (:Email)-[:HAS_ATTACHMENT]-(:File) AS {"
+            " LOAD JSON FROM '/data/emails.json' AS email"
+            " WHERE email.hasAttachments = true"
+            " UNWIND email.attachments AS fileId"
+            " RETURN email.id AS left_id, fileId AS right_id"
+            " }"
+        )
+        create = ast.first_child()
+        assert isinstance(create, CreateRelationship)
+        assert create.relationship is not None
+        assert create.relationship.type == "HAS_ATTACHMENT"
+        assert create.statement is not None
 
     def test_relationship_with_properties(self):
         """Test relationship with properties."""

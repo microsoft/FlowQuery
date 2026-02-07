@@ -220,6 +220,7 @@ class Parser extends BaseParser {
     }
 
     private parseWhere(): Where | null {
+        this.skipWhitespaceAndComments();
         if (!this.token.isWhere()) {
             return null;
         }

@@ -33,17 +33,3 @@ describe("Graph - Basic FlowQuery Operations", () => {
         expect(runner.results).toEqual([{ total: 60 }]);
     });
 });
-
-// The following tests require the loadJson plugin to work correctly at parse time.
-// Due to Jest module isolation, they are skipped. Run the app directly to test these.
-describe.skip("Graph Initialization (requires runtime integration)", () => {
-    test("should create User nodes", async () => {
-        // This test would use initializeGraph() and MATCH queries
-        expect(true).toBe(true);
-    });
-
-    test("should create relationships", async () => {
-        // This test would verify relationship creation
-        expect(true).toBe(true);
-    });
-});

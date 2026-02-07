@@ -1,24 +1,23 @@
 /**
  * FlowQuery Agent
- * 
+ *
  * Orchestrates the multi-step flow:
  * 1. Send user query to LLM to generate a FlowQuery statement
  * 2. Execute the FlowQuery statement
  * 3. Send results back to LLM for interpretation
  * 4. Return final response to user
  */
-
-import { llm, llmStream, LlmOptions, LlmResponse } from '../plugins/loaders/Llm';
-import { FlowQueryExecutor, FlowQueryExecutionResult } from '../utils/FlowQueryExecutor';
-import { extractFlowQuery, FlowQueryExtraction } from '../utils/FlowQueryExtractor';
-import { isAdaptiveCard } from './AdaptiveCardRenderer';
-import { generateInterpretationPrompt } from '../prompts';
+import { generateInterpretationPrompt } from "../prompts";
+import { FlowQueryExecutionResult, FlowQueryExecutor } from "../utils/FlowQueryExecutor";
+import { FlowQueryExtraction, extractFlowQuery } from "../utils/FlowQueryExtractor";
+import { LlmOptions, llm, llmStream } from "../utils/Llm";
+import { isAdaptiveCard } from "./AdaptiveCardRenderer";
 
 /**
  * Represents a step in the agent's execution process.
  */
 export interface AgentStep {
-    type: 'query_generation' | 'query_execution' | 'interpretation' | 'direct_response' | 'retry';
+    type: "query_generation" | "query_execution" | "interpretation" | "direct_response" | "retry";
     content: string;
     timestamp: Date;
     metadata?: {
@@ -45,7 +44,7 @@ export interface AgentResult {
 /**
  * Callback for streaming agent responses.
  */
-export type AgentStreamCallback = (chunk: string, step: AgentStep['type']) => void;
+export type AgentStreamCallback = (chunk: string, step: AgentStep["type"]) => void;
 
 /**
  * Options for the FlowQuery agent.
@@ -56,7 +55,7 @@ export interface FlowQueryAgentOptions {
     /** LLM options to use */
     llmOptions?: LlmOptions;
     /** Conversation history */
-    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
     /** Callback for streaming responses */
     onStream?: AgentStreamCallback;
     /** Whether to show intermediate steps to the user */
@@ -67,7 +66,7 @@ export interface FlowQueryAgentOptions {
 
 /**
  * FlowQuery Agent class that orchestrates the multi-step query processing flow.
- * 
+ *
  * @example
  * ```typescript
  * const agent = new FlowQueryAgent();
@@ -89,17 +88,20 @@ export class FlowQueryAgent {
 
     /**
      * Process a user query through the FlowQuery agent.
-     * 
+     *
      * @param userQuery - The natural language query from the user
      * @param options - Agent configuration options
      * @returns The agent result including final response and steps taken
      */
-    async processQuery(
-        userQuery: string,
-        options: FlowQueryAgentOptions
-    ): Promise<AgentResult> {
+    async processQuery(userQuery: string, options: FlowQueryAgentOptions): Promise<AgentResult> {
         const steps: AgentStep[] = [];
-        const { systemPrompt, llmOptions = {}, conversationHistory = [], onStream, showIntermediateSteps = true } = options;
+        const {
+            systemPrompt,
+            llmOptions = {},
+            conversationHistory = [],
+            onStream,
+            showIntermediateSteps = true,
+        } = options;
 
         try {
             // Step 1: Generate FlowQuery from natural language
@@ -109,10 +111,10 @@ export class FlowQueryAgent {
                 messages: conversationHistory,
             });
 
-            const generationContent = generationResponse.choices[0]?.message?.content || '';
-            
+            const generationContent = generationResponse.choices[0]?.message?.content || "";
+
             steps.push({
-                type: 'query_generation',
+                type: "query_generation",
                 content: generationContent,
                 timestamp: new Date(),
             });
@@ -123,12 +125,12 @@ export class FlowQueryAgent {
             // If no query needed (direct response from LLM)
             if (extraction.noQueryNeeded || !extraction.found) {
                 const directResponse = extraction.directResponse || generationContent;
-                
+
                 steps.push({
-                    type: 'direct_response',
+                    type: "direct_response",
                     content: directResponse,
                     timestamp: new Date(),
-                    metadata: { extraction }
+                    metadata: { extraction },
                 });
 
                 return {
@@ -140,16 +142,16 @@ export class FlowQueryAgent {
 
             // Step 3: Execute the FlowQuery
             let executionResult = await this.flowQueryExecutor.execute(extraction.query!);
-            
+
             steps.push({
-                type: 'query_execution',
+                type: "query_execution",
                 content: this.flowQueryExecutor.formatResult(executionResult),
                 timestamp: new Date(),
                 metadata: {
                     query: extraction.query!,
                     executionResult,
-                    extraction
-                }
+                    extraction,
+                },
             });
 
             // If execution failed, attempt retry with error context
@@ -164,20 +166,20 @@ export class FlowQueryAgent {
                     retryCount++;
 
                     steps.push({
-                        type: 'retry',
+                        type: "retry",
                         content: `Retry ${retryCount}: Error was "${currentError}"`,
                         timestamp: new Date(),
                         metadata: {
                             query: currentQuery,
-                            executionResult: currentResult
-                        }
+                            executionResult: currentResult,
+                        },
                     });
 
                     // Ask LLM to generate a corrected query
                     const correctedQuery = await this.generateCorrectedQuery(
                         userQuery,
                         currentQuery,
-                        currentError || 'Unknown error',
+                        currentError || "Unknown error",
                         steps,
                         options
                     );
@@ -190,12 +192,12 @@ export class FlowQueryAgent {
                             currentResult,
                             options
                         );
-                        
+
                         return {
                             finalResponse: errorInterpretation,
                             steps,
                             success: false,
-                            error: currentResult.error
+                            error: currentResult.error,
                         };
                     }
 
@@ -205,13 +207,13 @@ export class FlowQueryAgent {
                     currentError = currentResult.error;
 
                     steps.push({
-                        type: 'query_execution',
+                        type: "query_execution",
                         content: this.flowQueryExecutor.formatResult(currentResult),
                         timestamp: new Date(),
                         metadata: {
                             query: correctedQuery,
-                            executionResult: currentResult
-                        }
+                            executionResult: currentResult,
+                        },
                     });
                 }
 
@@ -223,12 +225,12 @@ export class FlowQueryAgent {
                         currentResult,
                         options
                     );
-                    
+
                     return {
                         finalResponse: errorInterpretation,
                         steps,
                         success: false,
-                        error: currentResult.error
+                        error: currentResult.error,
                     };
                 }
 
@@ -244,8 +246,8 @@ export class FlowQueryAgent {
                 executionResult
             );
 
-            let finalResponse = '';
-            
+            let finalResponse = "";
+
             if (onStream) {
                 // Stream the interpretation response
                 for await (const chunk of llmStream(interpretationPrompt, {
@@ -253,10 +255,10 @@ export class FlowQueryAgent {
                     systemPrompt: generateInterpretationPrompt(),
                     messages: conversationHistory,
                 })) {
-                    const deltaContent = chunk.choices?.[0]?.delta?.content || '';
+                    const deltaContent = chunk.choices?.[0]?.delta?.content || "";
                     if (deltaContent) {
                         finalResponse += deltaContent;
-                        onStream(deltaContent, 'interpretation');
+                        onStream(deltaContent, "interpretation");
                     }
                 }
             } else {
@@ -265,26 +267,26 @@ export class FlowQueryAgent {
                     systemPrompt: generateInterpretationPrompt(),
                     messages: conversationHistory,
                 });
-                finalResponse = interpretationResponse.choices[0]?.message?.content || '';
+                finalResponse = interpretationResponse.choices[0]?.message?.content || "";
             }
 
             steps.push({
-                type: 'interpretation',
+                type: "interpretation",
                 content: finalResponse,
                 timestamp: new Date(),
             });
 
             // Build the complete response with optional intermediate steps
-            let completeResponse = '';
-            
+            let completeResponse = "";
+
             if (showIntermediateSteps && extraction.explanation) {
-                completeResponse += extraction.explanation + '\n\n';
+                completeResponse += extraction.explanation + "\n\n";
             }
-            
+
             if (showIntermediateSteps) {
                 completeResponse += `**Query executed:**\n\`\`\`flowquery\n${extraction.query}\n\`\`\`\n\n`;
             }
-            
+
             completeResponse += finalResponse;
 
             return {
@@ -294,7 +296,7 @@ export class FlowQueryAgent {
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            
+
             return {
                 finalResponse: `⚠️ An error occurred: ${errorMessage}`,
                 steps,
@@ -310,9 +312,25 @@ export class FlowQueryAgent {
     async *processQueryStream(
         userQuery: string,
         options: FlowQueryAgentOptions
-    ): AsyncGenerator<{ chunk: string; step: AgentStep['type']; done: boolean; steps?: AgentStep[]; adaptiveCard?: Record<string, unknown>; newMessage?: boolean }, void, unknown> {
+    ): AsyncGenerator<
+        {
+            chunk: string;
+            step: AgentStep["type"];
+            done: boolean;
+            steps?: AgentStep[];
+            adaptiveCard?: Record<string, unknown>;
+            newMessage?: boolean;
+        },
+        void,
+        unknown
+    > {
         const steps: AgentStep[] = [];
-        const { systemPrompt, llmOptions = {}, conversationHistory = [], showIntermediateSteps = true } = options;
+        const {
+            systemPrompt,
+            llmOptions = {},
+            conversationHistory = [],
+            showIntermediateSteps = true,
+        } = options;
 
         try {
             // Step 1: Generate FlowQuery from natural language (non-streaming for speed)
@@ -322,10 +340,10 @@ export class FlowQueryAgent {
                 messages: conversationHistory,
             });
 
-            const generationContent = generationResponse.choices[0]?.message?.content || '';
-            
+            const generationContent = generationResponse.choices[0]?.message?.content || "";
+
             steps.push({
-                type: 'query_generation',
+                type: "query_generation",
                 content: generationContent,
                 timestamp: new Date(),
             });
@@ -336,39 +354,39 @@ export class FlowQueryAgent {
             // If no query needed
             if (extraction.noQueryNeeded || !extraction.found) {
                 const directResponse = extraction.directResponse || generationContent;
-                
+
                 steps.push({
-                    type: 'direct_response',
+                    type: "direct_response",
                     content: directResponse,
                     timestamp: new Date(),
-                    metadata: { extraction }
+                    metadata: { extraction },
                 });
 
-                yield { chunk: directResponse, step: 'direct_response', done: true, steps };
+                yield { chunk: directResponse, step: "direct_response", done: true, steps };
                 return;
             }
 
             // Emit intermediate step: show the query being executed
             if (showIntermediateSteps) {
-                yield { 
-                    chunk: `\`\`\`flowquery\n${extraction.query}\n\`\`\`\n\n`, 
-                    step: 'query_generation', 
-                    done: false 
+                yield {
+                    chunk: `\`\`\`flowquery\n${extraction.query}\n\`\`\`\n\n`,
+                    step: "query_generation",
+                    done: false,
                 };
             }
 
             // Step 3: Execute the FlowQuery
             let executionResult = await this.flowQueryExecutor.execute(extraction.query!);
-            
+
             steps.push({
-                type: 'query_execution',
+                type: "query_execution",
                 content: this.flowQueryExecutor.formatResult(executionResult),
                 timestamp: new Date(),
                 metadata: {
                     query: extraction.query!,
                     executionResult,
-                    extraction
-                }
+                    extraction,
+                },
             });
 
             // Handle execution errors with retry logic
@@ -381,65 +399,65 @@ export class FlowQueryAgent {
 
                 while (!currentResult.success && retryCount < maxRetries) {
                     retryCount++;
-                    
+
                     // Show the failure in the current message before marking it complete
-                    yield { 
-                        chunk: `\n⚠️ **Query execution failed:** ${currentError}\n`, 
-                        step: 'query_execution', 
-                        done: false 
-                    };
-                    
-                    // Complete the previous message before starting a new one
-                    yield { 
-                        chunk: '', 
-                        step: 'query_execution', 
-                        done: true 
-                    };
-                
-                    // Notify user of retry attempt - start a new message for the retry
-                    yield { 
-                        chunk: `🔄 Attempting to fix (retry ${retryCount}/${maxRetries})...\n\n`, 
-                        step: 'retry', 
+                    yield {
+                        chunk: `\n⚠️ **Query execution failed:** ${currentError}\n`,
+                        step: "query_execution",
                         done: false,
-                        newMessage: true
+                    };
+
+                    // Complete the previous message before starting a new one
+                    yield {
+                        chunk: "",
+                        step: "query_execution",
+                        done: true,
+                    };
+
+                    // Notify user of retry attempt - start a new message for the retry
+                    yield {
+                        chunk: `🔄 Attempting to fix (retry ${retryCount}/${maxRetries})...\n\n`,
+                        step: "retry",
+                        done: false,
+                        newMessage: true,
                     };
 
                     steps.push({
-                        type: 'retry',
+                        type: "retry",
                         content: `Retry ${retryCount}: Error was "${currentError}"`,
                         timestamp: new Date(),
                         metadata: {
                             query: currentQuery,
-                            executionResult: currentResult
-                        }
+                            executionResult: currentResult,
+                        },
                     });
 
                     // Ask LLM to generate a corrected query
                     const correctedQuery = await this.generateCorrectedQuery(
                         userQuery,
                         currentQuery,
-                        currentError || 'Unknown error',
+                        currentError || "Unknown error",
                         steps,
                         options
                     );
 
                     if (!correctedQuery) {
                         // LLM couldn't generate a correction
-                        yield { 
-                            chunk: `Unable to generate a corrected query. Please try rephrasing your request.\n`, 
-                            step: 'retry', 
-                            done: true, 
-                            steps 
+                        yield {
+                            chunk: `Unable to generate a corrected query. Please try rephrasing your request.\n`,
+                            step: "retry",
+                            done: true,
+                            steps,
                         };
                         return;
                     }
 
                     // Show the corrected query
                     if (showIntermediateSteps) {
-                        yield { 
-                            chunk: `**Corrected query:**\n\`\`\`flowquery\n${correctedQuery}\n\`\`\`\n\n`, 
-                            step: 'retry', 
-                            done: false 
+                        yield {
+                            chunk: `**Corrected query:**\n\`\`\`flowquery\n${correctedQuery}\n\`\`\`\n\n`,
+                            step: "retry",
+                            done: false,
                         };
                     }
 
@@ -449,28 +467,28 @@ export class FlowQueryAgent {
                     currentError = currentResult.error;
 
                     steps.push({
-                        type: 'query_execution',
+                        type: "query_execution",
                         content: this.flowQueryExecutor.formatResult(currentResult),
                         timestamp: new Date(),
                         metadata: {
                             query: correctedQuery,
-                            executionResult: currentResult
-                        }
+                            executionResult: currentResult,
+                        },
                     });
                 }
 
                 // If still failing after retries, give up
                 if (!currentResult.success) {
                     const errorMessage = `⚠️ Query execution failed after ${maxRetries} retries: ${currentError}\n\nLast query attempted:\n\`\`\`flowquery\n${currentQuery}\n\`\`\``;
-                    yield { chunk: errorMessage, step: 'query_execution', done: true, steps };
+                    yield { chunk: errorMessage, step: "query_execution", done: true, steps };
                     return;
                 }
 
                 // Mark the retry message as complete before proceeding to interpretation
-                yield { 
-                    chunk: '', 
-                    step: 'retry', 
-                    done: true 
+                yield {
+                    chunk: "",
+                    step: "retry",
+                    done: true,
                 };
 
                 // Update executionResult for interpretation phase
@@ -489,34 +507,34 @@ export class FlowQueryAgent {
                 !!adaptiveCard
             );
 
-            let interpretationContent = '';
+            let interpretationContent = "";
 
             for await (const chunk of llmStream(interpretationPrompt, {
                 ...llmOptions,
                 systemPrompt: generateInterpretationPrompt(),
                 messages: conversationHistory,
             })) {
-                const deltaContent = chunk.choices?.[0]?.delta?.content || '';
+                const deltaContent = chunk.choices?.[0]?.delta?.content || "";
                 if (deltaContent) {
                     interpretationContent += deltaContent;
-                    yield { chunk: deltaContent, step: 'interpretation', done: false };
+                    yield { chunk: deltaContent, step: "interpretation", done: false };
                 }
             }
 
             steps.push({
-                type: 'interpretation',
+                type: "interpretation",
                 content: interpretationContent,
                 timestamp: new Date(),
             });
 
-            yield { chunk: '', step: 'interpretation', done: true, steps, adaptiveCard };
+            yield { chunk: "", step: "interpretation", done: true, steps, adaptiveCard };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            yield { 
-                chunk: `⚠️ An error occurred: ${errorMessage}`, 
-                step: 'interpretation', 
-                done: true, 
-                steps 
+            yield {
+                chunk: `⚠️ An error occurred: ${errorMessage}`,
+                step: "interpretation",
+                done: true,
+                steps,
             };
         }
     }
@@ -526,7 +544,9 @@ export class FlowQueryAgent {
      * Checks if any result is an Adaptive Card (type: "AdaptiveCard") and returns it.
      * Searches for Adaptive Cards at the top level or within any property of result objects.
      */
-    private extractAdaptiveCardFromResults(results: unknown[] | undefined): Record<string, unknown> | undefined {
+    private extractAdaptiveCardFromResults(
+        results: unknown[] | undefined
+    ): Record<string, unknown> | undefined {
         if (!results || !Array.isArray(results)) {
             return undefined;
         }
@@ -536,9 +556,9 @@ export class FlowQueryAgent {
             if (isAdaptiveCard(result)) {
                 return result;
             }
-            
+
             // Check if any property of the result object is an Adaptive Card
-            if (typeof result === 'object' && result !== null) {
+            if (typeof result === "object" && result !== null) {
                 const obj = result as Record<string, unknown>;
                 for (const value of Object.values(obj)) {
                     if (isAdaptiveCard(value)) {
@@ -562,7 +582,7 @@ export class FlowQueryAgent {
     ): string {
         const resultsJson = JSON.stringify(executionResult.results, null, 2);
         const resultCount = executionResult.results?.length || 0;
-        
+
         let prompt = `The user asked: "${originalQuery}"
 
 This was translated to the following FlowQuery:
@@ -602,14 +622,14 @@ ${resultsJson}
 
         // Build context from previous steps
         const stepsContext = previousSteps
-            .filter(step => step.type === 'query_execution' || step.type === 'retry')
-            .map(step => {
-                if (step.type === 'retry') {
+            .filter((step) => step.type === "query_execution" || step.type === "retry")
+            .map((step) => {
+                if (step.type === "retry") {
                     return `- Retry attempt: ${step.content}`;
                 }
-                return `- Query: \`${step.metadata?.query}\` → Error: ${step.metadata?.executionResult?.error || 'unknown'}`;
+                return `- Query: \`${step.metadata?.query}\` → Error: ${step.metadata?.executionResult?.error || "unknown"}`;
             })
-            .join('\n');
+            .join("\n");
 
         const retryPrompt = `The user asked: "${originalQuery}"
 
@@ -621,7 +641,7 @@ ${failedQuery}
 However, the query failed with this error:
 ${errorMessage}
 
-${stepsContext ? `Previous attempts:\n${stepsContext}\n\n` : ''}Please analyze the error and generate a CORRECTED FlowQuery that will work. Pay close attention to:
+${stepsContext ? `Previous attempts:\n${stepsContext}\n\n` : ""}Please analyze the error and generate a CORRECTED FlowQuery that will work. Pay close attention to:
 - Syntax errors in the query
 - Incorrect loader names or function names
 - Missing or incorrect parameters
@@ -636,7 +656,7 @@ Generate the corrected query using the same format as before (with explanation i
                 messages: conversationHistory,
             });
 
-            const responseContent = response.choices[0]?.message?.content || '';
+            const responseContent = response.choices[0]?.message?.content || "";
             const extraction = extractFlowQuery(responseContent);
 
             if (extraction.found && extraction.query) {
@@ -645,7 +665,7 @@ Generate the corrected query using the same format as before (with explanation i
 
             return null;
         } catch (error) {
-            console.error('Error generating corrected query:', error);
+            console.error("Error generating corrected query:", error);
             return null;
         }
     }
@@ -673,42 +693,16 @@ Please explain what went wrong in user-friendly terms and, if possible, suggest 
 
         const response = await llm(errorPrompt, {
             ...options.llmOptions,
-            systemPrompt: 'You are a helpful assistant explaining query errors. Be concise and helpful.',
+            systemPrompt:
+                "You are a helpful assistant explaining query errors. Be concise and helpful.",
             messages: options.conversationHistory,
         });
 
-        return response.choices[0]?.message?.content || 
-            `The query failed with error: ${executionResult.error}`;
+        return (
+            response.choices[0]?.message?.content ||
+            `The query failed with error: ${executionResult.error}`
+        );
     }
-}
-
-// Create a default instance for convenience
-const defaultAgent = new FlowQueryAgent();
-
-/**
- * Process a user query through the FlowQuery agent.
- * 
- * @param userQuery - The natural language query from the user
- * @param options - Agent configuration options
- * @returns The agent result including final response and steps taken
- * @deprecated Use `new FlowQueryAgent().processQuery()` instead
- */
-export async function processQuery(
-    userQuery: string,
-    options: FlowQueryAgentOptions
-): Promise<AgentResult> {
-    return defaultAgent.processQuery(userQuery, options);
-}
-
-/**
- * Process a query with streaming support for the final interpretation.
- * @deprecated Use `new FlowQueryAgent().processQueryStream()` instead
- */
-export function processQueryStream(
-    userQuery: string,
-    options: FlowQueryAgentOptions
-): AsyncGenerator<{ chunk: string; step: AgentStep['type']; done: boolean; steps?: AgentStep[]; adaptiveCard?: Record<string, unknown>; newMessage?: boolean }, void, unknown> {
-    return defaultAgent.processQueryStream(userQuery, options);
 }
 
 export default FlowQueryAgent;

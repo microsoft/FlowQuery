@@ -867,6 +867,22 @@ test("Test node with properties", () => {
     expect(node.properties.get("value")?.value()).toBe("hello");
 });
 
+test("Test WHERE in CREATE VIRTUAL sub-query", () => {
+    const parser = new Parser();
+    const ast = parser.parse(`
+        CREATE VIRTUAL (:Email)-[:HAS_ATTACHMENT]-(:File) AS {
+            LOAD JSON FROM '/data/emails.json' AS email
+            WHERE email.hasAttachments = true
+            UNWIND email.attachments AS fileId
+            RETURN email.id AS left_id, fileId AS right_id
+        }
+    `);
+    const create = ast.firstChild() as CreateRelationship;
+    expect(create.relationship).not.toBeNull();
+    expect(create.relationship!.type).toBe("HAS_ATTACHMENT");
+    expect(create.statement).not.toBeNull();
+});
+
 test("Test relationship with properties", () => {
     const parser = new Parser();
     const ast = parser.parse("MATCH (:Person)-[r:LIKES{since: 2022}]->(:Food) return a");

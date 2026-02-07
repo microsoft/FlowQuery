@@ -199,6 +199,7 @@ class Parser(BaseParser):
         return Return(expressions)
 
     def _parse_where(self) -> Optional[Where]:
+        self._skip_whitespace_and_comments()
         if not self.token.is_where():
             return None
         self._expect_previous_token_to_be_whitespace_or_comment()

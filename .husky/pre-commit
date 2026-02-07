@@ -18,10 +18,11 @@ if git diff --cached --name-only | grep -q "^flowquery-py/.*\.py$"; then
     cd ..
 fi
 
-# Strip outputs from notebook files in flowquery-py
-for notebook in $(git ls-files 'flowquery-py/**/*.ipynb'); do
+# Strip outputs from notebook files in flowquery-py (only changed ones)
+for notebook in $(git diff --cached --name-only -- 'flowquery-py/**/*.ipynb'); do
     if [ -f "$notebook" ]; then
         echo "Stripping outputs from: $notebook"
         python -m nbstripout "$notebook"
+        git add "$notebook"
     fi
 done

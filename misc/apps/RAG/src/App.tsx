@@ -15,8 +15,11 @@ const App: React.FC = () => {
 
     useEffect(() => {
         // Generate the system prompt after plugins are initialized
-        const prompt = generateFlowQuerySystemPrompt();
-        setSystemPrompt(prompt);
+        const loadPrompt = async () => {
+            const prompt = await generateFlowQuerySystemPrompt();
+            setSystemPrompt(prompt);
+        };
+        loadPrompt();
     }, []);
 
     return (
@@ -36,9 +39,6 @@ const App: React.FC = () => {
                     <div className="chat-wrapper">
                         <ChatContainer
                             systemPrompt={systemPrompt}
-                            useStreaming={true}
-                            useFlowQueryAgent={true}
-                            showIntermediateSteps={true}
                         />
                     </div>
                 </div>

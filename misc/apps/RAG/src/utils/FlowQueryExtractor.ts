@@ -1,6 +1,6 @@
 /**
  * FlowQuery Extraction Utility
- * 
+ *
  * Extracts FlowQuery statements from LLM responses.
  */
 
@@ -22,10 +22,10 @@ export interface FlowQueryExtraction {
 
 /**
  * FlowQuery Extractor class for extracting FlowQuery statements from LLM responses.
- * 
+ *
  * Looks for code blocks with flowquery, cypher, or sql language tags,
  * or generic code blocks that appear to contain FlowQuery syntax.
- * 
+ *
  * @example
  * ```typescript
  * const extractor = new FlowQueryExtractor();
@@ -34,7 +34,7 @@ export interface FlowQueryExtraction {
  * LOAD JSON FROM somePlugin(5) AS item
  * RETURN item.text
  * \`\`\``;
- * 
+ *
  * const extraction = extractor.extract(response);
  * console.log(extraction.query); // "LOAD JSON FROM somePlugin(5) AS item\nRETURN item.text"
  * ```
@@ -44,47 +44,47 @@ export class FlowQueryExtractor {
     private readonly codeBlockPatterns: RegExp[] = [
         /```(?:flowquery|cypher|fql)\s*\n([\s\S]*?)```/i,
         /```(?:sql)\s*\n([\s\S]*?)```/i,
-        /```\s*\n([\s\S]*?)```/,  // Generic code block
+        /```\s*\n([\s\S]*?)```/, // Generic code block
     ];
 
     /** Keywords that indicate a FlowQuery statement */
     private readonly flowQueryKeywords: RegExp[] = [
+        /\bMATCH\b/i,
+        /\bCREATE\b/i,
         /\bWITH\b/i,
         /\bLOAD\s+JSON\s+FROM\b/i,
         /\bUNWIND\b/i,
         /\bRETURN\b/i,
         /\bWHERE\b/i,
-        /\bORDER\s+BY\b/i,
-        /\bLIMIT\b/i,
     ];
 
     /** Keywords that can start a FlowQuery statement */
-    private readonly startKeywords = /^(WITH|LOAD\s+JSON\s+FROM|UNWIND)\b/i;
+    private readonly startKeywords = /^(MATCH|CREATE|WITH|LOAD\s+JSON\s+FROM|UNWIND|CALL)\b/i;
 
     /** Keywords that can continue a FlowQuery statement */
-    private readonly continueKeywords = /^(WITH|LOAD|UNWIND|WHERE|RETURN|ORDER|LIMIT|SKIP|HEADERS|POST|AS)\b/i;
+    private readonly continueKeywords =
+        /^(MATCH|CREATE|WITH|LOAD|UNWIND|WHERE|RETURN|CALL|YIELD|HEADERS|POST|AS)\b/i;
 
     /**
      * Extract a FlowQuery statement from an LLM response.
-     * 
+     *
      * @param llmResponse - The full text response from the LLM
      * @returns The extraction result
      */
     public extract(llmResponse: string): FlowQueryExtraction {
-        if (!llmResponse || llmResponse.trim() === '') {
+        if (!llmResponse || llmResponse.trim() === "") {
             return { query: null, found: false };
         }
 
         // Check for explicit "NO_QUERY_NEEDED" marker
-        if (llmResponse.includes('[NO_QUERY_NEEDED]') || 
-            llmResponse.includes('NO_QUERY_NEEDED')) {
+        if (llmResponse.includes("[NO_QUERY_NEEDED]") || llmResponse.includes("NO_QUERY_NEEDED")) {
             // Extract the direct response after the marker
             const directMatch = llmResponse.match(/\[NO_QUERY_NEEDED\]\s*([\s\S]*)/i);
             return {
                 query: null,
                 found: false,
                 noQueryNeeded: true,
-                directResponse: directMatch ? directMatch[1].trim() : llmResponse
+                directResponse: directMatch ? directMatch[1].trim() : llmResponse,
             };
         }
 
@@ -93,16 +93,18 @@ export class FlowQueryExtractor {
             const match = llmResponse.match(pattern);
             if (match && match[1]) {
                 const query = match[1].trim();
-                
+
                 // Verify it looks like a FlowQuery statement
                 if (this.isLikelyFlowQuery(query)) {
                     // Extract explanation text before the code block
-                    const beforeMatch = llmResponse.substring(0, llmResponse.indexOf(match[0])).trim();
-                    
+                    const beforeMatch = llmResponse
+                        .substring(0, llmResponse.indexOf(match[0]))
+                        .trim();
+
                     return {
                         query,
                         found: true,
-                        explanation: beforeMatch || undefined
+                        explanation: beforeMatch || undefined,
                     };
                 }
             }
@@ -114,7 +116,7 @@ export class FlowQueryExtractor {
         if (inlineQuery) {
             return {
                 query: inlineQuery,
-                found: true
+                found: true,
             };
         }
 
@@ -124,7 +126,7 @@ export class FlowQueryExtractor {
     /**
      * Extract multiple FlowQuery statements from an LLM response.
      * Useful when the LLM provides alternative queries.
-     * 
+     *
      * @param llmResponse - The full text response from the LLM
      * @returns Array of extracted queries
      */
@@ -133,7 +135,7 @@ export class FlowQueryExtractor {
 
         const queries: string[] = [];
         const codeBlockPattern = /```(?:flowquery|cypher|fql|sql)?\s*\n([\s\S]*?)```/gi;
-        
+
         let match;
         while ((match = codeBlockPattern.exec(llmResponse)) !== null) {
             if (match[1]) {
@@ -152,31 +154,34 @@ export class FlowQueryExtractor {
      */
     private isLikelyFlowQuery(text: string): boolean {
         // Must contain at least one FlowQuery keyword
-        return this.flowQueryKeywords.some(pattern => pattern.test(text));
+        return this.flowQueryKeywords.some((pattern) => pattern.test(text));
     }
 
     /**
      * Try to extract a FlowQuery statement that's not in a code block.
      */
     private extractInlineQuery(text: string): string | null {
-        const lines = text.split('\n');
+        const lines = text.split("\n");
         const queryLines: string[] = [];
         let inQuery = false;
 
         for (const line of lines) {
             const trimmedLine = line.trim();
-            
+
             if (!inQuery && this.startKeywords.test(trimmedLine)) {
                 inQuery = true;
                 queryLines.push(trimmedLine);
             } else if (inQuery) {
                 // Check if this line continues the query
-                if (this.continueKeywords.test(trimmedLine) || 
-                    trimmedLine.startsWith('{') ||
-                    trimmedLine.startsWith('}') ||
-                    trimmedLine === '' ||
+                if (
+                    this.continueKeywords.test(trimmedLine) ||
+                    trimmedLine.startsWith("{") ||
+                    trimmedLine.startsWith("}") ||
+                    trimmedLine === "" ||
                     /^[A-Za-z_][A-Za-z0-9_]*\./.test(trimmedLine) ||
-                    /^\s+/.test(line)) {  // Indented line
+                    /^\s+/.test(line)
+                ) {
+                    // Indented line
                     queryLines.push(trimmedLine);
                 } else {
                     // End of query
@@ -185,7 +190,7 @@ export class FlowQueryExtractor {
             }
         }
 
-        const query = queryLines.join('\n').trim();
+        const query = queryLines.join("\n").trim();
         return query && this.isLikelyFlowQuery(query) ? query : null;
     }
 }

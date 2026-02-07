@@ -15,7 +15,7 @@ export {
 } from "./AdaptiveCardRenderer";
 
 // FlowQuery Agent
-export { processQuery, processQueryStream } from "./FlowQueryAgent";
+export { FlowQueryAgent } from "./FlowQueryAgent";
 export type {
     AgentStep,
     AgentResult,

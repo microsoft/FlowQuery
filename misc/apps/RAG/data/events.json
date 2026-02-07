@@ -1,0 +1,226 @@
+[
+  {
+    "id": "ev-001",
+    "subject": "Q1 Roadmap Review",
+    "organizer": "u-003",
+    "attendees": [
+      { "userId": "u-001", "response": "accepted" },
+      { "userId": "u-002", "response": "accepted" },
+      { "userId": "u-004", "response": "accepted" },
+      { "userId": "u-008", "response": "accepted" }
+    ],
+    "start": "2026-01-08T16:00:00Z",
+    "end": "2026-01-08T17:00:00Z",
+    "location": "Conference Room A (Seattle HQ)",
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-roadmap-q1",
+    "body": "Reviewing the Q1 2026 product roadmap. Please come prepared with feedback on the draft Priya shared via email.",
+    "recurrence": null,
+    "relatedEmails": ["em-001", "em-002", "em-003"],
+    "relatedFiles": ["f-001"],
+    "categories": ["Roadmap", "Leadership"]
+  },
+  {
+    "id": "ev-002",
+    "subject": "Engineering Weekly Standup",
+    "organizer": "u-002",
+    "attendees": [
+      { "userId": "u-005", "response": "accepted" },
+      { "userId": "u-006", "response": "accepted" },
+      { "userId": "u-007", "response": "accepted" },
+      { "userId": "u-008", "response": "accepted" }
+    ],
+    "start": "2026-01-12T15:00:00Z",
+    "end": "2026-01-12T15:30:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-eng-standup",
+    "body": "Weekly engineering standup. Review sprint progress, blockers, and upcoming work.",
+    "recurrence": {
+      "pattern": "weekly",
+      "daysOfWeek": ["monday"],
+      "interval": 1
+    },
+    "relatedEmails": [],
+    "relatedFiles": [],
+    "categories": ["Engineering", "Standup"]
+  },
+  {
+    "id": "ev-003",
+    "subject": "Project Aurora - Design Review",
+    "organizer": "u-009",
+    "attendees": [
+      { "userId": "u-008", "response": "accepted" },
+      { "userId": "u-005", "response": "accepted" },
+      { "userId": "u-003", "response": "tentative" }
+    ],
+    "start": "2026-01-13T18:00:00Z",
+    "end": "2026-01-13T19:00:00Z",
+    "location": "Conference Room B (Seattle HQ)",
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-aurora-design",
+    "body": "Reviewing Mia's dashboard mockups for Project Aurora. Three layout options to evaluate. Figma link in the project folder.",
+    "recurrence": null,
+    "relatedEmails": ["em-007"],
+    "relatedFiles": ["f-003"],
+    "categories": ["Project Aurora", "Design"]
+  },
+  {
+    "id": "ev-004",
+    "subject": "Contoso SSO Technical Scoping",
+    "organizer": "u-002",
+    "attendees": [
+      { "userId": "u-005", "response": "accepted" },
+      { "userId": "u-010", "response": "accepted" },
+      { "userId": "u-004", "response": "accepted" },
+      { "userId": "u-012", "response": "accepted" }
+    ],
+    "start": "2026-01-14T17:00:00Z",
+    "end": "2026-01-14T18:00:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-contoso-sso",
+    "body": "Technical scoping for Contoso enterprise deal. Need to evaluate SAML + OIDC requirements and on-prem data residency feasibility.",
+    "recurrence": null,
+    "relatedEmails": ["em-005", "em-006"],
+    "relatedFiles": ["f-005"],
+    "categories": ["Sales", "Enterprise", "Contoso"]
+  },
+  {
+    "id": "ev-005",
+    "subject": "K8s Migration Planning",
+    "organizer": "u-007",
+    "attendees": [
+      { "userId": "u-002", "response": "accepted" },
+      { "userId": "u-006", "response": "accepted" },
+      { "userId": "u-012", "response": "accepted" }
+    ],
+    "start": "2026-01-15T16:00:00Z",
+    "end": "2026-01-15T17:00:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-k8s-migration",
+    "body": "Walk through the AKS migration plan for staging (Jan 20-24). Review database migration scripts David prepared and discuss rollback procedures.",
+    "recurrence": null,
+    "relatedEmails": ["em-004"],
+    "relatedFiles": ["f-004"],
+    "categories": ["Infrastructure", "DevOps"]
+  },
+  {
+    "id": "ev-006",
+    "subject": "All Hands - January",
+    "organizer": "u-001",
+    "attendees": [
+      { "userId": "u-002", "response": "accepted" },
+      { "userId": "u-003", "response": "accepted" },
+      { "userId": "u-004", "response": "accepted" },
+      { "userId": "u-005", "response": "accepted" },
+      { "userId": "u-006", "response": "accepted" },
+      { "userId": "u-007", "response": "accepted" },
+      { "userId": "u-008", "response": "accepted" },
+      { "userId": "u-009", "response": "accepted" },
+      { "userId": "u-010", "response": "accepted" },
+      { "userId": "u-011", "response": "accepted" },
+      { "userId": "u-012", "response": "accepted" }
+    ],
+    "start": "2026-01-16T18:00:00Z",
+    "end": "2026-01-16T19:00:00Z",
+    "location": "Conference Room A (Seattle HQ)",
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-allhands-jan",
+    "body": "Monthly all-hands meeting. Agenda: Q4 results recap, Q1 priorities, Contoso deal announcement, team updates.",
+    "recurrence": {
+      "pattern": "monthly",
+      "dayOfMonth": 16,
+      "interval": 1
+    },
+    "relatedEmails": [],
+    "relatedFiles": [],
+    "categories": ["All Hands", "Company"]
+  },
+  {
+    "id": "ev-007",
+    "subject": "Sprint 25 Planning",
+    "organizer": "u-008",
+    "attendees": [
+      { "userId": "u-002", "response": "accepted" },
+      { "userId": "u-005", "response": "accepted" },
+      { "userId": "u-006", "response": "accepted" },
+      { "userId": "u-007", "response": "accepted" },
+      { "userId": "u-009", "response": "accepted" }
+    ],
+    "start": "2026-01-19T15:00:00Z",
+    "end": "2026-01-19T16:30:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-sprint25",
+    "body": "Sprint 25 planning session. Focus areas: Aurora frontend components, API v3 schema design, security remediation items from Noah's audit.",
+    "recurrence": null,
+    "relatedEmails": ["em-009", "em-010"],
+    "relatedFiles": ["f-007"],
+    "categories": ["Sprint", "Agile"]
+  },
+  {
+    "id": "ev-008",
+    "subject": "1:1 - Marcus & Emily",
+    "organizer": "u-002",
+    "attendees": [{ "userId": "u-005", "response": "accepted" }],
+    "start": "2026-01-13T20:00:00Z",
+    "end": "2026-01-13T20:30:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-marcus-emily",
+    "body": "Regular 1:1. Topics: Aurora progress, component library, career growth discussion.",
+    "recurrence": {
+      "pattern": "weekly",
+      "daysOfWeek": ["tuesday"],
+      "interval": 1
+    },
+    "relatedEmails": [],
+    "relatedFiles": [],
+    "categories": ["1:1"]
+  },
+  {
+    "id": "ev-009",
+    "subject": "Marketing Sync",
+    "organizer": "u-004",
+    "attendees": [
+      { "userId": "u-011", "response": "accepted" },
+      { "userId": "u-010", "response": "accepted" }
+    ],
+    "start": "2026-01-14T15:00:00Z",
+    "end": "2026-01-14T15:30:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-marketing-sync",
+    "body": "Weekly marketing and sales alignment. Discuss blog post, Fabrikam webinar logistics, and Q1 campaign plan.",
+    "recurrence": {
+      "pattern": "weekly",
+      "daysOfWeek": ["wednesday"],
+      "interval": 1
+    },
+    "relatedEmails": ["em-008", "em-011"],
+    "relatedFiles": ["f-006"],
+    "categories": ["Marketing", "Sales"]
+  },
+  {
+    "id": "ev-010",
+    "subject": "Fabrikam Webinar Dry Run",
+    "organizer": "u-011",
+    "attendees": [
+      { "userId": "u-003", "response": "accepted" },
+      { "userId": "u-004", "response": "accepted" },
+      { "userId": "u-008", "response": "tentative" }
+    ],
+    "start": "2026-02-10T17:00:00Z",
+    "end": "2026-02-10T18:00:00Z",
+    "location": null,
+    "isOnline": true,
+    "onlineMeetingUrl": "https://teams.microsoft.com/l/meetup/northwindtech-fabrikam-dryrun",
+    "body": "Practice run for the Fabrikam joint webinar (Feb 12). Priya to demo the API integration, Olivia handles intro and Q&A logistics.",
+    "recurrence": null,
+    "relatedEmails": ["em-011"],
+    "relatedFiles": [],
+    "categories": ["Partnership", "Marketing", "Fabrikam"]
+  }
+]

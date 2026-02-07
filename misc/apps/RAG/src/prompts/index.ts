@@ -2,9 +2,9 @@
  * Prompts module - exports system prompt generators.
  */
 
-export { 
+export {
     FlowQuerySystemPrompt,
-    generateFlowQuerySystemPrompt, 
+    generateFlowQuerySystemPrompt,
     generateInterpretationPrompt,
-    getMinimalFlowQueryPrompt 
-} from './FlowQuerySystemPrompt';
+    getMinimalFlowQueryPrompt,
+} from "./FlowQuerySystemPrompt";

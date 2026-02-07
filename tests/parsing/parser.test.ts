@@ -264,6 +264,42 @@ test("Test lookup with JSON array", () => {
     expect(_return.firstChild().value()).toBe(2);
 });
 
+test("Test lookup with reserved keyword property names", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with {end: 1, null: 2, case: 3} as x return x.end, x.null, x.case");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- With\n" +
+            "-- Expression (x)\n" +
+            "--- AssociativeArray\n" +
+            "---- KeyValuePair\n" +
+            "----- String (end)\n" +
+            "----- Expression\n" +
+            "------ Number (1)\n" +
+            "---- KeyValuePair\n" +
+            "----- String (null)\n" +
+            "----- Expression\n" +
+            "------ Number (2)\n" +
+            "---- KeyValuePair\n" +
+            "----- String (case)\n" +
+            "----- Expression\n" +
+            "------ Number (3)\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- Lookup\n" +
+            "---- Identifier (end)\n" +
+            "---- Reference (x)\n" +
+            "-- Expression\n" +
+            "--- Lookup\n" +
+            "---- Identifier (null)\n" +
+            "---- Reference (x)\n" +
+            "-- Expression\n" +
+            "--- Lookup\n" +
+            "---- Identifier (case)\n" +
+            "---- Reference (x)"
+    );
+});
+
 test("Test load with post", () => {
     const parser = new Parser();
     const ast = parser.parse(

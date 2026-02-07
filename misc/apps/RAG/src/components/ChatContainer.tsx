@@ -3,6 +3,7 @@ import { Spinner } from '@fluentui/react-components';
 import { ChatMessage, Message } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { FlowQueryAgent } from './FlowQueryAgent';
+import { getMaxRetries } from './ApiKeySettings';
 import './ChatContainer.css';
 
 interface ChatContainerProps {
@@ -95,12 +96,12 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
             }));
 
             let fullContent = '';
-            let adaptiveCardFromStream: Record<string, unknown> | undefined;
             
-            for await (const { chunk, done, adaptiveCard, newMessage } of this.agent.processQueryStream(content, {
+            for await (const { chunk, done, newMessage } of this.agent.processQueryStream(content, {
                 systemPrompt: systemPrompt ?? 'You are a helpful assistant. Be concise and informative in your responses.',
                 conversationHistory: conversationHistory.slice(0, -1),
-                showIntermediateSteps
+                showIntermediateSteps,
+                maxRetries: getMaxRetries(),
             })) {
                 // If newMessage flag is set, finalize current message and start a new one
                 if (newMessage) {
@@ -134,15 +135,11 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
                     }));
                 }
                 
-                if (adaptiveCard) {
-                    adaptiveCardFromStream = adaptiveCard;
-                }
-                
                 if (done) {
                     this.setState(prev => ({
                         messages: prev.messages.map(msg => 
                             msg.id === currentMessageId 
-                                ? { ...msg, isStreaming: false, adaptiveCard: adaptiveCardFromStream }
+                                ? { ...msg, isStreaming: false }
                                 : msg
                         )
                     }));

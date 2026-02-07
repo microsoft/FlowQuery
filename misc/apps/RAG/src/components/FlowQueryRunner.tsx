@@ -30,39 +30,9 @@ import {
     Checkmark24Regular,
 } from '@fluentui/react-icons';
 import { FlowQueryExecutor, FlowQueryExecutionResult } from '../utils/FlowQueryExecutor';
-import { AdaptiveCardRenderer, isAdaptiveCard } from './AdaptiveCardRenderer';
 import './FlowQueryRunner.css';
 
 const flowQueryExecutor = new FlowQueryExecutor();
-
-/**
- * Extract an Adaptive Card from the execution results.
- * Searches for Adaptive Cards at the top level or within any property of result objects.
- */
-function extractAdaptiveCardFromResults(results: unknown[] | undefined): Record<string, unknown> | undefined {
-    if (!results || !Array.isArray(results)) {
-        return undefined;
-    }
-
-    for (const result of results) {
-        // Check if the result itself is an Adaptive Card
-        if (isAdaptiveCard(result)) {
-            return result;
-        }
-        
-        // Check if any property of the result object is an Adaptive Card
-        if (typeof result === 'object' && result !== null) {
-            const obj = result as Record<string, unknown>;
-            for (const value of Object.values(obj)) {
-                if (isAdaptiveCard(value)) {
-                    return value as Record<string, unknown>;
-                }
-            }
-        }
-    }
-
-    return undefined;
-}
 
 interface FlowQueryRunnerProps {
     /** Initial query to pre-populate the input */
@@ -222,9 +192,6 @@ export class FlowQueryRunner extends Component<FlowQueryRunnerProps, FlowQueryRu
 
         const resultCount = result.results?.length || 0;
         const resultsJson = JSON.stringify(result.results, null, 2);
-        
-        // Check if the result contains an Adaptive Card
-        const adaptiveCard = extractAdaptiveCardFromResults(result.results);
 
         return (
             <div className="flowquery-results-container">
@@ -247,17 +214,11 @@ export class FlowQueryRunner extends Component<FlowQueryRunnerProps, FlowQueryRu
                         />
                     </Tooltip>
                 </div>
-                {adaptiveCard ? (
-                    <div className="flowquery-adaptive-card-results">
-                        <AdaptiveCardRenderer card={adaptiveCard} />
-                    </div>
-                ) : (
-                    <div className="flowquery-results">
-                        <pre className="flowquery-results-content">
-                            {resultsJson}
-                        </pre>
-                    </div>
-                )}
+                <div className="flowquery-results">
+                    <pre className="flowquery-results-content">
+                        {resultsJson}
+                    </pre>
+                </div>
             </div>
         );
     }

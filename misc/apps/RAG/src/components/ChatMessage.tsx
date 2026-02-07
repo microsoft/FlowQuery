@@ -1,8 +1,9 @@
 import React, { Component } from 'react';
 import { Body1, Spinner, Button, Tooltip } from '@fluentui/react-components';
 import { PersonFilled, BotFilled, Play16Regular } from '@fluentui/react-icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { FlowQueryRunner } from './FlowQueryRunner';
-import { AdaptiveCardRenderer, isAdaptiveCard } from './AdaptiveCardRenderer';
 import './ChatMessage.css';
 
 export interface Message {
@@ -11,10 +12,6 @@ export interface Message {
     content: string;
     timestamp: Date;
     isStreaming?: boolean;
-    /**
-     * Optional Adaptive Card payload to render instead of or alongside text content
-     */
-    adaptiveCard?: Record<string, unknown>;
 }
 
 interface ChatMessageProps {
@@ -39,34 +36,9 @@ function extractFlowQueryBlocks(content: string): string[] {
     return matches;
 }
 
-/**
- * Extract JSON blocks from content and check if any are Adaptive Cards
- */
-function extractAdaptiveCards(content: string): Record<string, unknown>[] {
-    const cards: Record<string, unknown>[] = [];
-    
-    // Look for ```json blocks that might contain Adaptive Cards
-    const jsonRegex = /```json\n([\s\S]*?)```/gi;
-    let match;
-    
-    while ((match = jsonRegex.exec(content)) !== null) {
-        try {
-            const parsed = JSON.parse(match[1]);
-            if (isAdaptiveCard(parsed)) {
-                cards.push(parsed);
-            }
-        } catch {
-            // Not valid JSON, skip
-        }
-    }
-    
-    return cards;
-}
-
 interface MessageContentProps {
     content: string;
     isStreaming?: boolean;
-    adaptiveCard?: Record<string, unknown>;
     showFlowQuery?: boolean;
 }
 
@@ -94,49 +66,28 @@ class MessageContent extends Component<MessageContentProps, MessageContentState>
         return extractFlowQueryBlocks(this.props.content);
     }
 
-    private getEmbeddedAdaptiveCards(): Record<string, unknown>[] {
-        return extractAdaptiveCards(this.props.content);
-    }
-
-    private getAllAdaptiveCards(): Record<string, unknown>[] {
-        const cards: Record<string, unknown>[] = [];
-        if (this.props.adaptiveCard) {
-            cards.push(this.props.adaptiveCard);
-        }
-        cards.push(...this.getEmbeddedAdaptiveCards());
-        return cards;
-    }
-
     render() {
         const { content, isStreaming, showFlowQuery } = this.props;
         const { runnerQuery } = this.state;
         
         const flowQueryBlocks = this.getFlowQueryBlocks();
-        const allAdaptiveCards = this.getAllAdaptiveCards();
 
-        // If there are no FlowQuery blocks, render plain content (possibly with Adaptive Cards)
+        // If there are no FlowQuery blocks, render markdown content
         if (flowQueryBlocks.length === 0) {
             return (
                 <>
-                    {content}
-                    {allAdaptiveCards.map((card, index) => (
-                        <AdaptiveCardRenderer key={`card-${index}`} card={card} />
-                    ))}
+                    <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>
                     {isStreaming && <Spinner size="tiny" className="streaming-indicator" />}
                 </>
             );
         }
 
-        // If FlowQuery blocks are hidden, render content without code blocks
+        // If FlowQuery blocks are hidden, render content without FlowQuery code blocks as markdown
         if (!showFlowQuery) {
-            // Remove FlowQuery code blocks from content for display
             const contentWithoutFlowQuery = content.replace(/```flowquery\n[\s\S]*?```/gi, '').trim();
             return (
                 <>
-                    {contentWithoutFlowQuery}
-                    {allAdaptiveCards.map((card, index) => (
-                        <AdaptiveCardRenderer key={`card-${index}`} card={card} />
-                    ))}
+                    <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentWithoutFlowQuery}</ReactMarkdown></div>
                     {isStreaming && <Spinner size="tiny" className="streaming-indicator" />}
                 </>
             );
@@ -150,18 +101,17 @@ class MessageContent extends Component<MessageContentProps, MessageContentState>
         let partIndex = 0;
 
         while ((match = regex.exec(content)) !== null) {
-            // Add text before the code block
+            // Add text before the code block as markdown
             if (match.index > lastIndex) {
+                const textSegment = content.slice(lastIndex, match.index);
                 parts.push(
-                    <span key={`text-${partIndex}`}>
-                        {content.slice(lastIndex, match.index)}
-                    </span>
+                    <div key={`text-${partIndex}`} className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{textSegment}</ReactMarkdown></div>
                 );
             }
 
             const query = match[1]?.trim() || '';
 
-            // Add the code block with a run button and </> link
+            // Add the FlowQuery code block with a run button
             parts.push(
                 <div key={`code-${partIndex}`} className="flowquery-code-block">
                     <div className="flowquery-code-header">
@@ -190,21 +140,17 @@ class MessageContent extends Component<MessageContentProps, MessageContentState>
             partIndex++;
         }
 
-        // Add remaining text after the last code block
+        // Add remaining text after the last code block as markdown
         if (lastIndex < content.length) {
+            const remainingText = content.slice(lastIndex);
             parts.push(
-                <span key={`text-${partIndex}`}>
-                    {content.slice(lastIndex)}
-                </span>
+                <div key={`text-${partIndex}`} className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{remainingText}</ReactMarkdown></div>
             );
         }
 
         return (
             <>
                 {parts}
-                {allAdaptiveCards.map((card, index) => (
-                    <AdaptiveCardRenderer key={`card-${index}`} card={card} />
-                ))}
                 {isStreaming && <Spinner size="tiny" className="streaming-indicator" />}
                 {runnerQuery !== null && (
                     <FlowQueryRunner
@@ -275,7 +221,6 @@ export class ChatMessage extends Component<ChatMessageProps, ChatMessageState> {
                         <MessageContent 
                             content={message.content} 
                             isStreaming={message.isStreaming}
-                            adaptiveCard={message.adaptiveCard}
                             showFlowQuery={showFlowQuery}
                         />
                     </div>

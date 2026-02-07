@@ -27,11 +27,15 @@ import { Settings24Regular, Key24Regular, Checkmark24Regular } from '@fluentui/r
 const STORAGE_KEY = 'flowquery_openai_api_key';
 const ORG_STORAGE_KEY = 'flowquery_openai_org_id';
 const MODEL_STORAGE_KEY = 'flowquery_openai_model';
+const MAX_RETRIES_STORAGE_KEY = 'flowquery_max_retries';
+
+const DEFAULT_MAX_RETRIES = 2;
 
 export interface ApiKeyConfig {
     apiKey: string;
     organizationId?: string;
     model?: string;
+    maxRetries?: number;
 }
 
 /**
@@ -41,10 +45,12 @@ export function getStoredApiConfig(): ApiKeyConfig | null {
     const apiKey = localStorage.getItem(STORAGE_KEY);
     if (!apiKey) return null;
     
+    const storedRetries = localStorage.getItem(MAX_RETRIES_STORAGE_KEY);
     return {
         apiKey,
         organizationId: localStorage.getItem(ORG_STORAGE_KEY) || undefined,
         model: localStorage.getItem(MODEL_STORAGE_KEY) || undefined,
+        maxRetries: storedRetries ? parseInt(storedRetries, 10) : DEFAULT_MAX_RETRIES,
     };
 }
 
@@ -62,6 +68,14 @@ export function getApiKey(): string | null {
     return localStorage.getItem(STORAGE_KEY);
 }
 
+/**
+ * Get the stored max retries setting from localStorage.
+ */
+export function getMaxRetries(): number {
+    const stored = localStorage.getItem(MAX_RETRIES_STORAGE_KEY);
+    return stored ? parseInt(stored, 10) : DEFAULT_MAX_RETRIES;
+}
+
 interface ApiKeySettingsProps {
     onSave?: (config: ApiKeyConfig) => void;
 }
@@ -71,6 +85,7 @@ interface ApiKeySettingsState {
     apiKey: string;
     organizationId: string;
     model: string;
+    maxRetries: string;
     saved: boolean;
 }
 
@@ -82,6 +97,7 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
             apiKey: '',
             organizationId: '',
             model: '',
+            maxRetries: String(DEFAULT_MAX_RETRIES),
             saved: false,
         };
     }
@@ -94,6 +110,7 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
                 apiKey: config?.apiKey || '',
                 organizationId: config?.organizationId || '',
                 model: config?.model || '',
+                maxRetries: String(config?.maxRetries ?? DEFAULT_MAX_RETRIES),
                 saved: false,
             });
         }
@@ -104,7 +121,7 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
     };
 
     handleSave = (): void => {
-        const { apiKey, organizationId, model } = this.state;
+        const { apiKey, organizationId, model, maxRetries } = this.state;
         const { onSave } = this.props;
 
         // Save to localStorage
@@ -126,10 +143,15 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
             localStorage.removeItem(MODEL_STORAGE_KEY);
         }
 
+        const parsedRetries = parseInt(maxRetries, 10);
+        const validRetries = isNaN(parsedRetries) ? DEFAULT_MAX_RETRIES : Math.max(0, Math.min(10, parsedRetries));
+        localStorage.setItem(MAX_RETRIES_STORAGE_KEY, String(validRetries));
+
         const config: ApiKeyConfig = {
             apiKey,
             organizationId: organizationId || undefined,
             model: model || undefined,
+            maxRetries: validRetries,
         };
 
         this.setState({ saved: true });
@@ -143,10 +165,12 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(ORG_STORAGE_KEY);
         localStorage.removeItem(MODEL_STORAGE_KEY);
+        localStorage.removeItem(MAX_RETRIES_STORAGE_KEY);
         this.setState({
             apiKey: '',
             organizationId: '',
             model: '',
+            maxRetries: String(DEFAULT_MAX_RETRIES),
             saved: false,
         });
     };
@@ -167,8 +191,12 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
         this.setState({ model: data.value });
     };
 
+    handleMaxRetriesChange = (_: unknown, data: { value: string }): void => {
+        this.setState({ maxRetries: data.value });
+    };
+
     render(): React.ReactNode {
-        const { open, apiKey, organizationId, model, saved } = this.state;
+        const { open, apiKey, organizationId, model, maxRetries, saved } = this.state;
         const isConfigured = hasApiKey();
 
         return (
@@ -215,6 +243,17 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
                                     value={model}
                                     onChange={this.handleModelChange}
                                     placeholder="gpt-4o-mini"
+                                />
+                            </Field>
+
+                            <Field label="Max Query Retries" hint={`Number of retry attempts when a query fails (0–10, default ${DEFAULT_MAX_RETRIES})`}>
+                                <Input
+                                    type="number"
+                                    min="0"
+                                    max="10"
+                                    value={maxRetries}
+                                    onChange={this.handleMaxRetriesChange}
+                                    placeholder={String(DEFAULT_MAX_RETRIES)}
                                 />
                             </Field>
 

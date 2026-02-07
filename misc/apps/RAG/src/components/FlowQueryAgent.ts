@@ -11,7 +11,6 @@ import { generateInterpretationPrompt } from "../prompts";
 import { FlowQueryExecutionResult, FlowQueryExecutor } from "../utils/FlowQueryExecutor";
 import { FlowQueryExtraction, extractFlowQuery } from "../utils/FlowQueryExtractor";
 import { LlmOptions, llm, llmStream } from "../utils/Llm";
-import { isAdaptiveCard } from "./AdaptiveCardRenderer";
 
 /**
  * Represents a step in the agent's execution process.
@@ -318,7 +317,6 @@ export class FlowQueryAgent {
             step: AgentStep["type"];
             done: boolean;
             steps?: AgentStep[];
-            adaptiveCard?: Record<string, unknown>;
             newMessage?: boolean;
         },
         void,
@@ -496,15 +494,11 @@ export class FlowQueryAgent {
                 extraction.query = currentQuery;
             }
 
-            // Check if the result contains an Adaptive Card
-            const adaptiveCard = this.extractAdaptiveCardFromResults(executionResult.results);
-
             // Step 4: Stream the interpretation
             const interpretationPrompt = this.buildInterpretationPrompt(
                 userQuery,
                 extraction.query!,
-                executionResult,
-                !!adaptiveCard
+                executionResult
             );
 
             let interpretationContent = "";
@@ -527,7 +521,7 @@ export class FlowQueryAgent {
                 timestamp: new Date(),
             });
 
-            yield { chunk: "", step: "interpretation", done: true, steps, adaptiveCard };
+            yield { chunk: "", step: "interpretation", done: true, steps };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             yield {
@@ -540,45 +534,12 @@ export class FlowQueryAgent {
     }
 
     /**
-     * Extract an Adaptive Card from the execution results.
-     * Checks if any result is an Adaptive Card (type: "AdaptiveCard") and returns it.
-     * Searches for Adaptive Cards at the top level or within any property of result objects.
-     */
-    private extractAdaptiveCardFromResults(
-        results: unknown[] | undefined
-    ): Record<string, unknown> | undefined {
-        if (!results || !Array.isArray(results)) {
-            return undefined;
-        }
-
-        for (const result of results) {
-            // Check if the result itself is an Adaptive Card
-            if (isAdaptiveCard(result)) {
-                return result;
-            }
-
-            // Check if any property of the result object is an Adaptive Card
-            if (typeof result === "object" && result !== null) {
-                const obj = result as Record<string, unknown>;
-                for (const value of Object.values(obj)) {
-                    if (isAdaptiveCard(value)) {
-                        return value as Record<string, unknown>;
-                    }
-                }
-            }
-        }
-
-        return undefined;
-    }
-
-    /**
      * Build the prompt for the interpretation phase.
      */
     private buildInterpretationPrompt(
         originalQuery: string,
         flowQuery: string,
-        executionResult: FlowQueryExecutionResult,
-        hasAdaptiveCard: boolean = false
+        executionResult: FlowQueryExecutionResult
     ): string {
         const resultsJson = JSON.stringify(executionResult.results, null, 2);
         const resultCount = executionResult.results?.length || 0;
@@ -598,11 +559,7 @@ ${resultsJson}
 
 `;
 
-        if (hasAdaptiveCard) {
-            prompt += `The result is an Adaptive Card that will be rendered automatically in the UI. Please provide a brief introduction or context for the data shown in the card, but do NOT recreate the table or list the data in your response since the card will display it visually.`;
-        } else {
-            prompt += `Please interpret these results and provide a helpful response to the user's original question.`;
-        }
+        prompt += `Please interpret these results and provide a helpful response to the user's original question.`;
 
         return prompt;
     }

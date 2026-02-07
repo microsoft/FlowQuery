@@ -7,13 +7,6 @@ export { ApiKeySettings } from "./ApiKeySettings";
 // FlowQuery Runner
 export { FlowQueryRunner } from "./FlowQueryRunner";
 
-// Adaptive Card Renderer
-export {
-    AdaptiveCardRenderer,
-    isAdaptiveCard,
-    normalizeAdaptiveCard,
-} from "./AdaptiveCardRenderer";
-
 // FlowQuery Agent
 export { FlowQueryAgent } from "./FlowQueryAgent";
 export type {
@@ -25,4 +18,3 @@ export type {
 
 // Types
 export type { Message } from "./ChatMessage";
-export type { AdaptiveCardRendererProps } from "./AdaptiveCardRenderer";

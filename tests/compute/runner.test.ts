@@ -370,6 +370,38 @@ test("Test replace function", async () => {
     expect(results[0]).toEqual({ replace: "hexxo" });
 });
 
+test("Test string_distance function", async () => {
+    const runner = new Runner('RETURN string_distance("kitten", "sitting") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].dist).toBeCloseTo(3 / 7, 10);
+});
+
+test("Test string_distance function with identical strings", async () => {
+    const runner = new Runner('RETURN string_distance("hello", "hello") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 0 });
+});
+
+test("Test string_distance function with empty string", async () => {
+    const runner = new Runner('RETURN string_distance("", "abc") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 1 });
+});
+
+test("Test string_distance function with both empty strings", async () => {
+    const runner = new Runner('RETURN string_distance("", "") as dist');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ dist: 0 });
+});
+
 test("Test f-string with escaped braces", async () => {
     const runner = new Runner(
         'with range(1,3) as numbers RETURN f"hello {{sum(n in numbers | n)}}" as f'
@@ -1005,6 +1037,85 @@ test("Test circular graph pattern with variable length should throw error", asyn
     }).rejects.toThrow("Circular relationship detected");
 });
 
+test("Test multi-hop match with min hops constraint *1..", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*1..]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    // *1.. means at least 1 hop, so no zero-hop (self) matches
+    // Person 1: 1-hop to P2, 2-hop to P3, 3-hop to P4
+    // Person 2: 1-hop to P3, 2-hop to P4
+    // Person 3: 1-hop to P4
+    // Person 4: no outgoing edges
+    expect(results.length).toBe(6);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(results[3]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    expect(results[4]).toEqual({ name1: "Person 2", name2: "Person 4" });
+    expect(results[5]).toEqual({ name1: "Person 3", name2: "Person 4" });
+});
+
+test("Test multi-hop match with min hops constraint *2..", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*2..]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    // *2.. means at least 2 hops
+    // Person 1: 2-hop to P3, 3-hop to P4
+    // Person 2: 2-hop to P4
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 4" });
+});
+
 test("Test multi-hop match with variable length relationships", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {
@@ -1601,4 +1712,226 @@ test("Test match with node reference passed through WITH", async () => {
     expect(results.length).toBe(2);
     expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
     expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
+});
+
+test("Test match with node reference reuse with label", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:RefLabelUser) AS {
+            UNWIND [
+                {id: 1, name: 'Alice', jobTitle: 'CEO'},
+                {id: 2, name: 'Bob', jobTitle: 'VP'},
+                {id: 3, name: 'Carol', jobTitle: 'VP'},
+                {id: 4, name: 'Dave', jobTitle: 'Engineer'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:RefLabelUser)-[:MANAGES]-(:RefLabelUser) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    // Uses (ceo:RefLabelUser) with label in both MATCH clauses.
+    // Previously this would create a new node instead of a NodeReference.
+    const match = new Runner(`
+        MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr1:RefLabelUser)
+        WHERE ceo.jobTitle = 'CEO'
+        WITH ceo, dr1
+        MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr2:RefLabelUser)
+        WHERE dr1.name <> dr2.name
+        RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
+    expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
+});
+
+test("Test WHERE with IS NULL", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}] as person
+        with person.name as name, person.age as age
+        where age IS NULL
+        return name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Bob" });
+});
+
+test("Test WHERE with IS NOT NULL", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}] as person
+        with person.name as name, person.age as age
+        where age IS NOT NULL
+        return name, age
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Alice", age: 30 });
+});
+
+test("Test WHERE with IS NOT NULL filters multiple results", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob'}, {name: 'Carol', age: 25}] as person
+        with person.name as name, person.age as age
+        where age IS NOT NULL
+        return name, age
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice", age: 30 });
+    expect(results[1]).toEqual({ name: "Carol", age: 25 });
+});
+
+test("Test WHERE with IN list check", async () => {
+    const runner = new Runner(`
+        unwind range(1, 10) as n
+        with n
+        where n IN [2, 4, 6, 8]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    expect(results.map((r: any) => r.n)).toEqual([2, 4, 6, 8]);
+});
+
+test("Test WHERE with NOT IN list check", async () => {
+    const runner = new Runner(`
+        unwind range(1, 5) as n
+        with n
+        where n NOT IN [2, 4]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results.map((r: any) => r.n)).toEqual([1, 3, 5]);
+});
+
+test("Test WHERE with IN string list", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'cherry', 'date'] as fruit
+        with fruit
+        where fruit IN ['banana', 'date']
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "date"]);
+});
+
+test("Test WHERE with IN combined with AND", async () => {
+    const runner = new Runner(`
+        unwind range(1, 20) as n
+        with n
+        where n IN [1, 5, 10, 15, 20] AND n > 5
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results.map((r: any) => r.n)).toEqual([10, 15, 20]);
+});
+
+test("Test WHERE with CONTAINS", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test WHERE with NOT CONTAINS", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+        with fruit
+        where fruit NOT CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "grape"]);
+});
+
+test("Test WHERE with STARTS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+        with fruit
+        where fruit STARTS WITH 'ap'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "apricot"]);
+});
+
+test("Test WHERE with NOT STARTS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+        with fruit
+        where fruit NOT STARTS WITH 'ap'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "avocado"]);
+});
+
+test("Test WHERE with ENDS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+        with fruit
+        where fruit ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test WHERE with NOT ENDS WITH", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+        with fruit
+        where fruit NOT ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "grape"]);
+});
+
+test("Test WHERE with CONTAINS combined with AND", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'pineapple', 'applesauce', 'banana'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple' AND fruit STARTS WITH 'pine'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("pineapple");
 });

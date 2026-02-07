@@ -419,6 +419,42 @@ class TestRunner:
         assert results[0] == {"replace": "hexxo"}
 
     @pytest.mark.asyncio
+    async def test_string_distance_function(self):
+        """Test string_distance function."""
+        runner = Runner('RETURN string_distance("kitten", "sitting") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["dist"] == pytest.approx(3 / 7)
+
+    @pytest.mark.asyncio
+    async def test_string_distance_identical_strings(self):
+        """Test string_distance function with identical strings."""
+        runner = Runner('RETURN string_distance("hello", "hello") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 0}
+
+    @pytest.mark.asyncio
+    async def test_string_distance_empty_string(self):
+        """Test string_distance function with empty string."""
+        runner = Runner('RETURN string_distance("", "abc") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 1}
+
+    @pytest.mark.asyncio
+    async def test_string_distance_both_empty(self):
+        """Test string_distance function with both empty strings."""
+        runner = Runner('RETURN string_distance("", "") as dist')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"dist": 0}
+
+    @pytest.mark.asyncio
     async def test_f_string_with_escaped_braces(self):
         """Test f-string with escaped braces."""
         runner = Runner(
@@ -1139,6 +1175,99 @@ class TestRunner:
             await match.run()
 
     @pytest.mark.asyncio
+    async def test_multi_hop_match_with_min_hops_constraint_1(self):
+        """Test multi-hop match with min hops constraint *1.."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop1Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop1Person)-[:KNOWS]-(:MinHop1Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:MinHop1Person)-[:KNOWS*1..]->(b:MinHop1Person)
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await match.run()
+        results = match.results
+        # *1.. means at least 1 hop, so no zero-hop (self) matches
+        # Person 1: 1-hop to P2, 2-hop to P3, 3-hop to P4
+        # Person 2: 1-hop to P3, 2-hop to P4
+        # Person 3: 1-hop to P4
+        # Person 4: no outgoing edges
+        assert len(results) == 6
+        assert results[0] == {"name1": "Person 1", "name2": "Person 2"}
+        assert results[1] == {"name1": "Person 1", "name2": "Person 3"}
+        assert results[2] == {"name1": "Person 1", "name2": "Person 4"}
+        assert results[3] == {"name1": "Person 2", "name2": "Person 3"}
+        assert results[4] == {"name1": "Person 2", "name2": "Person 4"}
+        assert results[5] == {"name1": "Person 3", "name2": "Person 4"}
+
+    @pytest.mark.asyncio
+    async def test_multi_hop_match_with_min_hops_constraint_2(self):
+        """Test multi-hop match with min hops constraint *2.."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop2Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop2Person)-[:KNOWS]-(:MinHop2Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:MinHop2Person)-[:KNOWS*2..]->(b:MinHop2Person)
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await match.run()
+        results = match.results
+        # *2.. means at least 2 hops
+        # Person 1: 2-hop to P3, 3-hop to P4
+        # Person 2: 2-hop to P4
+        assert len(results) == 3
+        assert results[0] == {"name1": "Person 1", "name2": "Person 3"}
+        assert results[1] == {"name1": "Person 1", "name2": "Person 4"}
+        assert results[2] == {"name1": "Person 2", "name2": "Person 4"}
+
+    @pytest.mark.asyncio
     async def test_multi_hop_match_with_variable_length_relationships(self):
         """Test multi-hop match with variable length relationships."""
         await Runner(
@@ -1710,3 +1839,239 @@ class TestRunner:
         assert len(results) == 2
         assert results[0] == {"ceo": "Alice", "dr1": "Bob", "dr2": "Carol"}
         assert results[1] == {"ceo": "Alice", "dr1": "Carol", "dr2": "Bob"}
+
+    async def test_match_with_node_reference_reuse_with_label(self):
+        """Test that reusing a node variable with a label creates a NodeReference, not a new node."""
+        await Runner("""
+            CREATE VIRTUAL (:RefLabelUser) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice', jobTitle: 'CEO'},
+                    {id: 2, name: 'Bob', jobTitle: 'VP'},
+                    {id: 3, name: 'Carol', jobTitle: 'VP'},
+                    {id: 4, name: 'Dave', jobTitle: 'Engineer'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:RefLabelUser)-[:MANAGES]-(:RefLabelUser) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3},
+                    {left_id: 2, right_id: 4}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """).run()
+        # Uses (ceo:RefLabelUser) with label in both MATCH clauses.
+        # Previously this would create a new node instead of a NodeReference.
+        runner = Runner("""
+            MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr1:RefLabelUser)
+            WHERE ceo.jobTitle = 'CEO'
+            WITH ceo, dr1
+            MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr2:RefLabelUser)
+            WHERE dr1.name <> dr2.name
+            RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"ceo": "Alice", "dr1": "Bob", "dr2": "Carol"}
+        assert results[1] == {"ceo": "Alice", "dr1": "Carol", "dr2": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_null(self):
+        """Test WHERE with IS NULL."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}] as person
+            with person.name as name, person.age as age
+            where age IS NULL
+            return name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_not_null(self):
+        """Test WHERE with IS NOT NULL."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}] as person
+            with person.name as name, person.age as age
+            where age IS NOT NULL
+            return name, age
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Alice", "age": 30}
+
+    @pytest.mark.asyncio
+    async def test_where_with_is_not_null_multiple_results(self):
+        """Test WHERE with IS NOT NULL filters multiple results."""
+        runner = Runner("""
+            unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}, {name: 'Carol', age: 25}] as person
+            with person.name as name, person.age as age
+            where age IS NOT NULL
+            return name, age
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice", "age": 30}
+        assert results[1] == {"name": "Carol", "age": 25}
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_list_check(self):
+        """Test WHERE with IN list check."""
+        runner = Runner("""
+            unwind range(1, 10) as n
+            with n
+            where n IN [2, 4, 6, 8]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert [r["n"] for r in results] == [2, 4, 6, 8]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_in_list_check(self):
+        """Test WHERE with NOT IN list check."""
+        runner = Runner("""
+            unwind range(1, 5) as n
+            with n
+            where n NOT IN [2, 4]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert [r["n"] for r in results] == [1, 3, 5]
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_string_list(self):
+        """Test WHERE with IN string list."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'cherry', 'date'] as fruit
+            with fruit
+            where fruit IN ['banana', 'date']
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "date"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_combined_with_and(self):
+        """Test WHERE with IN combined with AND."""
+        runner = Runner("""
+            unwind range(1, 20) as n
+            with n
+            where n IN [1, 5, 10, 15, 20] AND n > 5
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert [r["n"] for r in results] == [10, 15, 20]
+
+    @pytest.mark.asyncio
+    async def test_where_with_contains(self):
+        """Test WHERE with CONTAINS."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_contains(self):
+        """Test WHERE with NOT CONTAINS."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
+            with fruit
+            where fruit NOT CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "grape"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_starts_with(self):
+        """Test WHERE with STARTS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+            with fruit
+            where fruit STARTS WITH 'ap'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "apricot"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_starts_with(self):
+        """Test WHERE with NOT STARTS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'apricot', 'banana', 'avocado'] as fruit
+            with fruit
+            where fruit NOT STARTS WITH 'ap'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "avocado"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_ends_with(self):
+        """Test WHERE with ENDS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+            with fruit
+            where fruit ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_ends_with(self):
+        """Test WHERE with NOT ENDS WITH."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'banana', 'grape'] as fruit
+            with fruit
+            where fruit NOT ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "grape"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_contains_combined_with_and(self):
+        """Test WHERE with CONTAINS combined with AND."""
+        runner = Runner("""
+            unwind ['apple', 'pineapple', 'applesauce', 'banana'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple' AND fruit STARTS WITH 'pine'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "pineapple"

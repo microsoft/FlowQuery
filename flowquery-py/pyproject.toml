@@ -1,6 +1,6 @@
 [project]
 name = "flowquery"
-version = "1.0.17"
+version = "1.0.18"
 description = "A declarative query language for data processing pipelines"
 readme = "README.md"
 requires-python = ">=3.10"

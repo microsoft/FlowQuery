@@ -21,6 +21,7 @@ import "./round";
 import "./schema";
 import "./size";
 import "./split";
+import "./string_distance";
 import "./stringify";
 // Import built-in functions to ensure their @FunctionDef decorators run
 import "./sum";

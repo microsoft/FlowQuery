@@ -133,7 +133,7 @@ class Relationship extends ASTNode {
         const followId = isLeft ? "left_id" : "right_id";
         while (findMatch(left_id, hop)) {
             const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
-            if (hop >= this.hops!.min) {
+            if (hop + 1 >= this.hops!.min) {
                 this.setValue(this);
                 if (!this._matchesProperties(hop)) {
                     continue;
@@ -146,6 +146,9 @@ class Relationship extends ASTNode {
                     await this.find(data[followId], hop + 1);
                 }
                 this._matches.pop();
+            } else {
+                // Below minimum hops: traverse the edge without yielding a match
+                await this.find(data[followId], hop + 1);
             }
         }
         // Restore original source node

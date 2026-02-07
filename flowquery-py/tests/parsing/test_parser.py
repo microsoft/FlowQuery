@@ -8,7 +8,9 @@ from flowquery.parsing.functions.function_metadata import FunctionDef
 from flowquery.parsing.operations.match import Match
 from flowquery.parsing.operations.create_relationship import CreateRelationship
 from flowquery.graph.node import Node
+from flowquery.graph.node_reference import NodeReference
 from flowquery.graph.relationship import Relationship
+from flowquery.graph.relationship_reference import RelationshipReference
 
 
 # Test async function for CALL operation parsing test
@@ -821,6 +823,35 @@ class TestParser:
         assert relationship.properties.get("since") is not None
         assert relationship.properties["since"].value() == 2022
 
+    def test_node_reference_with_label_creates_node_reference(self):
+        """Test that reusing a variable with a label creates a NodeReference instead of a new node."""
+        parser = Parser()
+        ast = parser.parse("MATCH (n:Person)-[:KNOWS]->(n:Person) RETURN n")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        first_node = match_op.patterns[0].chain[0]
+        second_node = match_op.patterns[0].chain[2]
+        assert isinstance(first_node, Node)
+        assert first_node.identifier == "n"
+        assert first_node.label == "Person"
+        assert isinstance(second_node, NodeReference)
+        assert second_node.reference.identifier == "n"
+        assert second_node.label == "Person"
+
+    def test_relationship_reference_with_type_creates_relationship_reference(self):
+        """Test that reusing a relationship variable with a type creates a RelationshipReference."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[r:KNOWS]->(b:Person)-[r:KNOWS]->(c:Person) RETURN a, b, c")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        first_rel = match_op.patterns[0].chain[1]
+        second_rel = match_op.patterns[0].chain[3]
+        assert isinstance(first_rel, Relationship)
+        assert first_rel.identifier == "r"
+        assert first_rel.type == "KNOWS"
+        assert isinstance(second_rel, RelationshipReference)
+        assert second_rel.type == "KNOWS"
+
     def test_case_statement_with_keywords_as_identifiers(self):
         """Test that CASE/WHEN/THEN/ELSE/END are not treated as identifiers."""
         parser = Parser()
@@ -829,3 +860,175 @@ class TestParser:
         assert "When" in ast.print()
         assert "Then" in ast.print()
         assert "Else" in ast.print()
+
+    def test_where_with_in_list_check(self):
+        """Test WHERE with IN list check."""
+        parser = Parser()
+        ast = parser.parse("with 1 as n where n IN [1, 2, 3] return n")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (n)\n"
+            "--- Number (1)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- In\n"
+            "---- Reference (n)\n"
+            "---- JSONArray\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "----- Expression\n"
+            "------ Number (3)\n"
+            "- Return\n"
+            "-- Expression (n)\n"
+            "--- Reference (n)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_in_list_check(self):
+        """Test WHERE with NOT IN list check."""
+        parser = Parser()
+        ast = parser.parse("with 4 as n where n NOT IN [1, 2, 3] return n")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (n)\n"
+            "--- Number (4)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotIn\n"
+            "---- Reference (n)\n"
+            "---- JSONArray\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "----- Expression\n"
+            "------ Number (3)\n"
+            "- Return\n"
+            "-- Expression (n)\n"
+            "--- Reference (n)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_contains(self):
+        """Test WHERE with CONTAINS."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s CONTAINS 'ell' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- Contains\n"
+            "---- Reference (s)\n"
+            "---- String (ell)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_contains(self):
+        """Test WHERE with NOT CONTAINS."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT CONTAINS 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotContains\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_starts_with(self):
+        """Test WHERE with STARTS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s STARTS WITH 'hel' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- StartsWith\n"
+            "---- Reference (s)\n"
+            "---- String (hel)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_starts_with(self):
+        """Test WHERE with NOT STARTS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT STARTS WITH 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotStartsWith\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_ends_with(self):
+        """Test WHERE with ENDS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s ENDS WITH 'llo' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- EndsWith\n"
+            "---- Reference (s)\n"
+            "---- String (llo)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_ends_with(self):
+        """Test WHERE with NOT ENDS WITH."""
+        parser = Parser()
+        ast = parser.parse("with 'hello' as s where s NOT ENDS WITH 'xyz' return s")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (s)\n"
+            "--- String (hello)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotEndsWith\n"
+            "---- Reference (s)\n"
+            "---- String (xyz)\n"
+            "- Return\n"
+            "-- Expression (s)\n"
+            "--- Reference (s)"
+        )
+        assert ast.print() == expected

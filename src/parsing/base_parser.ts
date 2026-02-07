@@ -9,7 +9,7 @@ import Tokenizer from "../tokenization/tokenizer";
  */
 class BaseParser {
     private tokens: Token[] = <Token[]>[];
-    private tokenIndex: number = 0;
+    protected tokenIndex: number = 0;
 
     constructor(tokens: Token[] | null = null) {
         if (tokens !== null) {

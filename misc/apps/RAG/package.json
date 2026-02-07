@@ -6,7 +6,8 @@
   "scripts": {
     "start": "webpack serve --mode development",
     "build": "webpack --mode production",
-    "dev": "webpack serve --mode development --hot"
+    "dev": "webpack serve --mode development --hot",
+    "test": "jest"
   },
   "keywords": [
     "rag",
@@ -20,17 +21,20 @@
     "@fluentui/react-icons": "^2.0.316",
     "adaptivecards": "^3.0.5",
     "adaptivecards-templating": "^2.3.1",
-    "flowquery": "^1.0.16",
+    "flowquery": "^1.0.22",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "css-loader": "^7.1.2",
     "html-webpack-plugin": "^5.6.5",
+    "jest": "^29.7.0",
     "style-loader": "^4.0.0",
+    "ts-jest": "^29.1.2",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2",

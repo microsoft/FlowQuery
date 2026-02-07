@@ -1,10 +1,14 @@
 /**
  * FlowQuery Executor Utility
- * 
+ *
  * Executes FlowQuery statements and handles errors gracefully.
  */
+import { FlowQuery } from "flowquery";
 
-import { FlowQuery } from 'flowquery';
+import { initializePlugins } from "../plugins";
+
+// Ensure all plugins are registered
+initializePlugins();
 
 /**
  * Result of executing a FlowQuery statement.
@@ -24,7 +28,7 @@ export interface FlowQueryExecutionResult {
 
 /**
  * FlowQuery Executor class for executing FlowQuery statements.
- * 
+ *
  * @example
  * ```typescript
  * const executor = new FlowQueryExecutor();
@@ -49,52 +53,52 @@ export class FlowQueryExecutor {
 
     /**
      * Execute a FlowQuery statement and return the results.
-     * 
+     *
      * @param query - The FlowQuery statement to execute
      * @returns The execution result including success status, results or error
      */
     async execute(query: string): Promise<FlowQueryExecutionResult> {
         const startTime = performance.now();
-        
+
         try {
             // Validate the query is not empty
-            if (!query || query.trim() === '') {
+            if (!query || query.trim() === "") {
                 return {
                     success: false,
                     query,
-                    error: 'Query cannot be empty',
-                    executionTime: performance.now() - startTime
+                    error: "Query cannot be empty",
+                    executionTime: performance.now() - startTime,
                 };
             }
 
             // Create a runner and execute the query
             const runner = new FlowQuery(query);
             await runner.run();
-            
+
             // Get the results
             const results = runner.results;
-            
+
             return {
                 success: true,
                 query,
                 results: Array.isArray(results) ? results : [results],
-                executionTime: performance.now() - startTime
+                executionTime: performance.now() - startTime,
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            
+
             return {
                 success: false,
                 query,
                 error: errorMessage,
-                executionTime: performance.now() - startTime
+                executionTime: performance.now() - startTime,
             };
         }
     }
 
     /**
      * Format execution results for display or LLM consumption.
-     * 
+     *
      * @param result - The execution result to format
      * @param maxItems - Maximum number of items to include (uses default if not specified)
      * @returns A formatted string representation of the results
@@ -109,21 +113,21 @@ export class FlowQueryExecutor {
         const results = result.results || [];
         const totalCount = results.length;
         const displayResults = results.slice(0, limit);
-        
+
         let output = `Execution successful (${result.executionTime.toFixed(2)}ms)\n`;
         output += `Total results: ${totalCount}\n\n`;
-        
+
         if (totalCount === 0) {
-            output += 'No results returned.';
+            output += "No results returned.";
         } else {
-            output += 'Results:\n';
+            output += "Results:\n";
             output += JSON.stringify(displayResults, null, 2);
-            
+
             if (totalCount > limit) {
                 output += `\n\n... and ${totalCount - limit} more results`;
             }
         }
-        
+
         return output;
     }
 }

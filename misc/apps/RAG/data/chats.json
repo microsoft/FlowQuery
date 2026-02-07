@@ -1,0 +1,302 @@
+[
+  {
+    "id": "ch-001",
+    "topic": "Project Aurora",
+    "type": "channel",
+    "teamName": "Product & Engineering",
+    "members": ["u-002", "u-003", "u-005", "u-006", "u-007", "u-008", "u-009"],
+    "messages": [
+      {
+        "id": "msg-001",
+        "from": "u-008",
+        "timestamp": "2026-01-10T09:15:00Z",
+        "body": "Hey team! Mia just shared the Aurora mockups. They look amazing. Let's review before the design meeting Tuesday.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-005", "u-009"] }],
+        "mentions": ["u-009"],
+        "relatedFiles": ["f-003"]
+      },
+      {
+        "id": "msg-002",
+        "from": "u-005",
+        "timestamp": "2026-01-10T09:32:00Z",
+        "body": "Just looked through them - the drag-and-drop widget approach is really clean. I think we can leverage the existing React DnD library for that. Should be straightforward.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-009", "u-008"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-003",
+        "from": "u-009",
+        "timestamp": "2026-01-10T09:40:00Z",
+        "body": "Thanks Emily! I designed the grid system with 12-column breakpoints so it maps well to a component-based layout. Happy to walk through the interaction specs.",
+        "reactions": [],
+        "mentions": ["u-005"]
+      },
+      {
+        "id": "msg-004",
+        "from": "u-002",
+        "timestamp": "2026-01-10T10:05:00Z",
+        "body": "Great collaboration you two. @Liam, can you make sure we have story points estimated for the frontend work before sprint planning Monday?",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-008"] }],
+        "mentions": ["u-008"]
+      },
+      {
+        "id": "msg-005",
+        "from": "u-008",
+        "timestamp": "2026-01-10T10:08:00Z",
+        "body": "Will do. I'll break it into epics: widget framework, chart components, real-time data layer, and settings/preferences.",
+        "reactions": [],
+        "mentions": []
+      }
+    ]
+  },
+  {
+    "id": "ch-002",
+    "topic": "DevOps & Infrastructure",
+    "type": "channel",
+    "teamName": "Engineering",
+    "members": ["u-002", "u-005", "u-006", "u-007", "u-012"],
+    "messages": [
+      {
+        "id": "msg-006",
+        "from": "u-007",
+        "timestamp": "2026-01-08T11:00:00Z",
+        "body": "Migration plan for AKS is shared in the Engineering folder. @David, can you review the CosmosDB connection string migration section? Want to make sure the failover logic is right.",
+        "reactions": [],
+        "mentions": ["u-006"],
+        "relatedFiles": ["f-004"]
+      },
+      {
+        "id": "msg-007",
+        "from": "u-006",
+        "timestamp": "2026-01-08T11:25:00Z",
+        "body": "Looking at it now. One thing - we should use managed identity instead of connection strings for the new cluster. I'll update the Terraform configs.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-007", "u-012"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-008",
+        "from": "u-012",
+        "timestamp": "2026-01-08T11:45:00Z",
+        "body": "Good call David. I've already set up the managed identity in Azure AD for the staging subscription. I'll send you the resource IDs.",
+        "reactions": [{ "type": "heart", "users": ["u-006"] }],
+        "mentions": ["u-006"]
+      },
+      {
+        "id": "msg-009",
+        "from": "u-007",
+        "timestamp": "2026-01-08T12:00:00Z",
+        "body": "Perfect teamwork 🎉 Updated the plan to reflect managed identity approach. The staging migration window is confirmed for Jan 20-24. I'll send a calendar invite.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-002", "u-006", "u-012"] }],
+        "mentions": [],
+        "relatedEvents": ["ev-005"]
+      }
+    ]
+  },
+  {
+    "id": "ch-003",
+    "topic": null,
+    "type": "oneOnOne",
+    "teamName": null,
+    "members": ["u-004", "u-010"],
+    "messages": [
+      {
+        "id": "msg-010",
+        "from": "u-010",
+        "timestamp": "2026-01-09T14:50:00Z",
+        "body": "James, just got off the call with Contoso. They're in! 200 seats. 🎉",
+        "reactions": [{ "type": "celebrate", "users": ["u-004"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-011",
+        "from": "u-004",
+        "timestamp": "2026-01-09T14:52:00Z",
+        "body": "That's incredible Ryan!! Best news all week. Can you send me the details over email so I can loop in Sarah and Marcus?",
+        "reactions": [],
+        "mentions": []
+      },
+      {
+        "id": "msg-012",
+        "from": "u-010",
+        "timestamp": "2026-01-09T14:55:00Z",
+        "body": "Sending now. They need SSO scoping and a data residency conversation. I told them we'd get back to them by end of next week.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-004"] }],
+        "mentions": [],
+        "relatedEmails": ["em-005"]
+      }
+    ]
+  },
+  {
+    "id": "ch-004",
+    "topic": "Security & Compliance",
+    "type": "channel",
+    "teamName": "Engineering",
+    "members": ["u-002", "u-005", "u-006", "u-007", "u-012"],
+    "messages": [
+      {
+        "id": "msg-013",
+        "from": "u-012",
+        "timestamp": "2026-01-13T09:30:00Z",
+        "body": "Heads up team - just sent the Q4 security audit findings via email. Three items need attention within 14 days. Most critical: npm CVEs in the frontend build.",
+        "reactions": [],
+        "mentions": [],
+        "relatedEmails": ["em-009"],
+        "relatedFiles": ["f-007"]
+      },
+      {
+        "id": "msg-014",
+        "from": "u-005",
+        "timestamp": "2026-01-13T09:45:00Z",
+        "body": "I saw the report. Two of the three CVEs are in transitive dependencies. I can bump the parent packages and run the test suite today.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-012", "u-002"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-015",
+        "from": "u-007",
+        "timestamp": "2026-01-13T10:00:00Z",
+        "body": "I'll handle the TLS 1.0 deprecation on the legacy gateway. Should be a config change + testing. @Noah, can you verify from the network side after I push?",
+        "reactions": [],
+        "mentions": ["u-012"]
+      },
+      {
+        "id": "msg-016",
+        "from": "u-012",
+        "timestamp": "2026-01-13T10:05:00Z",
+        "body": "Absolutely. I'll set up the TLS scanner to validate. For the service account permissions, I can tighten those in Azure AD this afternoon - just need Marcus to approve the scope changes.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-002"] }],
+        "mentions": ["u-002"]
+      },
+      {
+        "id": "msg-017",
+        "from": "u-002",
+        "timestamp": "2026-01-13T10:12:00Z",
+        "body": "Approved. Go ahead Noah. And let's add the security items to sprint 25 backlog. @Liam can you create the tickets?",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-012", "u-008"] }],
+        "mentions": ["u-008"]
+      }
+    ]
+  },
+  {
+    "id": "ch-005",
+    "topic": null,
+    "type": "oneOnOne",
+    "teamName": null,
+    "members": ["u-003", "u-009"],
+    "messages": [
+      {
+        "id": "msg-018",
+        "from": "u-003",
+        "timestamp": "2026-01-10T09:00:00Z",
+        "body": "Mia, the mockups look fantastic! Quick question - did we consider the accessibility requirements for the color contrast in dark mode?",
+        "reactions": [],
+        "mentions": [],
+        "relatedFiles": ["f-003"]
+      },
+      {
+        "id": "msg-019",
+        "from": "u-009",
+        "timestamp": "2026-01-10T09:10:00Z",
+        "body": "Yes! All color combinations meet WCAG 2.1 AA standards. I used the Figma contrast checker plugin. I'll add the accessibility notes to the design spec doc.",
+        "reactions": [{ "type": "heart", "users": ["u-003"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-020",
+        "from": "u-003",
+        "timestamp": "2026-01-10T09:12:00Z",
+        "body": "Perfect. Let's make sure Emily knows about the ARIA roles needed for the drag-and-drop. Great work!",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-009"] }],
+        "mentions": ["u-005"]
+      }
+    ]
+  },
+  {
+    "id": "ch-006",
+    "topic": "Sales & Marketing",
+    "type": "channel",
+    "teamName": "Sales & Marketing",
+    "members": ["u-004", "u-010", "u-011"],
+    "messages": [
+      {
+        "id": "msg-021",
+        "from": "u-011",
+        "timestamp": "2026-01-12T14:00:00Z",
+        "body": "Blog post draft is out for review. @James and @Sarah have it. Targeting Jan 15th publish date.",
+        "reactions": [],
+        "mentions": ["u-004"],
+        "relatedEmails": ["em-008"],
+        "relatedFiles": ["f-006"]
+      },
+      {
+        "id": "msg-022",
+        "from": "u-004",
+        "timestamp": "2026-01-12T14:15:00Z",
+        "body": "Great timing Olivia. Also - Fabrikam wants to do a joint webinar Feb 12th. Can you start planning the logistics?",
+        "reactions": [],
+        "mentions": [],
+        "relatedEmails": ["em-011"]
+      },
+      {
+        "id": "msg-023",
+        "from": "u-011",
+        "timestamp": "2026-01-12T14:20:00Z",
+        "body": "On it! I'll draft a landing page and promotional email sequence. We should aim for 200+ registrations. Ryan, can you share the Contoso win as a case study teaser?",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-004"] }],
+        "mentions": ["u-010"]
+      },
+      {
+        "id": "msg-024",
+        "from": "u-010",
+        "timestamp": "2026-01-12T14:30:00Z",
+        "body": "Definitely! Once the deal is signed I'll get a quote from their CTO. Should make great social proof.",
+        "reactions": [{ "type": "fire", "users": ["u-011", "u-004"] }],
+        "mentions": []
+      }
+    ]
+  },
+  {
+    "id": "ch-007",
+    "topic": null,
+    "type": "groupChat",
+    "teamName": null,
+    "members": ["u-005", "u-006", "u-007"],
+    "messages": [
+      {
+        "id": "msg-025",
+        "from": "u-006",
+        "timestamp": "2026-01-16T12:00:00Z",
+        "body": "Hey, did either of you see the Python SDK beta results? 9 out of 12 rated DX as excellent or good!",
+        "reactions": [{ "type": "celebrate", "users": ["u-005", "u-007"] }],
+        "mentions": [],
+        "relatedEmails": ["em-012"],
+        "relatedFiles": ["f-008"]
+      },
+      {
+        "id": "msg-026",
+        "from": "u-005",
+        "timestamp": "2026-01-16T12:05:00Z",
+        "body": "That's awesome David! The auth token refresh bugs - are those in the same area I refactored last sprint?",
+        "reactions": [],
+        "mentions": ["u-006"]
+      },
+      {
+        "id": "msg-027",
+        "from": "u-006",
+        "timestamp": "2026-01-16T12:10:00Z",
+        "body": "Different code path actually. It's the background renewal timer in the async client. I have a fix ready, just need to add retry logic.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-005"] }],
+        "mentions": []
+      },
+      {
+        "id": "msg-028",
+        "from": "u-007",
+        "timestamp": "2026-01-16T12:15:00Z",
+        "body": "Nice work both of you! David, make sure the fix goes through the security scan pipeline before merging. Noah flagged some dependency issues yesterday.",
+        "reactions": [{ "type": "thumbsUp", "users": ["u-006"] }],
+        "mentions": ["u-006"],
+        "relatedEmails": ["em-009"]
+      }
+    ]
+  }
+]

@@ -2,14 +2,12 @@
  * FlowQuery System Prompt Generator
  *
  * Generates a system prompt that instructs the LLM to create FlowQuery statements
- * based on natural language queries, with awareness of available loader plugins.
+ * based on natural language queries, with awareness of the graph schema.
  *
- * Uses FlowQuery's built-in functions() introspection to dynamically discover
- * available async data loaders and their metadata.
+ * Uses FlowQuery's built-in schema() introspection to dynamically discover
+ * available nodes and relationships in the graph.
  */
-import { FunctionMetadata, OutputSchema, ParameterSchema } from "flowquery/extensibility";
-
-import { getAllPluginMetadata, getAvailableLoaders } from "../plugins";
+import { getGraphSchema } from "../plugins";
 
 /**
  * FlowQuery language reference documentation.
@@ -17,116 +15,92 @@ import { getAllPluginMetadata, getAvailableLoaders } from "../plugins";
 const FLOWQUERY_LANGUAGE_REFERENCE = `
 ## FlowQuery Language Reference
 
-FlowQuery is a declarative query language for data processing pipelines. It uses SQL-like syntax with additional constructs for working with APIs and data transformations.
+FlowQuery is a Cypher-inspired declarative query language for querying graph data. It uses pattern matching to traverse nodes and relationships.
 
-### Core Clauses
+### Graph Query Clauses
 
-1. **WITH** - Define variables and expressions
+1. **MATCH** - Match patterns in the graph
    \`\`\`
-   WITH 'value' AS myVariable
-   WITH 1 + 2 AS result
-   WITH expression1 AS var1, expression2 AS var2
-   \`\`\`
-
-2. **LOAD JSON FROM** - Load data from a URL
-   \`\`\`
-   LOAD JSON FROM 'https://api.example.com/data' AS item
+   MATCH (n:Person)
+   MATCH (a:User)-[:KNOWS]-(b:User)
+   MATCH (user:User)-[:SENT]->(email:Email)
+   MATCH p=(a:Person)-[:KNOWS*1..3]-(b:Person)
    \`\`\`
 
-3. **CALL ... YIELD** - Call an async data provider function and yield its fields
+2. **WHERE** - Filter matched patterns
    \`\`\`
-   CALL myFunction(arg1, arg2) YIELD field1, field2, field3
-   \`\`\`
+   MATCH (n:Person)
+   WHERE n.age > 30
    
-   **IMPORTANT**: Async data providers (functions used with CALL) cannot be nested inside other function calls. If you need to pass data from one async provider to another, first load the data into a variable using collect(), then pass that variable:
-   \`\`\`
-   // WRONG - async providers cannot be nested:
-   // CALL table(mockProducts(5), 'Products') YIELD html
-   
-   // CORRECT - collect data first, then pass to next provider:
-   CALL mockProducts(5) YIELD id, name, price
-   WITH collect({ id: id, name: name, price: price }) AS products
-   CALL table(products, 'Products') YIELD html
-   RETURN html
+   MATCH (a:User)-[:SENT]-(email:Email)
+   WHERE email.subject CONTAINS 'urgent'
    \`\`\`
 
-4. **LOAD JSON FROM ... HEADERS ... POST** - Make HTTP requests with headers and body
+3. **RETURN** - Specify output columns
    \`\`\`
-   LOAD JSON FROM 'https://api.example.com/data'
-   HEADERS {
-       \`Content-Type\`: 'application/json',
-       Authorization: f'Bearer {apiKey}'
-   }
-   POST {
-       field1: 'value1',
-       field2: variable
-   } AS response
+   RETURN n.name, n.email
+   RETURN n.name AS Name, n.email AS Email
+   RETURN n  -- Return full node
+   RETURN *  -- Return all matched variables
+   \`\`\`
+
+4. **WITH** - Define intermediate variables or chain queries
+   \`\`\`
+   MATCH (n:User)
+   WITH n, size((n)-[:SENT]->()) AS emailCount
+   WHERE emailCount > 5
+   RETURN n.name, emailCount
    \`\`\`
 
 5. **UNWIND** - Expand arrays into individual rows
    \`\`\`
    UNWIND [1, 2, 3] AS number
-   UNWIND myArray AS item
-   UNWIND range(0, 10) AS index
-   \`\`\`
-   
-   **IMPORTANT**: An UNWIND statement cannot be followed directly by a WHERE statement. If you need to filter after unwinding, use a WITH clause in between:
-   \`\`\`
-   // WRONG - UNWIND cannot be directly followed by WHERE:
-   // UNWIND items AS item
-   // WHERE item.active = true
-   
-   // CORRECT - use WITH between UNWIND and WHERE:
-   UNWIND items AS item
-   WITH item
-   WHERE item.active = true
+   UNWIND n.tags AS tag
    \`\`\`
 
-6. **WHERE** - Filter results
-   \`\`\`
-   WHERE item.active = true
-   WHERE user.age > 18 AND user.name CONTAINS 'John'
-   \`\`\`
+### Pattern Syntax
 
-7. **RETURN** - Specify output columns
-   \`\`\`
-   RETURN item.name, item.value
-   RETURN item.name AS Name, item.price AS Price
-   RETURN *  -- Return all fields
-   \`\`\`
+- **Nodes**: \`(variable:Label)\` or \`(variable)\` or \`(:Label)\`
+- **Relationships**: \`-[:TYPE]-\` (undirected), \`-[:TYPE]->\` (outgoing), \`<-[:TYPE]-\` (incoming)
+- **Variable-length paths**: \`-[:TYPE*1..3]-\` (1 to 3 hops), \`-[:TYPE*]-\` (any number)
+- **Named paths**: \`p=(a)-[:KNOWS]-(b)\`
+
+### Examples
+
+\`\`\`
+// Find all users
+MATCH (u:User)
+RETURN u.name, u.email
+
+// Find users and their managers
+MATCH (user:User)-[:MANAGES]-(manager:User)
+RETURN user.name AS Employee, manager.name AS Manager
+
+// Find emails sent by a specific user
+MATCH (u:User)-[:SENT]->(e:Email)
+WHERE u.name = 'Alice'
+RETURN e.subject, e.sentDate
+
+// Find chain of relationships
+MATCH (a:User)-[:KNOWS*1..2]-(b:User)
+WHERE a.name = 'Bob'
+RETURN b.name AS Connection
+\`\`\`
 
 ### Built-in Functions
 
-- **String Functions**: \`size()\`, \`substring()\`, \`trim()\`, \`toLower()\`, \`toUpper()\`, \`split()\`, \`join()\`, \`replace()\`, \`startsWith()\`, \`endsWith()\`, \`contains()\`
-- **Math Functions**: \`abs()\`, \`ceil()\`, \`floor()\`, \`round()\`, \`sqrt()\`, \`pow()\`, \`min()\`, \`max()\`
-- **Aggregate Functions**: \`sum()\`, \`avg()\`, \`count()\`, \`collect()\`, \`min()\`, \`max()\`
-- **List Functions**: \`range()\`, \`head()\`, \`tail()\`, \`last()\`, \`size()\`, \`reverse()\`
-- **Type Functions**: \`type()\`, \`toInteger()\`, \`toFloat()\`, \`toString()\`, \`toBoolean()\`
-- **Utility Functions**: \`coalesce()\`, \`keys()\`, \`properties()\`, \`stringify()\`
+- **Aggregation**: \`count()\`, \`sum()\`, \`avg()\`, \`min()\`, \`max()\`, \`collect()\`
+- **String**: \`size()\`, \`trim()\`, \`toLower()\`, \`toUpper()\`, \`split()\`, \`join()\`, \`replace()\`
+- **List**: \`range()\`, \`head()\`, \`tail()\`, \`last()\`, \`size()\`, \`reverse()\`
+- **Type**: \`type()\`, \`toInteger()\`, \`toFloat()\`, \`toString()\`
+- **Utility**: \`keys()\`, \`properties()\`
 
 ### F-Strings (Template Literals)
 
 Use \`f"..."\` for string interpolation:
 \`\`\`
-WITH f"Hello, {name}!" AS greeting
-WITH f"The result is {value * 2}" AS message
-\`\`\`
-
-### Object and Array Literals
-
-\`\`\`
-WITH { name: 'John', age: 30 } AS person
-WITH [1, 2, 3] AS numbers
-WITH { items: [{ id: 1 }, { id: 2 }] } AS data
-\`\`\`
-
-### Property Access
-
-\`\`\`
-item.propertyName
-item['property-with-dashes']
-item.nested.property
-array[0]
+MATCH (u:User)
+RETURN f"Name: {u.name}, Email: {u.email}" AS info
 \`\`\`
 
 ### Comparison Operators
@@ -135,14 +109,6 @@ array[0]
 - \`AND\`, \`OR\`, \`NOT\`
 - \`IN\`, \`CONTAINS\`, \`STARTS WITH\`, \`ENDS WITH\`
 - \`IS NULL\`, \`IS NOT NULL\`
-
-### Comments
-
-\`\`\`
-// Single line comment
-/* Multi-line
-   comment */
-\`\`\`
 `;
 
 /**
@@ -151,126 +117,80 @@ array[0]
  */
 export class FlowQuerySystemPrompt {
     /**
-     * Format a parameter schema into a readable string.
+     * Format the graph schema into readable documentation.
+     * Accepts raw schema() results: array of { kind, label, type, sample }
      */
-    private static formatParameter(param: ParameterSchema): string {
-        const required = param.required ? " (required)" : " (optional)";
-        const defaultVal =
-            param.default !== undefined ? `, default: ${JSON.stringify(param.default)}` : "";
-        const enumVals = param.enum
-            ? `, values: [${param.enum.map((v) => JSON.stringify(v)).join(", ")}]`
-            : "";
-        return `  - \`${param.name}\`: ${param.type}${required}${defaultVal}${enumVals} - ${param.description}`;
-    }
-
-    /**
-     * Format output schema into a readable string.
-     */
-    private static formatOutput(output: OutputSchema): string {
-        let result = `  Returns: ${output.type} - ${output.description}`;
-
-        if (output.properties) {
-            result += "\n  Output properties:";
-            for (const [key, prop] of Object.entries(output.properties)) {
-                result += `\n    - \`${key}\`: ${prop.type} - ${prop.description}`;
-            }
-        }
-
-        if (output.example) {
-            result += `\n  Example output: ${JSON.stringify(output.example, null, 2)}`;
-        }
-
-        return result;
-    }
-
-    /**
-     * Format a plugin metadata into a readable documentation block.
-     */
-    private static formatPluginDocumentation(plugin: FunctionMetadata): string {
-        const lines: string[] = [];
-
-        lines.push(`### \`${plugin.name}\``);
-        lines.push(`**Description**: ${plugin.description}`);
-
-        if (plugin.category) {
-            lines.push(`**Category**: ${plugin.category}`);
-        }
-
-        if (plugin.parameters.length > 0) {
-            lines.push("\n**Parameters**:");
-            for (const param of plugin.parameters) {
-                lines.push(this.formatParameter(param));
-            }
-        } else {
-            lines.push("\n**Parameters**: None");
-        }
-
-        lines.push("\n**Output**:");
-        lines.push(this.formatOutput(plugin.output));
-
-        if (plugin.examples && plugin.examples.length > 0) {
-            lines.push("\n**Usage Examples**:");
-            for (const example of plugin.examples) {
-                lines.push(`\`\`\`\n${example}\n\`\`\``);
-            }
-        }
-
-        if (plugin.notes) {
-            lines.push(`\n**Notes**: ${plugin.notes}`);
-        }
-
-        return lines.join("\n");
-    }
-
-    /**
-     * Generate documentation for all available plugins.
-     */
-    private static generatePluginDocumentation(plugins: FunctionMetadata[]): string {
-        if (plugins.length === 0) {
-            return "No data loader plugins are currently available.";
-        }
-
+    private static formatSchemaDocumentation(schema: any[]): string {
         const sections: string[] = [];
 
-        // Group plugins by category
-        const byCategory = new Map<string, FunctionMetadata[]>();
-        for (const plugin of plugins) {
-            const category = plugin.category || "general";
-            if (!byCategory.has(category)) {
-                byCategory.set(category, []);
-            }
-            byCategory.get(category)!.push(plugin);
-        }
-
-        sections.push("## Available Data Loader Plugins\n");
+        sections.push("## Graph Schema\n");
         sections.push(
-            "The following async data loader functions are available for use with `CALL ... YIELD`:\n"
+            "The following nodes and relationships are available in the graph for use with `MATCH` queries:\n"
         );
 
-        for (const [category, categoryPlugins] of byCategory) {
-            sections.push(
-                `\n### Category: ${category.charAt(0).toUpperCase() + category.slice(1)}\n`
-            );
-            for (const plugin of categoryPlugins) {
-                sections.push(this.formatPluginDocumentation(plugin));
-                sections.push("---");
+        // Filter nodes and relationships from raw schema results
+        const nodes = schema.filter((r) => r.kind === "node");
+        const relationships = schema.filter((r) => r.kind === "relationship");
+
+        // Document nodes
+        sections.push("### Node Labels\n");
+        if (nodes.length > 0) {
+            for (const node of nodes) {
+                sections.push(`#### \`${node.label}\``);
+                // Extract properties from sample data
+                if (node.sample && typeof node.sample === "object") {
+                    const props = Object.entries(node.sample);
+                    if (props.length > 0) {
+                        sections.push("**Properties**:");
+                        for (const [name, value] of props) {
+                            const propType = Array.isArray(value) ? "array" : typeof value;
+                            sections.push(`  - \`${name}\`: ${propType}`);
+                        }
+                    }
+                    sections.push(`**Sample**: \`${JSON.stringify(node.sample)}\``);
+                }
+                sections.push("");
             }
+        } else {
+            sections.push("No nodes defined.\n");
+        }
+
+        // Document relationships
+        sections.push("### Relationship Types\n");
+        if (relationships.length > 0) {
+            for (const rel of relationships) {
+                sections.push(`#### \`[:${rel.type}]\``);
+                // Extract properties from sample data
+                if (rel.sample && typeof rel.sample === "object") {
+                    const props = Object.entries(rel.sample);
+                    if (props.length > 0) {
+                        sections.push("**Properties**:");
+                        for (const [name, value] of props) {
+                            const propType = Array.isArray(value) ? "array" : typeof value;
+                            sections.push(`  - \`${name}\`: ${propType}`);
+                        }
+                    }
+                }
+                sections.push("");
+            }
+        } else {
+            sections.push("No relationships defined.\n");
         }
 
         return sections.join("\n");
     }
 
     /**
-     * Internal helper to build the system prompt from plugin documentation.
+     * Internal helper to build the system prompt from schema documentation.
      */
-    private static buildSystemPrompt(pluginDocs: string, additionalContext?: string): string {
+    private static buildSystemPrompt(schemaDocs: string, additionalContext?: string): string {
         return `You are a FlowQuery assistant. Your primary role is to help users by creating and executing FlowQuery statements based on their natural language requests.
 
 ## How You Work
 
 You operate in a multi-step process:
 1. **Analyze** the user's natural language request
-2. **Generate** a FlowQuery statement that fulfills the request using available plugins
+2. **Generate** a FlowQuery statement that fulfills the request using the graph schema
 3. The system will **execute** your FlowQuery and provide you with the results
 4. You will then **interpret** the results and present them to the user in a helpful way
 
@@ -287,9 +207,9 @@ When the user asks a question that doesn't require data fetching (e.g., asking a
 
 ## Important Guidelines
 
-- Only use the available data loader plugins documented below
+- Only use the nodes and relationships documented in the graph schema below
 - Use proper FlowQuery syntax as documented in the language reference
-- For API calls, prefer using the registered loader plugins over raw HTTP calls when possible
+- Use MATCH patterns to query the graph
 - Always alias loaded items with \`AS\` for clarity
 - Use meaningful aliases in RETURN statements for better readability
 - Generate the simplest query that fulfills the user's request
@@ -301,7 +221,7 @@ When the user asks a question that doesn't require data fetching (e.g., asking a
 
 ${FLOWQUERY_LANGUAGE_REFERENCE}
 
-${pluginDocs}
+${schemaDocs}
 
 ${additionalContext ? `## Additional Context\n\n${additionalContext}` : ""}
 
@@ -309,9 +229,9 @@ ${additionalContext ? `## Additional Context\n\n${additionalContext}` : ""}
 
 **When a query is needed**:
 \`\`\`flowquery
-CALL pluginName(args) YIELD field1, field2, field3
-WHERE field1 = 'value'
-RETURN field1 AS Name, field2 AS Value
+MATCH (n:NodeLabel)-[:RELATIONSHIP]-(m:OtherLabel)
+WHERE n.property = 'value'
+RETURN n.name AS Name, m.value AS Value
 \`\`\`
 
 **When no query is needed** (e.g., general questions about FlowQuery):
@@ -323,17 +243,16 @@ Now help the user with their request.`;
 
     /**
      * Generate the complete FlowQuery system prompt.
-     * Uses FlowQuery's introspection via functions() as the single source of truth.
+     * Uses FlowQuery's schema() introspection to discover the graph structure.
      *
      * @param additionalContext - Optional additional context to include in the prompt
-     * @returns The complete system prompt string
+     * @returns Promise resolving to the complete system prompt string
      */
-    public static generate(additionalContext?: string): string {
-        // Uses FlowQuery's introspection to get available async providers
-        const plugins = getAllPluginMetadata();
-        const pluginDocs = this.generatePluginDocumentation(plugins);
+    public static async generate(additionalContext?: string): Promise<string> {
+        const schema = await getGraphSchema();
+        const schemaDocs = this.formatSchemaDocumentation(schema);
 
-        return this.buildSystemPrompt(pluginDocs, additionalContext);
+        return this.buildSystemPrompt(schemaDocs, additionalContext);
     }
 
     /**
@@ -367,35 +286,44 @@ You are now receiving the execution results. Your job is to:
     /**
      * Get a minimal system prompt without full documentation.
      * Useful for contexts where token count is a concern.
+     *
+     * @returns Promise resolving to minimal prompt string
      */
-    public static getMinimalPrompt(): string {
-        const plugins = getAllPluginMetadata();
-        const pluginList = plugins.map((p) => `- \`${p.name}\`: ${p.description}`).join("\n");
+    public static async getMinimalPrompt(): Promise<string> {
+        const schema = await getGraphSchema();
+        const nodes = schema.filter((r: any) => r.kind === "node");
+        const relationships = schema.filter((r: any) => r.kind === "relationship");
+
+        const nodeList =
+            nodes.length > 0 ? nodes.map((n: any) => `- \`${n.label}\``).join("\n") : "None";
+        const relList =
+            relationships.length > 0
+                ? relationships.map((r: any) => `- \`[:${r.type}]\``).join("\n")
+                : "None";
 
         return `You are a FlowQuery assistant. Generate FlowQuery statements based on user requests.
 
-Available data loader plugins:
-${pluginList}
+Available node labels:
+${nodeList}
 
-FlowQuery uses SQL-like syntax: WITH, LOAD JSON FROM, UNWIND, WHERE, RETURN, ORDER BY, LIMIT, SKIP.
+Available relationships:
+${relList}
+
+FlowQuery uses Cypher-like syntax: MATCH, WITH, UNWIND, WHERE, RETURN.
 Use f"..." for string interpolation. Access properties with dot notation or brackets.
 
 Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
     }
 
     /**
-     * Generate the FlowQuery system prompt asynchronously using functions() introspection.
-     * This is the preferred method that uses FlowQuery's built-in introspection.
+     * Generate the FlowQuery system prompt asynchronously using schema() introspection.
+     * This is an alias for generate() for backward compatibility.
      *
      * @param additionalContext - Optional additional context to include in the prompt
      * @returns Promise resolving to the complete system prompt string
      */
     public static async generateAsync(additionalContext?: string): Promise<string> {
-        // Use FlowQuery's functions() introspection to discover available loaders
-        const plugins = await getAvailableLoaders();
-        const pluginDocs = this.generatePluginDocumentation(plugins);
-
-        return this.buildSystemPrompt(pluginDocs, additionalContext);
+        return this.generate(additionalContext);
     }
 }
 

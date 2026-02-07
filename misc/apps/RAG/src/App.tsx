@@ -15,8 +15,11 @@ const App: React.FC = () => {
 
     useEffect(() => {
         // Generate the system prompt after plugins are initialized
-        const prompt = generateFlowQuerySystemPrompt();
-        setSystemPrompt(prompt);
+        const loadPrompt = async () => {
+            const prompt = await generateFlowQuerySystemPrompt();
+            setSystemPrompt(prompt);
+        };
+        loadPrompt();
     }, []);
 
     return (

@@ -1670,3 +1670,43 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"name1": "Node 1", "name2": "Node 2"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_node_reference_passed_through_with(self):
+        """Test that node variables passed through WITH can be re-referenced in subsequent MATCH."""
+        await Runner("""
+            CREATE VIRTUAL (:WithRefUser) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice', mail: 'alice@test.com', jobTitle: 'CEO'},
+                    {id: 2, name: 'Bob', mail: 'bob@test.com', jobTitle: 'VP'},
+                    {id: 3, name: 'Carol', mail: 'carol@test.com', jobTitle: 'VP'},
+                    {id: 4, name: 'Dave', mail: 'dave@test.com', jobTitle: 'Engineer'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.mail AS mail, record.jobTitle AS jobTitle
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:WithRefUser)-[:MANAGES]-(:WithRefUser) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3},
+                    {left_id: 2, right_id: 4}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (ceo:WithRefUser)-[:MANAGES]->(dr1:WithRefUser)
+            WHERE ceo.jobTitle = 'CEO'
+            WITH ceo, dr1
+            MATCH (ceo)-[:MANAGES]->(dr2:WithRefUser)
+            WHERE dr1.mail <> dr2.mail
+            RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+        """)
+        await runner.run()
+        results = runner.results
+        # CEO (Alice) manages Bob and Carol. All distinct pairs:
+        # (Alice, Bob, Carol) and (Alice, Carol, Bob)
+        assert len(results) == 2
+        assert results[0] == {"ceo": "Alice", "dr1": "Bob", "dr2": "Carol"}
+        assert results[1] == {"ceo": "Alice", "dr1": "Carol", "dr2": "Bob"}

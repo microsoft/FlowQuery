@@ -1760,3 +1760,55 @@ test("Test WHERE with IS NOT NULL filters multiple results", async () => {
     expect(results[0]).toEqual({ name: "Alice", age: 30 });
     expect(results[1]).toEqual({ name: "Carol", age: 25 });
 });
+
+test("Test WHERE with IN list check", async () => {
+    const runner = new Runner(`
+        unwind range(1, 10) as n
+        with n
+        where n IN [2, 4, 6, 8]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    expect(results.map((r: any) => r.n)).toEqual([2, 4, 6, 8]);
+});
+
+test("Test WHERE with NOT IN list check", async () => {
+    const runner = new Runner(`
+        unwind range(1, 5) as n
+        with n
+        where n NOT IN [2, 4]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results.map((r: any) => r.n)).toEqual([1, 3, 5]);
+});
+
+test("Test WHERE with IN string list", async () => {
+    const runner = new Runner(`
+        unwind ['apple', 'banana', 'cherry', 'date'] as fruit
+        with fruit
+        where fruit IN ['banana', 'date']
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["banana", "date"]);
+});
+
+test("Test WHERE with IN combined with AND", async () => {
+    const runner = new Runner(`
+        unwind range(1, 20) as n
+        with n
+        where n IN [1, 5, 10, 15, 20] AND n > 5
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results.map((r: any) => r.n)).toEqual([10, 15, 20]);
+});

@@ -29,7 +29,7 @@ from .data_structures.range_lookup import RangeLookup
 from .expressions.expression import Expression
 from .expressions.f_string import FString
 from .expressions.identifier import Identifier
-from .expressions.operator import Is, IsNot, Not
+from .expressions.operator import In, Is, IsNot, Not, NotIn
 from .expressions.reference import Reference
 from .expressions.string import String
 from .functions.aggregate_function import AggregateFunction
@@ -735,6 +735,13 @@ class Parser(BaseParser):
                     expression.add_node(self._parse_is_operator())
                 else:
                     expression.add_node(self.token.node)
+            elif self.token.is_in():
+                expression.add_node(self._parse_in_operator())
+            elif self.token.is_not():
+                not_in = self._parse_not_in_operator()
+                if not_in is None:
+                    break
+                expression.add_node(not_in)
             else:
                 break
             self.set_next_token()
@@ -755,6 +762,23 @@ class Parser(BaseParser):
         # Not IS NOT — restore position to IS so the outer loop's set_next_token advances past it.
         self._token_index = saved_index
         return Is()
+
+    def _parse_in_operator(self) -> In:
+        """Parse IN operator."""
+        # Current token is IN. Advance past it so the outer loop's set_next_token moves correctly.
+        return In()
+
+    def _parse_not_in_operator(self) -> NotIn | None:
+        """Parse NOT IN operator, or return None if it's just NOT (not followed by IN)."""
+        # Current token is NOT. Look ahead for IN to produce NOT IN.
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_in():
+            return NotIn()
+        # Not NOT IN — restore position and let the outer loop break.
+        self._token_index = saved_index
+        return None
 
     def _parse_lookup(self, node: ASTNode) -> ASTNode:
         variable = node

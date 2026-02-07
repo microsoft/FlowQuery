@@ -185,6 +185,32 @@ class IsNot extends Operator {
     }
 }
 
+class In extends Operator {
+    constructor() {
+        super(-1, true);
+    }
+    public value(): number {
+        const list = this.rhs.value();
+        if (!Array.isArray(list)) {
+            throw new Error("Right operand of IN must be a list");
+        }
+        return list.includes(this.lhs.value()) ? 1 : 0;
+    }
+}
+
+class NotIn extends Operator {
+    constructor() {
+        super(-1, true);
+    }
+    public value(): number {
+        const list = this.rhs.value();
+        if (!Array.isArray(list)) {
+            throw new Error("Right operand of NOT IN must be a list");
+        }
+        return list.includes(this.lhs.value()) ? 0 : 1;
+    }
+}
+
 export {
     Operator,
     Add,
@@ -204,4 +230,6 @@ export {
     Not,
     Is,
     IsNot,
+    In,
+    NotIn,
 };

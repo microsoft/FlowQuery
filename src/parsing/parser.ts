@@ -24,7 +24,7 @@ import RangeLookup from "./data_structures/range_lookup";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
-import { Is, IsNot, Not } from "./expressions/operator";
+import { In, Is, IsNot, Not, NotIn } from "./expressions/operator";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
 import AggregateFunction from "./functions/aggregate_function";
@@ -858,6 +858,14 @@ class Parser extends BaseParser {
                 } else {
                     expression.addNode(this.token.node);
                 }
+            } else if (this.token.isIn()) {
+                expression.addNode(this.parseInOperator());
+            } else if (this.token.isNot()) {
+                const notIn = this.parseNotInOperator();
+                if (notIn === null) {
+                    break;
+                }
+                expression.addNode(notIn);
             } else {
                 break;
             }
@@ -881,6 +889,24 @@ class Parser extends BaseParser {
         // Not IS NOT — restore position to IS so the outer loop's setNextToken advances past it.
         this.tokenIndex = savedIndex;
         return new Is();
+    }
+
+    private parseInOperator(): In | NotIn {
+        // Current token is IN. Advance past it so the outer loop's setNextToken moves correctly.
+        return new In();
+    }
+
+    private parseNotInOperator(): NotIn | null {
+        // Current token is NOT. Look ahead for IN to produce NOT IN.
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (this.token.isIn()) {
+            return new NotIn();
+        }
+        // Not NOT IN — restore position and let the outer loop break.
+        this.tokenIndex = savedIndex;
+        return null;
     }
 
     private parseLookup(node: ASTNode): ASTNode {

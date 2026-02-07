@@ -175,3 +175,25 @@ class IsNot(Operator):
 
     def value(self) -> int:
         return 1 if self.lhs.value() != self.rhs.value() else 0
+
+
+class In(Operator):
+    def __init__(self) -> None:
+        super().__init__(-1, True)
+
+    def value(self) -> int:
+        lst = self.rhs.value()
+        if not isinstance(lst, list):
+            raise ValueError("Right operand of IN must be a list")
+        return 1 if self.lhs.value() in lst else 0
+
+
+class NotIn(Operator):
+    def __init__(self) -> None:
+        super().__init__(-1, True)
+
+    def value(self) -> int:
+        lst = self.rhs.value()
+        if not isinstance(lst, list):
+            raise ValueError("Right operand of NOT IN must be a list")
+        return 0 if self.lhs.value() in lst else 1

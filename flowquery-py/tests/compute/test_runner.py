@@ -1885,3 +1885,59 @@ class TestRunner:
         assert len(results) == 2
         assert results[0] == {"name": "Alice", "age": 30}
         assert results[1] == {"name": "Carol", "age": 25}
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_list_check(self):
+        """Test WHERE with IN list check."""
+        runner = Runner("""
+            unwind range(1, 10) as n
+            with n
+            where n IN [2, 4, 6, 8]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert [r["n"] for r in results] == [2, 4, 6, 8]
+
+    @pytest.mark.asyncio
+    async def test_where_with_not_in_list_check(self):
+        """Test WHERE with NOT IN list check."""
+        runner = Runner("""
+            unwind range(1, 5) as n
+            with n
+            where n NOT IN [2, 4]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert [r["n"] for r in results] == [1, 3, 5]
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_string_list(self):
+        """Test WHERE with IN string list."""
+        runner = Runner("""
+            unwind ['apple', 'banana', 'cherry', 'date'] as fruit
+            with fruit
+            where fruit IN ['banana', 'date']
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["banana", "date"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_in_combined_with_and(self):
+        """Test WHERE with IN combined with AND."""
+        runner = Runner("""
+            unwind range(1, 20) as n
+            with n
+            where n IN [1, 5, 10, 15, 20] AND n > 5
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert [r["n"] for r in results] == [10, 15, 20]

@@ -926,3 +926,55 @@ test("Test relationship reference with type creates RelationshipReference instea
     expect(secondRel).toBeInstanceOf(RelationshipReference);
     expect(secondRel.type).toBe("KNOWS");
 });
+
+test("Test WHERE with IN list check", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 1 as n where n IN [1, 2, 3] return n");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (n)\n" +
+        "--- Number (1)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- In\n" +
+        "---- Reference (n)\n" +
+        "---- JSONArray\n" +
+        "----- Expression\n" +
+        "------ Number (1)\n" +
+        "----- Expression\n" +
+        "------ Number (2)\n" +
+        "----- Expression\n" +
+        "------ Number (3)\n" +
+        "- Return\n" +
+        "-- Expression (n)\n" +
+        "--- Reference (n)"
+    );
+});
+
+test("Test WHERE with NOT IN list check", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with 4 as n where n NOT IN [1, 2, 3] return n");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- With\n" +
+        "-- Expression (n)\n" +
+        "--- Number (4)\n" +
+        "- Where\n" +
+        "-- Expression\n" +
+        "--- NotIn\n" +
+        "---- Reference (n)\n" +
+        "---- JSONArray\n" +
+        "----- Expression\n" +
+        "------ Number (1)\n" +
+        "----- Expression\n" +
+        "------ Number (2)\n" +
+        "----- Expression\n" +
+        "------ Number (3)\n" +
+        "- Return\n" +
+        "-- Expression (n)\n" +
+        "--- Reference (n)"
+    );
+});

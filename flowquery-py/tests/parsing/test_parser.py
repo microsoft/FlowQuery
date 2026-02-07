@@ -860,3 +860,55 @@ class TestParser:
         assert "When" in ast.print()
         assert "Then" in ast.print()
         assert "Else" in ast.print()
+
+    def test_where_with_in_list_check(self):
+        """Test WHERE with IN list check."""
+        parser = Parser()
+        ast = parser.parse("with 1 as n where n IN [1, 2, 3] return n")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (n)\n"
+            "--- Number (1)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- In\n"
+            "---- Reference (n)\n"
+            "---- JSONArray\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "----- Expression\n"
+            "------ Number (3)\n"
+            "- Return\n"
+            "-- Expression (n)\n"
+            "--- Reference (n)"
+        )
+        assert ast.print() == expected
+
+    def test_where_with_not_in_list_check(self):
+        """Test WHERE with NOT IN list check."""
+        parser = Parser()
+        ast = parser.parse("with 4 as n where n NOT IN [1, 2, 3] return n")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (n)\n"
+            "--- Number (4)\n"
+            "- Where\n"
+            "-- Expression\n"
+            "--- NotIn\n"
+            "---- Reference (n)\n"
+            "---- JSONArray\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "----- Expression\n"
+            "------ Number (3)\n"
+            "- Return\n"
+            "-- Expression (n)\n"
+            "--- Reference (n)"
+        )
+        assert ast.print() == expected

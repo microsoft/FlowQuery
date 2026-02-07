@@ -434,10 +434,7 @@ class Parser extends BaseParser {
         let node = new Node();
         node.properties = new Map(this.parseProperties());
         node.label = label!;
-        if (label !== null && identifier !== null) {
-            node.identifier = identifier;
-            this.variables.set(identifier, node);
-        } else if (identifier !== null) {
+        if (identifier !== null && this.variables.has(identifier)) {
             let reference = this.variables.get(identifier);
             // Resolve through Expression -> Reference -> Node (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
@@ -450,6 +447,9 @@ class Parser extends BaseParser {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }
             node = new NodeReference(node, reference);
+        } else if (identifier !== null) {
+            node.identifier = identifier;
+            this.variables.set(identifier, node);
         }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
@@ -632,10 +632,7 @@ class Parser extends BaseParser {
         let relationship = new Relationship();
         relationship.direction = direction;
         relationship.properties = properties;
-        if (type !== null && variable !== null) {
-            relationship.identifier = variable;
-            this.variables.set(variable, relationship);
-        } else if (variable !== null) {
+        if (variable !== null && this.variables.has(variable)) {
             let reference = this.variables.get(variable);
             // Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
@@ -648,6 +645,9 @@ class Parser extends BaseParser {
                 throw new Error(`Undefined relationship reference: ${variable}`);
             }
             relationship = new RelationshipReference(relationship, reference);
+        } else if (variable !== null) {
+            relationship.identifier = variable;
+            this.variables.set(variable, relationship);
         }
         if (hops !== null) {
             relationship.hops = hops;

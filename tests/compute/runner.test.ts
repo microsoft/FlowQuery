@@ -1681,3 +1681,42 @@ test("Test match with node reference passed through WITH", async () => {
     expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
     expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
 });
+
+test("Test match with node reference reuse with label", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:RefLabelUser) AS {
+            UNWIND [
+                {id: 1, name: 'Alice', jobTitle: 'CEO'},
+                {id: 2, name: 'Bob', jobTitle: 'VP'},
+                {id: 3, name: 'Carol', jobTitle: 'VP'},
+                {id: 4, name: 'Dave', jobTitle: 'Engineer'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:RefLabelUser)-[:MANAGES]-(:RefLabelUser) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    // Uses (ceo:RefLabelUser) with label in both MATCH clauses.
+    // Previously this would create a new node instead of a NodeReference.
+    const match = new Runner(`
+        MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr1:RefLabelUser)
+        WHERE ceo.jobTitle = 'CEO'
+        WITH ceo, dr1
+        MATCH (ceo:RefLabelUser)-[:MANAGES]->(dr2:RefLabelUser)
+        WHERE dr1.name <> dr2.name
+        RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ ceo: "Alice", dr1: "Bob", dr2: "Carol" });
+    expect(results[1]).toEqual({ ceo: "Alice", dr1: "Carol", dr2: "Bob" });
+});

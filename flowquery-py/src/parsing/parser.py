@@ -469,10 +469,7 @@ class Parser(BaseParser):
         node = Node()
         node.label = label
         node.properties = dict(self._parse_properties())
-        if label is not None and identifier is not None:
-            node.identifier = identifier
-            self._variables[identifier] = node
-        elif identifier is not None:
+        if identifier is not None and identifier in self._variables:
             reference = self._variables.get(identifier)
             # Resolve through Expression -> Reference -> Node (e.g., after WITH)
             ref_child = reference.first_child() if isinstance(reference, Expression) else None
@@ -483,6 +480,9 @@ class Parser(BaseParser):
             if reference is None or not isinstance(reference, Node):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
+        elif identifier is not None:
+            node.identifier = identifier
+            self._variables[identifier] = node
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected closing parenthesis for node definition")
         self.set_next_token()
@@ -525,21 +525,20 @@ class Parser(BaseParser):
         relationship = Relationship()
         relationship.direction = direction
         relationship.properties = properties
-        if rel_type is not None and variable is not None:
-            relationship.identifier = variable
-            self._variables[variable] = relationship
-        elif variable is not None:
+        if variable is not None and variable in self._variables:
             reference = self._variables.get(variable)
             # Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
-            if isinstance(reference, Expression) and isinstance(
-                reference.first_child(), Reference
-            ):
-                inner = reference.first_child().referred
+            first = reference.first_child() if isinstance(reference, Expression) else None
+            if isinstance(first, Reference):
+                inner = first.referred
                 if isinstance(inner, Relationship):
                     reference = inner
             if reference is None or not isinstance(reference, Relationship):
                 raise ValueError(f"Undefined relationship reference: {variable}")
             relationship = RelationshipReference(relationship, reference)
+        elif variable is not None:
+            relationship.identifier = variable
+            self._variables[variable] = relationship
         if hops is not None:
             relationship.hops = hops
         relationship.type = rel_type

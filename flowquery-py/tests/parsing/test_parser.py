@@ -8,7 +8,9 @@ from flowquery.parsing.functions.function_metadata import FunctionDef
 from flowquery.parsing.operations.match import Match
 from flowquery.parsing.operations.create_relationship import CreateRelationship
 from flowquery.graph.node import Node
+from flowquery.graph.node_reference import NodeReference
 from flowquery.graph.relationship import Relationship
+from flowquery.graph.relationship_reference import RelationshipReference
 
 
 # Test async function for CALL operation parsing test
@@ -820,6 +822,35 @@ class TestParser:
         assert isinstance(relationship, Relationship)
         assert relationship.properties.get("since") is not None
         assert relationship.properties["since"].value() == 2022
+
+    def test_node_reference_with_label_creates_node_reference(self):
+        """Test that reusing a variable with a label creates a NodeReference instead of a new node."""
+        parser = Parser()
+        ast = parser.parse("MATCH (n:Person)-[:KNOWS]->(n:Person) RETURN n")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        first_node = match_op.patterns[0].chain[0]
+        second_node = match_op.patterns[0].chain[2]
+        assert isinstance(first_node, Node)
+        assert first_node.identifier == "n"
+        assert first_node.label == "Person"
+        assert isinstance(second_node, NodeReference)
+        assert second_node.reference.identifier == "n"
+        assert second_node.label == "Person"
+
+    def test_relationship_reference_with_type_creates_relationship_reference(self):
+        """Test that reusing a relationship variable with a type creates a RelationshipReference."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[r:KNOWS]->(b:Person)-[r:KNOWS]->(c:Person) RETURN a, b, c")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        first_rel = match_op.patterns[0].chain[1]
+        second_rel = match_op.patterns[0].chain[3]
+        assert isinstance(first_rel, Relationship)
+        assert first_rel.identifier == "r"
+        assert first_rel.type == "KNOWS"
+        assert isinstance(second_rel, RelationshipReference)
+        assert second_rel.type == "KNOWS"
 
     def test_case_statement_with_keywords_as_identifiers(self):
         """Test that CASE/WHEN/THEN/ELSE/END are not treated as identifiers."""

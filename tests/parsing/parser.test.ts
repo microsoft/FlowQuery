@@ -1,6 +1,7 @@
 import Node from "../../src/graph/node";
 import NodeReference from "../../src/graph/node_reference";
 import Relationship from "../../src/graph/relationship";
+import RelationshipReference from "../../src/graph/relationship_reference";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import CreateNode from "../../src/parsing/operations/create_node";
@@ -897,4 +898,31 @@ test("Test relationship with properties", () => {
     const match: Match = ast.firstChild() as Match;
     const relationship: Relationship = match.patterns[0].chain[1] as Relationship;
     expect(relationship.properties.get("since")?.value()).toBe(2022);
+});
+
+test("Test node reference with label creates NodeReference instead of new node", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (n:Person)-[:KNOWS]->(n:Person) RETURN n");
+    const match: Match = ast.firstChild() as Match;
+    const firstNode = match.patterns[0].chain[0] as Node;
+    const secondNode = match.patterns[0].chain[2] as NodeReference;
+    expect(firstNode.identifier).toBe("n");
+    expect(firstNode.label).toBe("Person");
+    expect(secondNode).toBeInstanceOf(NodeReference);
+    expect(secondNode.reference!.identifier).toBe("n");
+    expect(secondNode.label).toBe("Person");
+});
+
+test("Test relationship reference with type creates RelationshipReference instead of new relationship", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "MATCH (a:Person)-[r:KNOWS]->(b:Person)-[r:KNOWS]->(c:Person) RETURN a, b, c"
+    );
+    const match: Match = ast.firstChild() as Match;
+    const firstRel = match.patterns[0].chain[1] as Relationship;
+    const secondRel = match.patterns[0].chain[3] as RelationshipReference;
+    expect(firstRel.identifier).toBe("r");
+    expect(firstRel.type).toBe("KNOWS");
+    expect(secondRel).toBeInstanceOf(RelationshipReference);
+    expect(secondRel.type).toBe("KNOWS");
 });

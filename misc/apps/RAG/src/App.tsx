@@ -39,9 +39,6 @@ const App: React.FC = () => {
                     <div className="chat-wrapper">
                         <ChatContainer
                             systemPrompt={systemPrompt}
-                            useStreaming={true}
-                            useFlowQueryAgent={true}
-                            showIntermediateSteps={true}
                         />
                     </div>
                 </div>

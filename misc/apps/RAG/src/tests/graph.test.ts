@@ -1,41 +1,13 @@
 /**
- * Tests for the M365 Graph initialization
+ * Tests for the FlowQuery graph initialization
  *
- * Note: The tests that depend on the loadJson plugin and graph initialization
+ * Note: The tests that depend on graph initialization
  * are skipped due to Jest module isolation issues with the flowquery package.
  * These tests work correctly when the app runs directly.
  */
 import FlowQuery from "flowquery";
 
-import { initializePlugins } from "../plugins";
-
-describe("M365 Graph - Plugin Registration", () => {
-    beforeAll(() => {
-        // Initialize plugins (registers loadJson, etc.)
-        initializePlugins();
-    });
-
-    test("loadJson plugin should be registered", () => {
-        const asyncFuncs = FlowQuery.listFunctions({ asyncOnly: true });
-        const names = asyncFuncs.map((f) => f.name);
-        expect(names).toContain("loadjson");
-    });
-
-    test("schema plugin should be registered", () => {
-        const asyncFuncs = FlowQuery.listFunctions({ asyncOnly: true });
-        const names = asyncFuncs.map((f) => f.name);
-        expect(names).toContain("schema");
-    });
-
-    test("loadJson plugin should have correct metadata", () => {
-        const metadata = FlowQuery.getFunctionMetadata("loadjson");
-        expect(metadata).toBeDefined();
-        expect(metadata?.category).toBe("async");
-        expect(metadata?.description).toContain("JSON");
-    });
-});
-
-describe("M365 Graph - Basic FlowQuery Operations", () => {
+describe("Graph - Basic FlowQuery Operations", () => {
     test("should execute simple WITH/RETURN query", async () => {
         const runner = new FlowQuery("WITH 42 AS value RETURN value");
         await runner.run();
@@ -64,7 +36,7 @@ describe("M365 Graph - Basic FlowQuery Operations", () => {
 
 // The following tests require the loadJson plugin to work correctly at parse time.
 // Due to Jest module isolation, they are skipped. Run the app directly to test these.
-describe.skip("M365 Graph Initialization (requires runtime integration)", () => {
+describe.skip("Graph Initialization (requires runtime integration)", () => {
     test("should create User nodes", async () => {
         // This test would use initializeGraph() and MATCH queries
         expect(true).toBe(true);

@@ -4,7 +4,7 @@
  * Provides functions for making OpenAI-compatible API calls.
  * Supports both regular and streaming responses.
  */
-import { getStoredApiConfig } from "../../components/ApiKeySettings";
+import { getStoredApiConfig } from "../components/ApiKeySettings";
 
 export interface LlmOptions {
     /** System prompt to use */
@@ -246,5 +246,3 @@ export async function* llmStream(
         reader.releaseLock();
     }
 }
-
-export default { llm, llmStream };

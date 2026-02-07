@@ -5,11 +5,6 @@
  */
 import { FlowQuery } from "flowquery";
 
-import { initializePlugins } from "../plugins";
-
-// Ensure all plugins are registered
-initializePlugins();
-
 /**
  * Result of executing a FlowQuery statement.
  */

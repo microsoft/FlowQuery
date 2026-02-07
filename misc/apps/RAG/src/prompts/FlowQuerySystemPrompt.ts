@@ -7,7 +7,7 @@
  * Uses FlowQuery's built-in schema() introspection to dynamically discover
  * available nodes and relationships in the graph.
  */
-import { getGraphSchema } from "../plugins";
+import { getGraphSchema } from "../graph";
 
 /**
  * FlowQuery language reference documentation.
@@ -314,27 +314,14 @@ Use f"..." for string interpolation. Access properties with dot notation or brac
 
 Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
     }
-
-    /**
-     * Generate the FlowQuery system prompt asynchronously using schema() introspection.
-     * This is an alias for generate() for backward compatibility.
-     *
-     * @param additionalContext - Optional additional context to include in the prompt
-     * @returns Promise resolving to the complete system prompt string
-     */
-    public static async generateAsync(additionalContext?: string): Promise<string> {
-        return this.generate(additionalContext);
-    }
 }
 
-// Export functions for backward compatibility
+// Convenience function exports
 export const generateFlowQuerySystemPrompt =
     FlowQuerySystemPrompt.generate.bind(FlowQuerySystemPrompt);
 export const generateInterpretationPrompt =
     FlowQuerySystemPrompt.generateInterpretationPrompt.bind(FlowQuerySystemPrompt);
 export const getMinimalFlowQueryPrompt =
     FlowQuerySystemPrompt.getMinimalPrompt.bind(FlowQuerySystemPrompt);
-export const generateFlowQuerySystemPromptAsync =
-    FlowQuerySystemPrompt.generateAsync.bind(FlowQuerySystemPrompt);
 
 export default FlowQuerySystemPrompt;

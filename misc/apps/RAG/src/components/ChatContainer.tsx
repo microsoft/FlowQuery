@@ -2,16 +2,11 @@ import React, { Component, createRef, RefObject } from 'react';
 import { Spinner } from '@fluentui/react-components';
 import { ChatMessage, Message } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { LlmOptions } from '../plugins/loaders/Llm';
-import { processQueryStream } from './FlowQueryAgent';
+import { FlowQueryAgent } from './FlowQueryAgent';
 import './ChatContainer.css';
 
 interface ChatContainerProps {
     systemPrompt?: string;
-    llmOptions?: LlmOptions;
-    useStreaming?: boolean;
-    /** Whether to use the FlowQuery agent for processing queries */
-    useFlowQueryAgent?: boolean;
     /** Whether to show intermediate steps (query generation, execution) */
     showIntermediateSteps?: boolean;
 }
@@ -25,11 +20,10 @@ interface ChatContainerState {
 export class ChatContainer extends Component<ChatContainerProps, ChatContainerState> {
     static defaultProps: Partial<ChatContainerProps> = {
         systemPrompt: 'You are a helpful assistant. Be concise and informative in your responses.',
-        llmOptions: {},
-        useStreaming: true,
-        useFlowQueryAgent: true,
         showIntermediateSteps: true
     };
+
+    private readonly agent = new FlowQueryAgent();
 
     private messagesEndRef: RefObject<HTMLDivElement | null>;
 
@@ -65,7 +59,7 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
     };
 
     private handleSendMessage = async (content: string): Promise<void> => {
-        const { systemPrompt, llmOptions, useStreaming, useFlowQueryAgent, showIntermediateSteps } = this.props;
+        const { systemPrompt, showIntermediateSteps } = this.props;
         const { messages } = this.state;
 
         const userMessage: Message = {
@@ -88,134 +82,69 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
         
         try {
             const conversationHistory = this.buildConversationHistory([...messages, userMessage]);
+
+            const assistantMessage: Message = {
+                id: assistantMessageId,
+                role: 'assistant',
+                content: '',
+                timestamp: new Date(),
+                isStreaming: true
+            };
+            this.setState(prev => ({
+                messages: [...prev.messages, assistantMessage]
+            }));
+
+            let fullContent = '';
+            let adaptiveCardFromStream: Record<string, unknown> | undefined;
             
-            if (useFlowQueryAgent) {
-                // Use the FlowQuery agent for processing
-                const assistantMessage: Message = {
-                    id: assistantMessageId,
-                    role: 'assistant',
-                    content: '',
-                    timestamp: new Date(),
-                    isStreaming: true
-                };
-                this.setState(prev => ({
-                    messages: [...prev.messages, assistantMessage]
-                }));
-
-                let fullContent = '';
-                let adaptiveCardFromStream: Record<string, unknown> | undefined;
-                
-                for await (const { chunk, done, adaptiveCard, newMessage } of processQueryStream(content, {
-                    systemPrompt: systemPrompt ?? 'You are a helpful assistant. Be concise and informative in your responses.',
-                    llmOptions,
-                    conversationHistory: conversationHistory.slice(0, -1),
-                    showIntermediateSteps
-                })) {
-                    // If newMessage flag is set, finalize current message and start a new one
-                    if (newMessage) {
-                        // Create a new assistant message for the retry
-                        const previousMessageId = currentMessageId;
-                        currentMessageId = this.generateMessageId();
-                        fullContent = '';
-                        const newAssistantMessage: Message = {
-                            id: currentMessageId,
-                            role: 'assistant',
-                            content: '',
-                            timestamp: new Date(),
-                            isStreaming: true
-                        };
-                        // Mark previous message as done streaming AND add new message atomically
-                        this.setState(prev => ({
-                            messages: [...prev.messages.map(msg => 
-                                msg.id === previousMessageId 
-                                    ? { ...msg, isStreaming: false }
-                                    : msg
-                            ), newAssistantMessage]
-                        }));
-                    }
-                    
-                    if (chunk) {
-                        fullContent += chunk;
-                        this.setState(prev => ({
-                            messages: prev.messages.map(msg => 
-                                msg.id === currentMessageId 
-                                    ? { ...msg, content: fullContent }
-                                    : msg
-                            )
-                        }));
-                    }
-                    
-                    // Capture adaptive card if present
-                    if (adaptiveCard) {
-                        adaptiveCardFromStream = adaptiveCard;
-                    }
-                    
-                    if (done) {
-                        this.setState(prev => ({
-                            messages: prev.messages.map(msg => 
-                                msg.id === currentMessageId 
-                                    ? { ...msg, isStreaming: false, adaptiveCard: adaptiveCardFromStream }
-                                    : msg
-                            )
-                        }));
-                    }
-                }
-            } else {
-                // Original LLM-only behavior (kept for backward compatibility)
-                const { llm, llmStream } = await import('../plugins/loaders/Llm');
-                
-                const options: LlmOptions = {
-                    ...llmOptions,
-                    systemPrompt,
-                    messages: conversationHistory.slice(0, -1),
-                };
-
-                if (useStreaming) {
-                    const assistantMessage: Message = {
-                        id: assistantMessageId,
+            for await (const { chunk, done, adaptiveCard, newMessage } of this.agent.processQueryStream(content, {
+                systemPrompt: systemPrompt ?? 'You are a helpful assistant. Be concise and informative in your responses.',
+                conversationHistory: conversationHistory.slice(0, -1),
+                showIntermediateSteps
+            })) {
+                // If newMessage flag is set, finalize current message and start a new one
+                if (newMessage) {
+                    const previousMessageId = currentMessageId;
+                    currentMessageId = this.generateMessageId();
+                    fullContent = '';
+                    const newAssistantMessage: Message = {
+                        id: currentMessageId,
                         role: 'assistant',
                         content: '',
                         timestamp: new Date(),
                         isStreaming: true
                     };
                     this.setState(prev => ({
-                        messages: [...prev.messages, assistantMessage]
+                        messages: [...prev.messages.map(msg => 
+                            msg.id === previousMessageId 
+                                ? { ...msg, isStreaming: false }
+                                : msg
+                        ), newAssistantMessage]
                     }));
-
-                    let fullContent = '';
-                    for await (const chunk of llmStream(content, options)) {
-                        const deltaContent = chunk.choices?.[0]?.delta?.content || '';
-                        if (deltaContent) {
-                            fullContent += deltaContent;
-                            this.setState(prev => ({
-                                messages: prev.messages.map(msg => 
-                                    msg.id === assistantMessageId 
-                                        ? { ...msg, content: fullContent }
-                                        : msg
-                                )
-                            }));
-                        }
-                    }
-
+                }
+                
+                if (chunk) {
+                    fullContent += chunk;
                     this.setState(prev => ({
                         messages: prev.messages.map(msg => 
-                            msg.id === assistantMessageId 
-                                ? { ...msg, isStreaming: false }
+                            msg.id === currentMessageId 
+                                ? { ...msg, content: fullContent }
                                 : msg
                         )
                     }));
-                } else {
-                    const response = await llm(content, options);
-                    const assistantContent = response.choices[0]?.message?.content || 'No response received.';
-                    
-                    const assistantMessage: Message = {
-                        id: assistantMessageId,
-                        role: 'assistant',
-                        content: assistantContent,
-                        timestamp: new Date()
-                    };
+                }
+                
+                if (adaptiveCard) {
+                    adaptiveCardFromStream = adaptiveCard;
+                }
+                
+                if (done) {
                     this.setState(prev => ({
-                        messages: [...prev.messages, assistantMessage]
+                        messages: prev.messages.map(msg => 
+                            msg.id === currentMessageId 
+                                ? { ...msg, isStreaming: false, adaptiveCard: adaptiveCardFromStream }
+                                : msg
+                        )
                     }));
                 }
             }

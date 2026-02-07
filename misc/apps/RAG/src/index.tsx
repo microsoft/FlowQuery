@@ -1,11 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { initializePlugins } from './plugins';
 import { initializeGraph } from './graph';
-
-// Initialize FlowQuery plugins before rendering
-initializePlugins();
 
 // Initialize the FlowQuery graph and then render the app
 initializeGraph().then(() => {

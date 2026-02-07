@@ -149,7 +149,7 @@ async function createEmailSentByRelationships(): Promise<void> {
     const runner = new FlowQuery(`
         CREATE VIRTUAL (:User)-[:SENT]-(:Email) AS {
             LOAD JSON FROM '/data/emails.json' AS email
-            RETURN email.from AS left_id, email.id AS right_id
+            RETURN email.\`from\` AS left_id, email.id AS right_id
         }
     `);
     await runner.run();

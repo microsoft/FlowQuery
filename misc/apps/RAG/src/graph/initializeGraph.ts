@@ -73,11 +73,11 @@ async function createEmailNodes(): Promise<void> {
         CREATE VIRTUAL (:Email) AS {
             LOAD JSON FROM '/data/emails.json' AS email
             RETURN 
-                email.id AS id, email.subject AS subject, email.\`from\` AS \`fromUser\`, 
+                email.id AS id, email.subject AS subject, email.from AS fromUser, 
                 email.to AS toUsers, email.cc AS cc, email.receivedDateTime AS receivedDateTime, 
                 email.body AS body, email.importance AS importance, 
                 email.hasAttachments AS hasAttachments, email.attachments AS attachments, 
-                email.\`isRead\` AS \`isRead\`, email.conversationId AS conversationId, 
+                email.isRead AS isRead, email.conversationId AS conversationId, 
                 email.categories AS categories
         }
     `);
@@ -92,7 +92,7 @@ async function createEventNodes(): Promise<void> {
             RETURN 
                 event.id AS id, event.subject AS subject, event.organizer AS organizer, 
                 event.attendees AS attendees, event.start AS start, event.end AS end, 
-                event.location AS location, event.\`isOnline\` AS \`isOnline\`, 
+                event.location AS location, event.isOnline AS isOnline, 
                 event.onlineMeetingUrl AS onlineMeetingUrl, event.body AS body, 
                 event.recurrence AS recurrence, event.relatedEmails AS relatedEmails, 
                 event.relatedFiles AS relatedFiles, event.categories AS categories
@@ -149,7 +149,7 @@ async function createEmailSentByRelationships(): Promise<void> {
     const runner = new FlowQuery(`
         CREATE VIRTUAL (:User)-[:SENT]-(:Email) AS {
             LOAD JSON FROM '/data/emails.json' AS email
-            RETURN email.\`from\` AS left_id, email.id AS right_id
+            RETURN email.from AS left_id, email.id AS right_id
         }
     `);
     await runner.run();

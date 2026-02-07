@@ -734,7 +734,7 @@ class Parser(BaseParser):
         while True:
             if self.token.is_dot():
                 self.set_next_token()
-                if not self.token.is_identifier_or_keyword():
+                if not self.token.is_identifier() and not self.token.is_keyword():
                     raise ValueError("Expected identifier")
                 lookup = Lookup()
                 lookup.index = Identifier(self.token.value or "")

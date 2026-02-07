@@ -264,6 +264,51 @@ test("Test lookup with JSON array", () => {
     expect(_return.firstChild().value()).toBe(2);
 });
 
+test("Test lookup with from keyword as property name", () => {
+    const parser = new Parser();
+    const ast = parser.parse("with {from: 1, to: 2} as x return x.from, x.to");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- With\n" +
+            "-- Expression (x)\n" +
+            "--- AssociativeArray\n" +
+            "---- KeyValuePair\n" +
+            "----- String (from)\n" +
+            "----- Expression\n" +
+            "------ Number (1)\n" +
+            "---- KeyValuePair\n" +
+            "----- String (to)\n" +
+            "----- Expression\n" +
+            "------ Number (2)\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- Lookup\n" +
+            "---- Identifier (from)\n" +
+            "---- Reference (x)\n" +
+            "-- Expression\n" +
+            "--- Lookup\n" +
+            "---- Identifier (to)\n" +
+            "---- Reference (x)"
+    );
+});
+
+test("Test camelCase alias starting with keyword", () => {
+    const parser = new Parser();
+    const ast = parser.parse("LOAD JSON FROM '/data.json' AS x RETURN x.from AS fromUser");
+    expect(ast.print()).toContain("Lookup");
+    expect(ast.print()).toContain("Identifier (from)");
+});
+
+test("Test from keyword property in create virtual subquery", () => {
+    const parser = new Parser();
+    // Should not throw - email.from should be parsed correctly even with FROM being a keyword
+    expect(() => {
+        parser.parse(
+            "CREATE VIRTUAL (:Email) AS { LOAD JSON FROM '/data/emails.json' AS email RETURN email.id AS id, email.from AS fromUser }"
+        );
+    }).not.toThrow();
+});
+
 test("Test lookup with reserved keyword property names", () => {
     const parser = new Parser();
     const ast = parser.parse("with {end: 1, null: 2, case: 3} as x return x.end, x.null, x.case");

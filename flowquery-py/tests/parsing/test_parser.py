@@ -325,6 +325,52 @@ class TestParser:
         )
         assert ast.print() == expected
 
+    def test_lookup_with_from_keyword_as_property_name(self):
+        """Test lookup with from and to keywords as property names."""
+        parser = Parser()
+        ast = parser.parse("with {from: 1, to: 2} as x return x.from, x.to")
+        expected = (
+            "ASTNode\n"
+            "- With\n"
+            "-- Expression (x)\n"
+            "--- AssociativeArray\n"
+            "---- KeyValuePair\n"
+            "----- String (from)\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "---- KeyValuePair\n"
+            "----- String (to)\n"
+            "----- Expression\n"
+            "------ Number (2)\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Lookup\n"
+            "---- Identifier (from)\n"
+            "---- Reference (x)\n"
+            "-- Expression\n"
+            "--- Lookup\n"
+            "---- Identifier (to)\n"
+            "---- Reference (x)"
+        )
+        assert ast.print() == expected
+
+    def test_camel_case_alias_starting_with_keyword(self):
+        """Test that camelCase identifiers starting with a keyword (e.g. fromUser) are tokenized correctly."""
+        parser = Parser()
+        ast = parser.parse("LOAD JSON FROM '/data.json' AS x RETURN x.from AS fromUser")
+        output = ast.print()
+        assert "Lookup" in output
+        assert "Identifier (from)" in output
+
+    def test_from_keyword_property_in_create_virtual_subquery(self):
+        """Test that email.from parses correctly inside a CREATE VIRTUAL subquery."""
+        parser = Parser()
+        # Should not raise - email.from should be parsed correctly even with FROM being a keyword
+        parser.parse(
+            "CREATE VIRTUAL (:Email) AS { LOAD JSON FROM '/data/emails.json' AS email "
+            "RETURN email.id AS id, email.from AS fromUser }"
+        )
+
     def test_load_with_post(self):
         """Test load with post."""
         parser = Parser()

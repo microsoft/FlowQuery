@@ -353,7 +353,7 @@ class Parser extends BaseParser {
                 throw new Error("Expected ':' for relationship type");
             }
             this.setNextToken();
-            if (!this.token.isIdentifier()) {
+            if (!this.token.isIdentifierOrKeyword()) {
                 throw new Error("Expected relationship type identifier");
             }
             const type: string = this.token.value || "";
@@ -412,19 +412,19 @@ class Parser extends BaseParser {
         this.setNextToken();
         this.skipWhitespaceAndComments();
         let identifier: string | null = null;
-        if (this.token.isIdentifier()) {
+        if (this.token.isIdentifierOrKeyword()) {
             identifier = this.token.value || "";
             this.setNextToken();
         }
         this.skipWhitespaceAndComments();
         let label: string | null = null;
-        if (!this.token.isColon() && this.peek()?.isIdentifier()) {
+        if (!this.token.isColon() && this.peek()?.isIdentifierOrKeyword()) {
             throw new Error("Expected ':' for node label");
         }
-        if (this.token.isColon() && !this.peek()?.isIdentifier()) {
+        if (this.token.isColon() && !this.peek()?.isIdentifierOrKeyword()) {
             throw new Error("Expected node label identifier");
         }
-        if (this.token.isColon() && this.peek()?.isIdentifier()) {
+        if (this.token.isColon() && this.peek()?.isIdentifierOrKeyword()) {
             this.setNextToken();
             label = this.token.value || "";
             this.setNextToken();
@@ -595,7 +595,7 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         let variable: string | null = null;
-        if (this.token.isIdentifier()) {
+        if (this.token.isIdentifierOrKeyword()) {
             variable = this.token.value || "";
             this.setNextToken();
         }
@@ -603,7 +603,7 @@ class Parser extends BaseParser {
             throw new Error("Expected ':' for relationship type");
         }
         this.setNextToken();
-        if (!this.token.isIdentifier()) {
+        if (!this.token.isIdentifierOrKeyword()) {
             throw new Error("Expected relationship type identifier");
         }
         const type: string = this.token.value || "";
@@ -745,14 +745,14 @@ class Parser extends BaseParser {
      */
     private parseOperand(expression: Expression): boolean {
         this.skipWhitespaceAndComments();
-        if (this.token.isIdentifier() && !this.peek()?.isLeftParenthesis()) {
+        if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
             const reference = new Reference(identifier, this.variables.get(identifier));
             this.setNextToken();
             const lookup = this.parseLookup(reference);
             expression.addNode(lookup);
             return true;
-        } else if (this.token.isIdentifier() && this.peek()?.isLeftParenthesis()) {
+        } else if (this.token.isIdentifierOrKeyword() && this.peek()?.isLeftParenthesis()) {
             const func = this.parsePredicateFunction() || this.parseFunction();
             if (func !== null) {
                 const lookup = this.parseLookup(func);
@@ -761,7 +761,7 @@ class Parser extends BaseParser {
             }
         } else if (
             this.token.isLeftParenthesis() &&
-            (this.peek()?.isIdentifier() ||
+            (this.peek()?.isIdentifierOrKeyword() ||
                 this.peek()?.isColon() ||
                 this.peek()?.isRightParenthesis())
         ) {
@@ -857,7 +857,7 @@ class Parser extends BaseParser {
         while (true) {
             if (this.token.isDot()) {
                 this.setNextToken();
-                if (!this.token.isIdentifier() && !this.token.isKeyword()) {
+                if (!this.token.isIdentifierOrKeyword()) {
                     throw new Error("Expected identifier");
                 }
                 lookup = new Lookup();

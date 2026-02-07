@@ -104,6 +104,10 @@ class Token {
         return this._type === TokenType.IDENTIFIER || this._type === TokenType.BACKTICK_STRING;
     }
 
+    public isIdentifierOrKeyword(): boolean {
+        return this.isIdentifier() || (this.isKeyword() && !this.isKeywordThatCannotBeIdentifier());
+    }
+
     // String token
 
     public static STRING(value: string, quoteChar: string = '"'): Token {
@@ -385,6 +389,18 @@ class Token {
 
     public isKeyword(): boolean {
         return this._type === TokenType.KEYWORD;
+    }
+
+    public isKeywordThatCannotBeIdentifier(): boolean {
+        return (
+            this.isKeyword() &&
+            (this.isNull() ||
+                this.isCase() ||
+                this.isWhen() ||
+                this.isThen() ||
+                this.isElse() ||
+                this.isEnd())
+        );
     }
 
     public static get WITH(): Token {

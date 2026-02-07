@@ -326,7 +326,7 @@ class Parser(BaseParser):
             if not self.token.is_colon():
                 raise ValueError("Expected ':' for relationship type")
             self.set_next_token()
-            if not self.token.is_identifier():
+            if not self.token.is_identifier_or_keyword():
                 raise ValueError("Expected relationship type identifier")
             rel_type = self.token.value or ""
             self.set_next_token()
@@ -450,17 +450,17 @@ class Parser(BaseParser):
         self.set_next_token()
         self._skip_whitespace_and_comments()
         identifier: Optional[str] = None
-        if self.token.is_identifier():
+        if self.token.is_identifier_or_keyword():
             identifier = self.token.value
             self.set_next_token()
         self._skip_whitespace_and_comments()
         label: Optional[str] = None
         peek = self.peek()
-        if not self.token.is_colon() and peek is not None and peek.is_identifier():
+        if not self.token.is_colon() and peek is not None and peek.is_identifier_or_keyword():
             raise ValueError("Expected ':' for node label")
-        if self.token.is_colon() and (peek is None or not peek.is_identifier()):
+        if self.token.is_colon() and (peek is None or not peek.is_identifier_or_keyword()):
             raise ValueError("Expected node label identifier")
-        if self.token.is_colon() and peek is not None and peek.is_identifier():
+        if self.token.is_colon() and peek is not None and peek.is_identifier_or_keyword():
             self.set_next_token()
             label = cast(str, self.token.value)  # Guaranteed by is_identifier check
             self.set_next_token()
@@ -495,13 +495,13 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         variable: Optional[str] = None
-        if self.token.is_identifier():
+        if self.token.is_identifier_or_keyword():
             variable = self.token.value
             self.set_next_token()
         if not self.token.is_colon():
             raise ValueError("Expected ':' for relationship type")
         self.set_next_token()
-        if not self.token.is_identifier():
+        if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected relationship type identifier")
         rel_type: str = self.token.value or ""
         self.set_next_token()
@@ -633,14 +633,14 @@ class Parser(BaseParser):
     def _parse_operand(self, expression: Expression) -> bool:
         """Parse a single operand (without operators). Returns True if an operand was parsed."""
         self._skip_whitespace_and_comments()
-        if self.token.is_identifier() and (self.peek() is None or not self.peek().is_left_parenthesis()):
+        if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
             reference = Reference(identifier, self._variables.get(identifier))
             self.set_next_token()
             lookup = self._parse_lookup(reference)
             expression.add_node(lookup)
             return True
-        elif self.token.is_identifier() and self.peek() is not None and self.peek().is_left_parenthesis():
+        elif self.token.is_identifier_or_keyword() and self.peek() is not None and self.peek().is_left_parenthesis():
             func = self._parse_predicate_function() or self._parse_function()
             if func is not None:
                 lookup = self._parse_lookup(func)
@@ -650,7 +650,7 @@ class Parser(BaseParser):
             self.token.is_left_parenthesis()
             and self.peek() is not None
             and (
-                self.peek().is_identifier()
+                self.peek().is_identifier_or_keyword()
                 or self.peek().is_colon()
                 or self.peek().is_right_parenthesis()
             )
@@ -734,7 +734,7 @@ class Parser(BaseParser):
         while True:
             if self.token.is_dot():
                 self.set_next_token()
-                if not self.token.is_identifier() and not self.token.is_keyword():
+                if not self.token.is_identifier_or_keyword():
                     raise ValueError("Expected identifier")
                 lookup = Lookup()
                 lookup.index = Identifier(self.token.value or "")
@@ -847,7 +847,7 @@ class Parser(BaseParser):
         self._expect_previous_token_to_be_whitespace_or_comment()
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
-        if not self.token.is_identifier():
+        if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected identifier")
         alias = Alias(self.token.value or "")
         self.set_next_token()

@@ -155,3 +155,37 @@ test("Test relationship with hops", () => {
     expect(tokens).toBeDefined();
     expect(tokens.length).toBeGreaterThan(0);
 });
+
+test("Test reserved keywords as identifiers", () => {
+    const tokenizer = new Tokenizer(`
+        WITH 1 AS return
+        RETURN return
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test reserved keywords as part of identifiers", () => {
+    const tokenizer = new Tokenizer(`
+        unwind [
+            {from: "Alice", to: "Bob", organizer: "Charlie"},
+            {from: "Bob", to: "Charlie", organizer: "Alice"},
+            {from: "Charlie", to: "Alice", organizer: "Bob"}
+        ] as data
+        return data.from, data.to
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});
+
+test("Test reserved keywords as relationship types and labels", () => {
+    const tokenizer = new Tokenizer(`
+        MATCH (a:RETURN)-[r:WITH]->(b:RETURN)
+        RETURN a, b
+    `);
+    const tokens = tokenizer.tokenize();
+    expect(tokens).toBeDefined();
+    expect(tokens.length).toBeGreaterThan(0);
+});

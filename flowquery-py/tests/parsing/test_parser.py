@@ -719,3 +719,12 @@ class TestParser:
         assert isinstance(relationship, Relationship)
         assert relationship.properties.get("since") is not None
         assert relationship.properties["since"].value() == 2022
+
+    def test_case_statement_with_keywords_as_identifiers(self):
+        """Test that CASE/WHEN/THEN/ELSE/END are not treated as identifiers."""
+        parser = Parser()
+        ast = parser.parse("RETURN CASE WHEN 1 THEN 2 ELSE 3 END")
+        assert "Case" in ast.print()
+        assert "When" in ast.print()
+        assert "Then" in ast.print()
+        assert "Else" in ast.print()

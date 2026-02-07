@@ -1585,3 +1585,62 @@ class TestRunner:
         assert "left_id" not in chases["sample"]
         assert "right_id" not in chases["sample"]
         assert "speed" in chases["sample"]
+
+    @pytest.mark.asyncio
+    async def test_reserved_keywords_as_identifiers(self):
+        """Test reserved keywords as identifiers."""
+        runner = Runner("""
+            WITH 1 AS return
+            RETURN return
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["return"] == 1
+
+    @pytest.mark.asyncio
+    async def test_reserved_keywords_as_parts_of_identifiers(self):
+        """Test reserved keywords as parts of identifiers."""
+        runner = Runner("""
+            unwind [
+                {from: "Alice", to: "Bob", organizer: "Charlie"},
+                {from: "Bob", to: "Charlie", organizer: "Alice"},
+                {from: "Charlie", to: "Alice", organizer: "Bob"}
+            ] as data
+            return data.from as from, data.to as to, data.organizer as organizer
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"from": "Alice", "to": "Bob", "organizer": "Charlie"}
+        assert results[1] == {"from": "Bob", "to": "Charlie", "organizer": "Alice"}
+        assert results[2] == {"from": "Charlie", "to": "Alice", "organizer": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_reserved_keywords_as_relationship_types_and_labels(self):
+        """Test reserved keywords as relationship types and labels."""
+        await Runner("""
+            CREATE VIRTUAL (:Return) AS {
+                unwind [
+                    {id: 1, name: 'Node 1'},
+                    {id: 2, name: 'Node 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Return)-[:With]-(:Return) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:Return)-[:With]->(b:Return)
+            RETURN a.name AS name1, b.name AS name2
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name1": "Node 1", "name2": "Node 2"}

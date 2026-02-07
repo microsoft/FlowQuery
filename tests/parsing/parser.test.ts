@@ -401,6 +401,15 @@ test("Test case statement", () => {
     );
 });
 
+test("Test case statement with keywords as identifiers", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN CASE WHEN 1 THEN 2 ELSE 3 END");
+    expect(ast.print()).toContain("Case");
+    expect(ast.print()).toContain("When");
+    expect(ast.print()).toContain("Then");
+    expect(ast.print()).toContain("Else");
+});
+
 test("Test functions with wrong number of arguments", () => {
     expect(() => new Parser().parse("RETURN range(1)")).toThrow(
         "Function range expected 2 parameters, but got 1"

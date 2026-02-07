@@ -1005,6 +1005,85 @@ test("Test circular graph pattern with variable length should throw error", asyn
     }).rejects.toThrow("Circular relationship detected");
 });
 
+test("Test multi-hop match with min hops constraint *1..", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*1..]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    // *1.. means at least 1 hop, so no zero-hop (self) matches
+    // Person 1: 1-hop to P2, 2-hop to P3, 3-hop to P4
+    // Person 2: 1-hop to P3, 2-hop to P4
+    // Person 3: 1-hop to P4
+    // Person 4: no outgoing edges
+    expect(results.length).toBe(6);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 2" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[2]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(results[3]).toEqual({ name1: "Person 2", name2: "Person 3" });
+    expect(results[4]).toEqual({ name1: "Person 2", name2: "Person 4" });
+    expect(results[5]).toEqual({ name1: "Person 3", name2: "Person 4" });
+});
+
+test("Test multi-hop match with min hops constraint *2..", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }    
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }    
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*2..]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    // *2.. means at least 2 hops
+    // Person 1: 2-hop to P3, 3-hop to P4
+    // Person 2: 2-hop to P4
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name1: "Person 1", name2: "Person 3" });
+    expect(results[1]).toEqual({ name1: "Person 1", name2: "Person 4" });
+    expect(results[2]).toEqual({ name1: "Person 2", name2: "Person 4" });
+});
+
 test("Test multi-hop match with variable length relationships", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {

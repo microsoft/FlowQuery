@@ -1139,6 +1139,99 @@ class TestRunner:
             await match.run()
 
     @pytest.mark.asyncio
+    async def test_multi_hop_match_with_min_hops_constraint_1(self):
+        """Test multi-hop match with min hops constraint *1.."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop1Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop1Person)-[:KNOWS]-(:MinHop1Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:MinHop1Person)-[:KNOWS*1..]->(b:MinHop1Person)
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await match.run()
+        results = match.results
+        # *1.. means at least 1 hop, so no zero-hop (self) matches
+        # Person 1: 1-hop to P2, 2-hop to P3, 3-hop to P4
+        # Person 2: 1-hop to P3, 2-hop to P4
+        # Person 3: 1-hop to P4
+        # Person 4: no outgoing edges
+        assert len(results) == 6
+        assert results[0] == {"name1": "Person 1", "name2": "Person 2"}
+        assert results[1] == {"name1": "Person 1", "name2": "Person 3"}
+        assert results[2] == {"name1": "Person 1", "name2": "Person 4"}
+        assert results[3] == {"name1": "Person 2", "name2": "Person 3"}
+        assert results[4] == {"name1": "Person 2", "name2": "Person 4"}
+        assert results[5] == {"name1": "Person 3", "name2": "Person 4"}
+
+    @pytest.mark.asyncio
+    async def test_multi_hop_match_with_min_hops_constraint_2(self):
+        """Test multi-hop match with min hops constraint *2.."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop2Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:MinHop2Person)-[:KNOWS]-(:MinHop2Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:MinHop2Person)-[:KNOWS*2..]->(b:MinHop2Person)
+            RETURN a.name AS name1, b.name AS name2
+            """
+        )
+        await match.run()
+        results = match.results
+        # *2.. means at least 2 hops
+        # Person 1: 2-hop to P3, 3-hop to P4
+        # Person 2: 2-hop to P4
+        assert len(results) == 3
+        assert results[0] == {"name1": "Person 1", "name2": "Person 3"}
+        assert results[1] == {"name1": "Person 1", "name2": "Person 4"}
+        assert results[2] == {"name1": "Person 2", "name2": "Person 4"}
+
+    @pytest.mark.asyncio
     async def test_multi_hop_match_with_variable_length_relationships(self):
         """Test multi-hop match with variable length relationships."""
         await Runner(

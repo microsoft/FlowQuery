@@ -50,10 +50,10 @@ class GroupBy extends Projection {
     }
     private map() {
         let node: Node = this.current;
-        for(const mapper of this.mappers) {
+        for (const mapper of this.mappers) {
             const value: any = mapper.value();
             let child: Node | undefined = node.children.get(value);
-            if(child === undefined) {
+            if (child === undefined) {
                 child = new Node(value);
                 node.children.set(value, child);
             }
@@ -62,8 +62,8 @@ class GroupBy extends Projection {
         this.current = node;
     }
     private reduce() {
-        if(this.current.elements === null) {
-            this.current.elements = this.reducers.map(reducer => reducer.element());
+        if (this.current.elements === null) {
+            this.current.elements = this.reducers.map((reducer) => reducer.element());
         }
         const elements: AggregationElement[] = this.current.elements;
         this.reducers.forEach((reducer, index) => {
@@ -71,29 +71,37 @@ class GroupBy extends Projection {
         });
     }
     private get mappers(): Expression[] {
-        if(this._mappers === null) {
+        if (this._mappers === null) {
             this._mappers = [...this._generate_mappers()];
         }
         return this._mappers;
     }
     private *_generate_mappers(): Generator<Expression> {
-        for(const [expression, _] of this.expressions()) {
-            if(expression.mappable()) {
+        for (const [expression, _] of this.expressions()) {
+            if (expression.mappable()) {
                 yield expression;
             }
         }
     }
     private get reducers(): AggregateFunction[] {
-        if(this._reducers === null) {
-            this._reducers = this.children.map((child) => {
-                return (child as Expression).reducers();
-            }).flat();
+        if (this._reducers === null) {
+            this._reducers = this.children
+                .map((child) => {
+                    return (child as Expression).reducers();
+                })
+                .flat();
         }
         return this._reducers;
     }
-    public *generate_results(mapperIndex: number = 0, node: Node = this.root): Generator<Record<string, any>> {
-        if(node.children.size > 0) {
-            for(const child of node.children.values()) {
+    public *generate_results(
+        mapperIndex: number = 0,
+        node: Node = this.root
+    ): Generator<Record<string, any>> {
+        if (mapperIndex === 0 && node.children.size === 0 && this.mappers.length > 0) {
+            return;
+        }
+        if (node.children.size > 0) {
+            for (const child of node.children.values()) {
                 this.mappers[mapperIndex].overridden = child.value;
                 yield* this.generate_results(mapperIndex + 1, child);
             }
@@ -102,10 +110,10 @@ class GroupBy extends Projection {
                 this.reducers[reducerIndex].overridden = element.value;
             });
             const record: Record<string, any> = {};
-            for(const [expression, alias] of this.expressions()) {
+            for (const [expression, alias] of this.expressions()) {
                 record[alias] = expression.value();
             }
-            if(this.where) {
+            if (this.where) {
                 yield record;
             }
         }
@@ -114,11 +122,11 @@ class GroupBy extends Projection {
         this._where = where;
     }
     public get where(): boolean {
-        if(this._where === null) {
+        if (this._where === null) {
             return true;
         }
         return this._where.value();
     }
-};
+}
 
 export default GroupBy;

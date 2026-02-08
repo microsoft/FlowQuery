@@ -19,13 +19,10 @@ class RelationshipData(Data):
         self._build_index("left_id")
         self._build_index("right_id")
 
-    def find(self, left_id: str, hop: int = 0) -> bool:
-        """Find a relationship by start node ID."""
-        return self._find(left_id, hop, "left_id")
-
-    def find_reverse(self, right_id: str, hop: int = 0) -> bool:
-        """Find a relationship by end node ID (reverse direction)."""
-        return self._find(right_id, hop, "right_id")
+    def find(self, id: str, hop: int = 0, direction: str = "right") -> bool:
+        """Find a relationship by node ID and direction."""
+        key = "right_id" if direction == "left" else "left_id"
+        return self._find(id, hop, key)
 
     def properties(self) -> Optional[Dict[str, Any]]:
         """Get properties of current relationship, excluding left_id and right_id."""

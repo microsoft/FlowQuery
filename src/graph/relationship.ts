@@ -108,10 +108,12 @@ class Relationship extends ASTNode {
     public setEndNode(node: Node): void {
         this._matches.endNode = node;
     }
+    public _left_id_or_right_id(): string {
+        return this._direction === "left" ? "left_id" : "right_id";
+    }
     public async find(left_id: string, hop: number = 0): Promise<void> {
         // Save original source node
         const original = this._source;
-        const isLeft = this._direction === "left";
         if (hop > 0) {
             // For hops greater than 0, the source becomes the target of the previous hop
             this._source = this._target;
@@ -127,29 +129,26 @@ class Relationship extends ASTNode {
                 await this._target.find(left_id, hop);
             }
         }
-        const findMatch = isLeft
-            ? (id: string, h: number) => this._data!.findReverse(id, h)
-            : (id: string, h: number) => this._data!.find(id, h);
-        const followId = isLeft ? "left_id" : "right_id";
-        while (findMatch(left_id, hop)) {
+        while (this._data!.find(left_id, hop, this._direction)) {
             const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
+            const id = data[this._left_id_or_right_id()];
             if (hop + 1 >= this.hops!.min) {
                 this.setValue(this, left_id);
                 if (!this._matchesProperties(hop)) {
                     continue;
                 }
-                await this._target?.find(data[followId], hop);
+                await this._target?.find(id, hop);
                 if (hop + 1 < this.hops!.max) {
-                    if (this._matches.isCircular(data[followId])) {
+                    if (this._matches.isCircular(id)) {
                         this._matches.pop();
                         continue;
                     }
-                    await this.find(data[followId], hop + 1);
+                    await this.find(id, hop + 1);
                 }
                 this._matches.pop();
             } else {
                 // Below minimum hops: traverse the edge without yielding a match
-                await this.find(data[followId], hop + 1);
+                await this.find(id, hop + 1);
             }
         }
         // Restore original source node

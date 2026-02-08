@@ -637,6 +637,51 @@ class TestRunner:
         assert results[0] == {"stringify": '{\n   "a": 1,\n   "b": 2\n}'}
 
     @pytest.mark.asyncio
+    async def test_to_string_function_with_number(self):
+        """Test toString function with a number."""
+        runner = Runner("RETURN toString(42) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "42"}
+
+    @pytest.mark.asyncio
+    async def test_to_string_function_with_boolean(self):
+        """Test toString function with a boolean."""
+        runner = Runner("RETURN toString(true) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "true"}
+
+    @pytest.mark.asyncio
+    async def test_to_string_function_with_object(self):
+        """Test toString function with an object."""
+        runner = Runner("RETURN toString({a: 1}) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": '{"a": 1}'}
+
+    @pytest.mark.asyncio
+    async def test_to_lower_function(self):
+        """Test toLower function."""
+        runner = Runner('RETURN toLower("Hello World") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello world"}
+
+    @pytest.mark.asyncio
+    async def test_to_lower_function_with_all_uppercase(self):
+        """Test toLower function with all uppercase."""
+        runner = Runner('RETURN toLower("FOO BAR") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "foo bar"}
+
+    @pytest.mark.asyncio
     async def test_associative_array_with_key_which_is_keyword(self):
         """Test associative array with key which is keyword."""
         runner = Runner("RETURN {return: 1} as aa")

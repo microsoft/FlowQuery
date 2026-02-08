@@ -27,6 +27,8 @@ import "./stringify";
 // Import built-in functions to ensure their @FunctionDef decorators run
 import "./sum";
 import "./to_json";
+import "./to_lower";
+import "./to_string";
 import "./type";
 
 // Re-export AsyncDataProvider for backwards compatibility

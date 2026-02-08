@@ -573,6 +573,46 @@ test("Test stringify function", async () => {
     });
 });
 
+test("Test toString function with number", async () => {
+    const runner = new Runner("RETURN toString(42) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "42" });
+});
+
+test("Test toString function with boolean", async () => {
+    const runner = new Runner("RETURN toString(true) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "true" });
+});
+
+test("Test toString function with object", async () => {
+    const runner = new Runner("RETURN toString({a: 1}) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: '{"a":1}' });
+});
+
+test("Test toLower function", async () => {
+    const runner = new Runner('RETURN toLower("Hello World") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello world" });
+});
+
+test("Test toLower function with all uppercase", async () => {
+    const runner = new Runner('RETURN toLower("FOO BAR") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "foo bar" });
+});
+
 test("Test associative array with key which is keyword", async () => {
     const runner = new Runner("RETURN {return: 1} as aa");
     await runner.run();

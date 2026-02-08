@@ -43,6 +43,8 @@ enum Keyword {
     CONTAINS = "CONTAINS",
     STARTS = "STARTS",
     ENDS = "ENDS",
+    UNION = "UNION",
+    ALL = "ALL",
 }
 
 export default Keyword;

@@ -683,6 +683,18 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.LIMIT;
     }
 
+    public static get UNION(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.UNION);
+    }
+
+    public isUnion(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.UNION;
+    }
+
+    public static get ALL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ALL);
+    }
+
     // End of file token
 
     public static get EOF(): Token {

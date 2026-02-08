@@ -83,14 +83,18 @@ class MessageContent extends Component<MessageContentProps, MessageContentState>
         }
 
         // If FlowQuery blocks are hidden, render content without FlowQuery code blocks as markdown
+        // But don't strip them if it would leave the message empty or if the message contains error/failure indicators
         if (!showFlowQuery) {
             const contentWithoutFlowQuery = content.replace(/```flowquery\n[\s\S]*?```/gi, '').trim();
-            return (
-                <>
-                    <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentWithoutFlowQuery}</ReactMarkdown></div>
-                    {isStreaming && <Spinner size="tiny" className="streaming-indicator" />}
-                </>
-            );
+            if (contentWithoutFlowQuery && !/⚠️/.test(content)) {
+                return (
+                    <>
+                        <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{contentWithoutFlowQuery}</ReactMarkdown></div>
+                        {isStreaming && <Spinner size="tiny" className="streaming-indicator" />}
+                    </>
+                );
+            }
+            // Fall through to render with flowquery blocks visible
         }
 
         // Split content by FlowQuery code blocks and render with buttons
@@ -174,8 +178,23 @@ export class ChatMessage extends Component<ChatMessageProps, ChatMessageState> {
     constructor(props: ChatMessageProps) {
         super(props);
         this.state = {
-            showFlowQuery: false
+            showFlowQuery: this.containsError(props.message.content)
         };
+    }
+
+    componentDidUpdate(prevProps: ChatMessageProps): void {
+        // Auto-show FlowQuery blocks when error content appears (e.g. during streaming)
+        if (prevProps.message.content !== this.props.message.content) {
+            const hasError = this.containsError(this.props.message.content);
+            const hadError = this.containsError(prevProps.message.content);
+            if (hasError && !hadError && !this.state.showFlowQuery) {
+                this.setState({ showFlowQuery: true });
+            }
+        }
+    }
+
+    private containsError(content: string): boolean {
+        return /⚠️/.test(content);
     }
 
     private hasFlowQueryBlocks(): boolean {

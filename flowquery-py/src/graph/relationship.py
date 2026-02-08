@@ -123,9 +123,9 @@ class Relationship(ASTNode):
     def get_data(self) -> Optional['RelationshipData']:
         return self._data
 
-    def set_value(self, relationship: 'Relationship') -> None:
+    def set_value(self, relationship: 'Relationship', traversal_id: str = "") -> None:
         """Set value by pushing match to collector."""
-        self._matches.push(relationship)
+        self._matches.push(relationship, traversal_id)
         self._value = self._matches.value()
 
     def value(self) -> Optional[Union[RelationshipMatchRecord, List[RelationshipMatchRecord]]]:
@@ -168,14 +168,15 @@ class Relationship(ASTNode):
         while self._data and find_match(left_id, hop):
             data = self._data.current(hop)
             if data and self._hops and hop + 1 >= self._hops.min:
-                self.set_value(self)
+                self.set_value(self, left_id)
                 if not self._matches_properties(hop):
                     continue
                 if self._target and follow_id in data:
                     await self._target.find(data[follow_id], hop)
-                if self._matches.is_circular():
-                    raise ValueError("Circular relationship detected")
                 if self._hops and hop + 1 < self._hops.max:
+                    if self._matches.is_circular(data[follow_id]):
+                        self._matches.pop()
+                        continue
                     await self.find(data[follow_id], hop + 1)
                 self._matches.pop()
             elif data and self._hops:

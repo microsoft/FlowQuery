@@ -24,7 +24,7 @@ class RelationshipMatchCollector:
         self._matches: List[RelationshipMatchRecord] = []
         self._node_ids: List[str] = []
 
-    def push(self, relationship: 'Relationship') -> RelationshipMatchRecord:
+    def push(self, relationship: 'Relationship', traversal_id: str = "") -> RelationshipMatchRecord:
         """Push a new match onto the collector."""
         start_node_value = relationship.source.value() if relationship.source else None
         rel_data = relationship.get_data()
@@ -36,8 +36,7 @@ class RelationshipMatchCollector:
             "properties": rel_props,
         }
         self._matches.append(match)
-        if isinstance(start_node_value, dict):
-            self._node_ids.append(start_node_value.get("id", ""))
+        self._node_ids.append(traversal_id)
         return match
 
     @property
@@ -76,7 +75,6 @@ class RelationshipMatchCollector:
         """Get all matches."""
         return self._matches
 
-    def is_circular(self) -> bool:
-        """Check if the collected relationships form a circular pattern."""
-        seen = set(self._node_ids)
-        return len(seen) < len(self._node_ids)
+    def is_circular(self, next_id: str = "") -> bool:
+        """Check if traversing to the given node id would form a cycle."""
+        return next_id in self._node_ids

@@ -1279,8 +1279,8 @@ class TestRunner:
         assert len(results) == 2
 
     @pytest.mark.asyncio
-    async def test_circular_graph_pattern_with_variable_length_should_throw_error(self):
-        """Test circular graph pattern with variable length should throw error."""
+    async def test_circular_graph_pattern_with_variable_length_should_not_revisit_nodes(self):
+        """Test circular graph pattern with variable length should not revisit nodes."""
         await Runner(
             """
             CREATE VIRTUAL (:CircularVarPerson) AS {
@@ -1309,8 +1309,10 @@ class TestRunner:
             RETURN p AS pattern
             """
         )
-        with pytest.raises(ValueError, match="Circular relationship detected"):
-            await match.run()
+        await match.run()
+        results = match.results
+        # Circular graph 1↔2: cycles are skipped, only acyclic paths are returned
+        assert len(results) == 6
 
     @pytest.mark.asyncio
     async def test_multi_hop_match_with_min_hops_constraint_1(self):

@@ -1138,7 +1138,7 @@ test("Test circular graph pattern", async () => {
     expect(results[0].pattern[4].id).toBe(1);
 });
 
-test("Test circular graph pattern with variable length should throw error", async () => {
+test("Test circular graph pattern with variable length should not revisit nodes", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {
             unwind [
@@ -1161,9 +1161,10 @@ test("Test circular graph pattern with variable length should throw error", asyn
         MATCH p=(:Person)-[:KNOWS*]-(:Person)
         RETURN p AS pattern
     `);
-    await expect(async () => {
-        await match.run();
-    }).rejects.toThrow("Circular relationship detected");
+    await match.run();
+    const results = match.results;
+    // Circular graph 1↔2: cycles are skipped, only acyclic paths are returned
+    expect(results.length).toBe(6);
 });
 
 test("Test multi-hop match with min hops constraint *1..", async () => {

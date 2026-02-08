@@ -1279,8 +1279,8 @@ class TestRunner:
         assert len(results) == 2
 
     @pytest.mark.asyncio
-    async def test_circular_graph_pattern_with_variable_length_should_throw_error(self):
-        """Test circular graph pattern with variable length should throw error."""
+    async def test_circular_graph_pattern_with_variable_length_should_not_revisit_nodes(self):
+        """Test circular graph pattern with variable length should not revisit nodes."""
         await Runner(
             """
             CREATE VIRTUAL (:CircularVarPerson) AS {
@@ -1309,8 +1309,10 @@ class TestRunner:
             RETURN p AS pattern
             """
         )
-        with pytest.raises(ValueError, match="Circular relationship detected"):
-            await match.run()
+        await match.run()
+        results = match.results
+        # Circular graph 1↔2: cycles are skipped, only acyclic paths are returned
+        assert len(results) == 6
 
     @pytest.mark.asyncio
     async def test_multi_hop_match_with_min_hops_constraint_1(self):
@@ -2213,3 +2215,42 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0]["fruit"] == "pineapple"
+
+    @pytest.mark.asyncio
+    async def test_collected_nodes_and_re_matching(self):
+        """Test that collected nodes can be unwound and used as node references in subsequent MATCH."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:Person)-[:KNOWS*0..3]->(b:Person)
+            WITH collect(a) AS persons, b
+            UNWIND persons AS p
+            match (p)-[:KNOWS]->(:Person)
+            return p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 9
+        names = [r["name"] for r in results]
+        assert "Person 1" in names
+        assert "Person 2" in names
+        assert "Person 3" in names

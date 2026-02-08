@@ -11,7 +11,7 @@ class RelationshipMatchCollector {
     private _matches: RelationshipMatchRecord[] = [];
     private _nodeIds: Array<string> = [];
 
-    public push(relationship: Relationship): RelationshipMatchRecord {
+    public push(relationship: Relationship, traversalId: string): RelationshipMatchRecord {
         const match: RelationshipMatchRecord = {
             type: relationship.type!,
             startNode: relationship.source?.value() || {},
@@ -19,7 +19,7 @@ class RelationshipMatchCollector {
             properties: relationship.getData()?.properties() as Record<string, any>,
         };
         this._matches.push(match);
-        this._nodeIds.push(match.startNode.id);
+        this._nodeIds.push(traversalId);
         return match;
     }
     public set endNode(node: any) {
@@ -46,12 +46,11 @@ class RelationshipMatchCollector {
         return this._matches;
     }
     /*
-     ** Checks if the collected relationships form a circular pattern
-     ** meaning the same node id occur more than 2 times in the collected matches
+     ** Checks if traversing to the given node id would form a cycle
+     ** in the current traversal path
      */
-    public isCircular(): boolean {
-        const seen = new Set(this._nodeIds);
-        return seen.size < this._nodeIds.length;
+    public isCircular(nextId: string): boolean {
+        return this._nodeIds.includes(nextId);
     }
 }
 

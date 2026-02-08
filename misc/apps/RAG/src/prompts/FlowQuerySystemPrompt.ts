@@ -25,46 +25,131 @@ FlowQuery is a Cypher-inspired declarative query language for querying graph dat
    MATCH (a:User)-[:KNOWS]-(b:User)
    MATCH (user:User)-[:SENT]->(email:Email)
    MATCH p=(a:Person)-[:KNOWS*1..3]-(b:Person)
+   MATCH (e:Employee{name:'Alice'})
    \`\`\`
 
-2. **WHERE** - Filter matched patterns
+2. **OPTIONAL MATCH** - Match patterns, returning null for unmatched variables
+   \`\`\`
+   MATCH (a:Person)
+   OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+   RETURN a.name AS name, b AS friend
+   \`\`\`
+
+3. **WHERE** - Filter matched patterns
    \`\`\`
    MATCH (n:Person)
    WHERE n.age > 30
-   
+
    MATCH (a:User)-[:SENT]-(email:Email)
    WHERE email.subject CONTAINS 'urgent'
    \`\`\`
 
-3. **RETURN** - Specify output columns
+4. **RETURN** - Specify output columns
    \`\`\`
    RETURN n.name, n.email
    RETURN n.name AS Name, n.email AS Email
-   RETURN n  -- Return full node
-   RETURN *  -- Return all matched variables
+   RETURN n
+   RETURN DISTINCT n.category AS category
    \`\`\`
 
-4. **WITH** - Define intermediate variables or chain queries
+5. **WITH** - Define intermediate variables or chain queries
    \`\`\`
-   MATCH (n:User)
-   WITH n, size((n)-[:SENT]->()) AS emailCount
-   WHERE emailCount > 5
-   RETURN n.name, emailCount
+   MATCH (n:Person)
+   WITH n, n.age AS age
+   WHERE age > 30
+   RETURN n.name, age
+
+   // WITH DISTINCT
+   UNWIND [1, 1, 2, 2] AS i
+   WITH DISTINCT i AS i
+   RETURN sum(i) AS total
    \`\`\`
 
-5. **UNWIND** - Expand arrays into individual rows
+6. **UNWIND** - Expand arrays into individual rows
    \`\`\`
    UNWIND [1, 2, 3] AS number
    UNWIND n.tags AS tag
    \`\`\`
 
+7. **LOAD** - Fetch external data from URLs
+   \`\`\`
+   LOAD JSON FROM "https://api.example.com/data" AS item
+   RETURN item
+
+   // With POST body
+   LOAD JSON FROM "https://api.example.com/data" POST {userId: 1} AS data
+   RETURN data
+   \`\`\`
+
+8. **CALL ... YIELD** - Call async functions and yield results
+   \`\`\`
+   CALL schema() YIELD kind, label, type, sample
+   RETURN kind, label, type, sample
+   \`\`\`
+
+9. **UNION / UNION ALL** - Combine results from multiple sub-queries
+   \`\`\`
+   // UNION removes duplicates
+   WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x
+
+   // UNION ALL keeps duplicates
+   WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
+
+   // Chained
+   UNWIND [1, 2] AS x RETURN x UNION UNWIND [3, 4] AS x RETURN x
+   \`\`\`
+
+10. **LIMIT** - Restrict the number of intermediate rows
+    \`\`\`
+    UNWIND range(1, 100) AS i
+    LIMIT 10
+    RETURN i
+    \`\`\`
+
+11. **CASE** - Conditional expressions
+    \`\`\`
+    UNWIND range(1, 5) AS num
+    RETURN CASE WHEN num > 3 THEN num ELSE null END AS result
+    \`\`\`
+
 ### Pattern Syntax
 
 - **Nodes**: \`(variable:Label)\` or \`(variable)\` or \`(:Label)\`
+- **Node constraints**: \`(e:Employee{name:'Alice'})\` — inline property filters
 - **Relationships**: \`-[:TYPE]->\` (outgoing), \`<-[:TYPE]-\` (incoming), \`-[:TYPE]-\` (either direction)
   - Relationships are **bi-directional** — they can be traversed in both directions — but a pattern matches only **one direction at a time**. Use \`->\` or \`<-\` to specify which direction, or \`-[:TYPE]-\` to match either direction without specifying.
-- **Variable-length paths**: \`-[:TYPE*1..3]-\` (1 to 3 hops), \`-[:TYPE*]-\` (any number)
-- **Named paths**: \`p=(a)-[:KNOWS]-(b)\`
+- **Variable-length paths**: \`-[:TYPE*1..3]-\` (1 to 3 hops), \`-[:TYPE*]-\` (any number), \`-[:TYPE*1..]-\` (1 or more), \`-[:TYPE*2..]-\` (2 or more)
+- **Named paths**: \`p=(a)-[:KNOWS]-(b)\` — captures the full path including intermediate nodes and relationships
+- **Graph patterns in WHERE**: \`WHERE (a)-[:KNOWS]->(b)\` or \`WHERE NOT (a)-[:KNOWS]->(:Person)\`
+
+### Property Access
+
+- **Dot notation**: \`n.name\`, \`n.age\`
+- **Bracket notation**: \`n["name"]\`, \`obj["key with spaces"]\`
+- **Range slicing** (arrays): \`arr[0:3]\`, \`arr[:-2]\`, \`arr[2:-2]\`, \`arr[:]\`
+- **Chained access**: \`tojson('{"a": [1,2,3]}').a\`
+
+### Associative Arrays (Object Literals)
+
+Create inline objects in queries:
+\`\`\`
+RETURN {name: "Alice", age: 30} AS person
+WITH {sum: sum(j)} AS result
+\`\`\`
+
+### Predicate Expressions
+
+Iterate, filter, and transform collections inline:
+\`\`\`
+// Sum with filter
+RETURN sum(n in [1, 2, 3] | n where n > 1) AS sum  // → 5
+
+// Transform values
+RETURN sum(n in [1, 2, 3] | n^2) AS sum  // → 14
+
+// Without filter
+RETURN sum(n in [1, 2, 3] | n) AS sum  // → 6
+\`\`\`
 
 ### Examples
 
@@ -74,7 +159,7 @@ MATCH (u:User)
 RETURN u.name, u.email
 
 // Find users and their managers
-MATCH (user:User)-[:MANAGES]-(manager:User)
+MATCH (user:User)-[:MANAGES]->(manager:User)
 RETURN user.name AS Employee, manager.name AS Manager
 
 // Find emails sent by a specific user
@@ -82,18 +167,65 @@ MATCH (u:User)-[:SENT]->(e:Email)
 WHERE u.name = 'Alice'
 RETURN e.subject, e.sentDate
 
-// Find chain of relationships
-MATCH (a:User)-[:KNOWS*1..2]-(b:User)
+// Find chain of relationships (1 to 2 hops)
+MATCH (a:User)-[:KNOWS*1..2]->(b:User)
 WHERE a.name = 'Bob'
 RETURN b.name AS Connection
+
+// Multi-MATCH with variable references (chained queries)
+MATCH (ceo:User)-[:MANAGES]->(dr1:User)
+WHERE ceo.jobTitle = 'CEO'
+WITH ceo, dr1
+MATCH (ceo)-[:MANAGES]->(dr2:User)
+WHERE dr1.name <> dr2.name
+RETURN ceo.name AS ceo, dr1.name AS dr1, dr2.name AS dr2
+
+// Find persons who don't know anyone
+MATCH (a:Person)
+WHERE NOT (a)-[:KNOWS]->(:Person)
+RETURN a.name AS name
+
+// Optional match with aggregation
+MATCH (a:Person)
+OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+RETURN a.name AS name, collect(b) AS friends
+
+// Leftward traversal — find who reports to a manager
+MATCH (manager:Person)<-[:REPORTS_TO]-(employee:Person)
+RETURN manager.name AS manager, employee.name AS employee
+
+// Aggregation pipeline
+UNWIND [1, 1, 2, 2] AS i
+UNWIND range(1, 3) AS j
+WITH i, collect(distinct j) AS collected
+RETURN i, collected
+
+// Null filtering
+UNWIND [{name: 'Alice', age: 30}, {name: 'Bob'}] AS person
+WITH person.name AS name, person.age AS age
+WHERE age IS NOT NULL
+RETURN name, age
+
+// String filtering
+UNWIND ['apple', 'banana', 'grape', 'pineapple'] AS fruit
+WITH fruit
+WHERE fruit CONTAINS 'apple'
+RETURN fruit
+
+// Distinct return
+UNWIND [1, 1, 2, 2, 3, 3] AS i
+RETURN DISTINCT i
 \`\`\`
 
 ### Built-in Functions
 
 - **Aggregation**: \`count()\`, \`sum()\`, \`avg()\`, \`min()\`, \`max()\`, \`collect()\`
-- **String**: \`size()\`, \`trim()\`, \`toLower()\`, \`toUpper()\`, \`split()\`, \`join()\`, \`replace()\`
+  - Supports \`DISTINCT\`: \`count(distinct x)\`, \`collect(distinct x)\`
+- **String**: \`size()\`, \`trim()\`, \`toLower()\`, \`toUpper()\`, \`split()\`, \`join()\`, \`replace()\`, \`string_distance()\`
+- **Math**: \`round()\`, \`rand()\`
 - **List**: \`range()\`, \`head()\`, \`tail()\`, \`last()\`, \`size()\`, \`reverse()\`
 - **Type**: \`type()\`, \`toInteger()\`, \`toFloat()\`, \`toString()\`
+- **JSON**: \`tojson()\` (parse JSON string to object), \`stringify()\` (object to JSON string)
 - **Utility**: \`keys()\`, \`properties()\`
 
 ### F-Strings (Template Literals)
@@ -102,14 +234,38 @@ Use \`f"..."\` for string interpolation:
 \`\`\`
 MATCH (u:User)
 RETURN f"Name: {u.name}, Email: {u.email}" AS info
+
+// Expressions inside braces are evaluated
+WITH range(1,3) AS numbers
+RETURN f"total: {sum(n in numbers | n)}" AS f
+
+// Escape braces with double braces
+RETURN f"literal {{braces}}" AS f
 \`\`\`
 
-### Comparison Operators
+### Arithmetic Operators
+
+- \`+\` (add numbers, concatenate strings, merge lists), \`-\`, \`*\`, \`/\`
+- \`^\` (exponent / power)
+- \`%\` (modulo)
+- Parentheses for grouping: \`(2 + 3) * 4\`
+
+### Comparison & Logical Operators
 
 - \`=\`, \`<>\` (not equal), \`<\`, \`>\`, \`<=\`, \`>=\`
 - \`AND\`, \`OR\`, \`NOT\`
-- \`IN\`, \`CONTAINS\`, \`STARTS WITH\`, \`ENDS WITH\`
+- \`IN\`, \`NOT IN\`
+- \`CONTAINS\`, \`NOT CONTAINS\`
+- \`STARTS WITH\`, \`NOT STARTS WITH\`
+- \`ENDS WITH\`, \`NOT ENDS WITH\`
 - \`IS NULL\`, \`IS NOT NULL\`
+
+### Backtick-Escaped Identifiers
+
+Use backticks for identifiers that conflict with reserved words or contain special characters:
+\`\`\`
+RETURN i=5 AS \\\`isEqual\\\`
+\`\`\`
 `;
 
 /**
@@ -215,10 +371,11 @@ When the user asks a question that doesn't require data fetching (e.g., asking a
 - Use meaningful aliases in RETURN statements for better readability
 - Generate the simplest query that fulfills the user's request
 - If you cannot determine what the user needs, ask clarifying questions (with [NO_QUERY_NEEDED])
-- Do not use order by or coalesce
-- Do not use list comprehension [i for i in ...]
+- Do not use ORDER BY, SKIP, or COALESCE (these are not supported)
+- Do not use list comprehension \`[i for i in ...]\` — use predicate expressions instead: \`sum(n in list | n where condition)\`
 - Do not use substring function
-- Do not use limit or skip
+- Aggregate functions cannot be nested (e.g., \`sum(sum(x))\` is invalid)
+- UNION sub-queries must have the same return column names
 
 ${FLOWQUERY_LANGUAGE_REFERENCE}
 
@@ -310,8 +467,9 @@ ${nodeList}
 Available relationships:
 ${relList}
 
-FlowQuery uses Cypher-like syntax: MATCH, WITH, UNWIND, WHERE, RETURN.
+FlowQuery uses Cypher-like syntax: MATCH, OPTIONAL MATCH, WITH, UNWIND, WHERE, RETURN, LOAD, CALL...YIELD, UNION, LIMIT, CASE.
 Use f"..." for string interpolation. Access properties with dot notation or brackets.
+Supports DISTINCT, predicate expressions, associative arrays, range slicing, and IS NULL / IS NOT NULL.
 
 Always wrap FlowQuery code in \`\`\`flowquery code blocks.`;
     }

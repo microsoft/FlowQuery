@@ -1,6 +1,7 @@
 enum Keyword {
     RETURN = "RETURN",
     MATCH = "MATCH",
+    OPTIONAL = "OPTIONAL",
     WHERE = "WHERE",
     CREATE = "CREATE",
     VIRTUAL = "VIRTUAL",
@@ -42,6 +43,8 @@ enum Keyword {
     CONTAINS = "CONTAINS",
     STARTS = "STARTS",
     ENDS = "ENDS",
+    UNION = "UNION",
+    ALL = "ALL",
 }
 
 export default Keyword;

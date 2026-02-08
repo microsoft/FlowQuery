@@ -6,6 +6,7 @@ This is the Python implementation of FlowQuery.
 This module provides the core components for defining, parsing, and executing FlowQuery queries.
 """
 
+from .compute.flowquery import FlowQuery
 from .compute.runner import Runner
 from .io.command_line import CommandLine
 from .parsing.functions.aggregate_function import AggregateFunction
@@ -21,6 +22,7 @@ from .parsing.functions.reducer_element import ReducerElement
 from .parsing.parser import Parser
 
 __all__ = [
+    "FlowQuery",
     "Runner",
     "CommandLine",
     "Parser",

@@ -75,7 +75,7 @@ class Node(ASTNode):
             return bool(record[key] == expression.value())
         return True
 
-    def set_value(self, value: Dict[str, Any]) -> None:
+    def set_value(self, value: Optional[Dict[str, Any]]) -> None:
         self._value = value  # type: ignore[assignment]
 
     def value(self) -> Optional['NodeRecord']:

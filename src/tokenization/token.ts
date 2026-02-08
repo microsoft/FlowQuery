@@ -507,6 +507,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.MATCH;
     }
 
+    public static get OPTIONAL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.OPTIONAL);
+    }
+
+    public isOptional(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.OPTIONAL;
+    }
+
     public static get AS(): Token {
         return new Token(TokenType.KEYWORD, Keyword.AS);
     }
@@ -673,6 +681,22 @@ class Token {
 
     public isLimit(): boolean {
         return this._type === TokenType.KEYWORD && this._value === Keyword.LIMIT;
+    }
+
+    public static get UNION(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.UNION);
+    }
+
+    public isUnion(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.UNION;
+    }
+
+    public static get ALL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ALL);
+    }
+
+    public isAll(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ALL;
     }
 
     // End of file token

@@ -8,6 +8,7 @@ class Keyword(Enum):
 
     RETURN = "RETURN"
     MATCH = "MATCH"
+    OPTIONAL = "OPTIONAL"
     WHERE = "WHERE"
     CREATE = "CREATE"
     VIRTUAL = "VIRTUAL"
@@ -49,3 +50,5 @@ class Keyword(Enum):
     CONTAINS = "CONTAINS"
     STARTS = "STARTS"
     ENDS = "ENDS"
+    UNION = "UNION"
+    ALL = "ALL"

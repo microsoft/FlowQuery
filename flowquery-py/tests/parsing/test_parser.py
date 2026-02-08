@@ -1090,3 +1090,85 @@ class TestParser:
             "----- Number (3)"
         )
         assert ast.print() == expected
+
+    def test_optional_match_operation(self):
+        """Test optional match operation."""
+        parser = Parser()
+        ast = parser.parse("OPTIONAL MATCH (n:Person) RETURN n")
+        expected = (
+            "ASTNode\n"
+            "- OptionalMatch\n"
+            "- Return\n"
+            "-- Expression (n)\n"
+            "--- Reference (n)"
+        )
+        assert ast.print() == expected
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        assert match.optional is True
+        assert match.patterns[0].start_node is not None
+        assert match.patterns[0].start_node.label == "Person"
+        assert match.patterns[0].start_node.identifier == "n"
+
+    def test_optional_match_with_relationships(self):
+        """Test optional match with graph pattern including relationships."""
+        parser = Parser()
+        ast = parser.parse("OPTIONAL MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b")
+        expected = (
+            "ASTNode\n"
+            "- OptionalMatch\n"
+            "- Return\n"
+            "-- Expression (a)\n"
+            "--- Reference (a)\n"
+            "-- Expression (b)\n"
+            "--- Reference (b)"
+        )
+        assert ast.print() == expected
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        assert match.optional is True
+        assert len(match.patterns[0].chain) == 3
+        source = match.patterns[0].chain[0]
+        relationship = match.patterns[0].chain[1]
+        target = match.patterns[0].chain[2]
+        assert source.identifier == "a"
+        assert source.label == "Person"
+        assert relationship.type == "KNOWS"
+        assert target.identifier == "b"
+        assert target.label == "Person"
+
+    def test_match_followed_by_optional_match(self):
+        """Test match followed by optional match."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b:Person) RETURN a, b")
+        expected = (
+            "ASTNode\n"
+            "- Match\n"
+            "- OptionalMatch\n"
+            "- Return\n"
+            "-- Expression (a)\n"
+            "--- Reference (a)\n"
+            "-- Expression (b)\n"
+            "--- Reference (b)"
+        )
+        assert ast.print() == expected
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        assert match.optional is False
+        optional_match = match.next
+        assert isinstance(optional_match, Match)
+        assert optional_match.optional is True
+
+    def test_regular_match_is_not_optional(self):
+        """Test that regular match is not optional."""
+        parser = Parser()
+        ast = parser.parse("MATCH (n:Person) RETURN n")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        assert match.optional is False
+
+    def test_optional_without_match_throws_error(self):
+        """Test that OPTIONAL without MATCH throws error."""
+        parser = Parser()
+        with pytest.raises(Exception, match="Expected MATCH after OPTIONAL"):
+            parser.parse("OPTIONAL RETURN 1")

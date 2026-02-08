@@ -46,6 +46,36 @@ export interface AgentResult {
 export type AgentStreamCallback = (chunk: string, step: AgentStep["type"]) => void;
 
 /**
+ * Represents a single thinking/reasoning entry shown in the collapsible thinking panel.
+ */
+export interface ThinkingEntry {
+    /** Unique id for this entry */
+    id: string;
+    /** Timestamp of the entry */
+    timestamp: Date;
+    /** Type of thinking step */
+    type:
+        | "query_generated"
+        | "query_executing"
+        | "query_succeeded"
+        | "retry_start"
+        | "retry_error"
+        | "retry_query"
+        | "retry_success"
+        | "retry_fail";
+    /** Human-readable label */
+    label: string;
+    /** Optional detail content (e.g. error text, corrected query) */
+    detail?: string;
+    /** The FlowQuery statement (for entries that can be opened in the runner) */
+    query?: string;
+    /** Retry attempt number */
+    attempt?: number;
+    /** Total max retries */
+    maxAttempts?: number;
+}
+
+/**
  * Options for the FlowQuery agent.
  */
 export interface FlowQueryAgentOptions {
@@ -318,6 +348,8 @@ export class FlowQueryAgent {
             done: boolean;
             steps?: AgentStep[];
             newMessage?: boolean;
+            /** A thinking/reasoning entry to display in a collapsible panel */
+            thinkingEntry?: ThinkingEntry;
         },
         void,
         unknown
@@ -364,14 +396,33 @@ export class FlowQueryAgent {
                 return;
             }
 
-            // Emit intermediate step: show the query being executed
-            if (showIntermediateSteps) {
-                yield {
-                    chunk: `\`\`\`flowquery\n${extraction.query}\n\`\`\`\n\n`,
-                    step: "query_generation",
-                    done: false,
-                };
-            }
+            // Emit thinking entry: query generated
+            yield {
+                chunk: "",
+                step: "query_generation",
+                done: false,
+                thinkingEntry: {
+                    id: "thinking-query-generated",
+                    timestamp: new Date(),
+                    type: "query_generated",
+                    label: "Generated FlowQuery",
+                    detail: extraction.query!,
+                    query: extraction.query!,
+                },
+            };
+
+            // Emit thinking entry: executing
+            yield {
+                chunk: "",
+                step: "query_execution",
+                done: false,
+                thinkingEntry: {
+                    id: "thinking-query-executing",
+                    timestamp: new Date(),
+                    type: "query_executing",
+                    label: "Executing query...",
+                },
+            };
 
             // Step 3: Execute the FlowQuery
             let executionResult = await this.flowQueryExecutor.execute(extraction.query!);
@@ -387,6 +438,22 @@ export class FlowQueryAgent {
                 },
             });
 
+            // If first attempt succeeded, emit success thinking entry
+            if (executionResult.success) {
+                yield {
+                    chunk: "",
+                    step: "query_execution",
+                    done: false,
+                    thinkingEntry: {
+                        id: "thinking-query-succeeded",
+                        timestamp: new Date(),
+                        type: "query_succeeded",
+                        label: `Query succeeded (${executionResult.executionTime.toFixed(0)}ms, ${executionResult.results?.length ?? 0} results)`,
+                        query: extraction.query!,
+                    },
+                };
+            }
+
             // Handle execution errors with retry logic
             if (!executionResult.success) {
                 const maxRetries = options.maxRetries ?? 2;
@@ -398,26 +465,34 @@ export class FlowQueryAgent {
                 while (!currentResult.success && retryCount < maxRetries) {
                     retryCount++;
 
-                    // Show the failure in the current message before marking it complete
-                    yield {
-                        chunk: `\n⚠️ **Query execution failed:** ${currentError}\n`,
-                        step: "query_execution",
-                        done: false,
-                    };
-
-                    // Complete the previous message before starting a new one
+                    // Emit thinking entries instead of separate chat messages
                     yield {
                         chunk: "",
-                        step: "query_execution",
-                        done: true,
-                    };
-
-                    // Notify user of retry attempt - start a new message for the retry
-                    yield {
-                        chunk: `🔄 Attempting to fix (retry ${retryCount}/${maxRetries})...\n\n`,
                         step: "retry",
                         done: false,
-                        newMessage: true,
+                        thinkingEntry: {
+                            id: `thinking-error-${retryCount}`,
+                            timestamp: new Date(),
+                            type: "retry_error",
+                            label: `Query execution failed`,
+                            detail: currentError || "Unknown error",
+                            attempt: retryCount,
+                            maxAttempts: maxRetries,
+                        },
+                    };
+
+                    yield {
+                        chunk: "",
+                        step: "retry",
+                        done: false,
+                        thinkingEntry: {
+                            id: `thinking-retry-${retryCount}`,
+                            timestamp: new Date(),
+                            type: "retry_start",
+                            label: `Attempting to fix (retry ${retryCount}/${maxRetries})...`,
+                            attempt: retryCount,
+                            maxAttempts: maxRetries,
+                        },
                     };
 
                     steps.push({
@@ -442,6 +517,20 @@ export class FlowQueryAgent {
                     if (!correctedQuery) {
                         // LLM couldn't generate a correction
                         yield {
+                            chunk: "",
+                            step: "retry",
+                            done: false,
+                            thinkingEntry: {
+                                id: `thinking-fail-${retryCount}`,
+                                timestamp: new Date(),
+                                type: "retry_fail",
+                                label: `Unable to generate a corrected query`,
+                                detail: "Please try rephrasing your request.",
+                                attempt: retryCount,
+                                maxAttempts: maxRetries,
+                            },
+                        };
+                        yield {
                             chunk: `Unable to generate a corrected query. Please try rephrasing your request.\n`,
                             step: "retry",
                             done: true,
@@ -450,14 +539,22 @@ export class FlowQueryAgent {
                         return;
                     }
 
-                    // Show the corrected query
-                    if (showIntermediateSteps) {
-                        yield {
-                            chunk: `**Corrected query:**\n\`\`\`flowquery\n${correctedQuery}\n\`\`\`\n\n`,
-                            step: "retry",
-                            done: false,
-                        };
-                    }
+                    // Emit thinking entry for the corrected query
+                    yield {
+                        chunk: "",
+                        step: "retry",
+                        done: false,
+                        thinkingEntry: {
+                            id: `thinking-corrected-${retryCount}`,
+                            timestamp: new Date(),
+                            type: "retry_query",
+                            label: `Generated corrected query (attempt ${retryCount})`,
+                            detail: correctedQuery,
+                            query: correctedQuery,
+                            attempt: retryCount,
+                            maxAttempts: maxRetries,
+                        },
+                    };
 
                     // Try executing the corrected query
                     currentQuery = correctedQuery;
@@ -477,16 +574,39 @@ export class FlowQueryAgent {
 
                 // If still failing after retries, give up
                 if (!currentResult.success) {
+                    yield {
+                        chunk: "",
+                        step: "retry",
+                        done: false,
+                        thinkingEntry: {
+                            id: `thinking-final-fail`,
+                            timestamp: new Date(),
+                            type: "retry_fail",
+                            label: `Failed after ${maxRetries} retries`,
+                            detail: currentError || "Unknown error",
+                            attempt: maxRetries,
+                            maxAttempts: maxRetries,
+                        },
+                    };
                     const errorMessage = `⚠️ Query execution failed after ${maxRetries} retries: ${currentError}\n\nLast query attempted:\n\`\`\`flowquery\n${currentQuery}\n\`\`\``;
                     yield { chunk: errorMessage, step: "query_execution", done: true, steps };
                     return;
                 }
 
-                // Mark the retry message as complete before proceeding to interpretation
+                // Emit success thinking entry
                 yield {
                     chunk: "",
                     step: "retry",
-                    done: true,
+                    done: false,
+                    thinkingEntry: {
+                        id: `thinking-success-${retryCount}`,
+                        timestamp: new Date(),
+                        type: "retry_success",
+                        label: `Query succeeded on retry ${retryCount} (${currentResult.executionTime.toFixed(0)}ms, ${currentResult.results?.length ?? 0} results)`,
+                        query: currentQuery,
+                        attempt: retryCount,
+                        maxAttempts: maxRetries,
+                    },
                 };
 
                 // Update executionResult for interpretation phase

@@ -238,11 +238,11 @@ export class ApiKeySettings extends Component<ApiKeySettingsProps, ApiKeySetting
                                 />
                             </Field>
 
-                            <Field label="Default Model" hint="Optional - defaults to gpt-4o-mini">
+                            <Field label="Default Model" hint="Optional - defaults to gpt-5.2">
                                 <Input
                                     value={model}
                                     onChange={this.handleModelChange}
-                                    placeholder="gpt-4o-mini"
+                                    placeholder="gpt-5.2"
                                 />
                             </Field>
 

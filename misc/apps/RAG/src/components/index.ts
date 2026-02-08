@@ -14,7 +14,11 @@ export type {
     AgentResult,
     FlowQueryAgentOptions,
     AgentStreamCallback,
+    ThinkingEntry,
 } from "./FlowQueryAgent";
+
+// Thinking Panel
+export { ThinkingPanel } from "./ThinkingPanel";
 
 // Types
 export type { Message } from "./ChatMessage";

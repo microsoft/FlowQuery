@@ -11,7 +11,7 @@ export interface LlmOptions {
     systemPrompt?: string;
     /** Conversation history */
     messages?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
-    /** Model to use (defaults to stored model or gpt-4o-mini) */
+    /** Model to use (defaults to stored model or gpt-5.2) */
     model?: string;
     /** Temperature for response generation (0-2, default 0.7) */
     temperature?: number;
@@ -85,7 +85,7 @@ function getApiConfig(options: LlmOptions): {
     return {
         apiKey,
         orgId: options.organizationId || storedConfig?.organizationId,
-        model: options.model || storedConfig?.model || "gpt-4o-mini",
+        model: options.model || storedConfig?.model || "gpt-5.2",
         baseUrl: options.baseUrl || "https://api.openai.com/v1",
     };
 }

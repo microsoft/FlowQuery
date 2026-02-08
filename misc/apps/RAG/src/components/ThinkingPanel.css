@@ -1,0 +1,239 @@
+/* ===== Thinking Panel ===== */
+.thinking-panel {
+    margin: 8px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+    background-color: #fafbfc;
+}
+
+.thinking-panel-active {
+    border-color: #0078d4;
+    border-left: 3px solid #0078d4;
+}
+
+.thinking-panel-done {
+    border-color: #d0d7de;
+    border-left: 3px solid #d0d7de;
+}
+
+/* Header / toggle button */
+.thinking-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 500;
+    color: #444;
+    transition: background-color 0.15s ease;
+}
+
+.thinking-panel-header:hover {
+    background-color: #f0f2f5;
+}
+
+.thinking-panel-chevron {
+    font-size: 12px;
+    color: #666;
+    flex-shrink: 0;
+    width: 12px;
+}
+
+.thinking-panel-spinner {
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.thinking-panel-summary {
+    flex-shrink: 0;
+    color: #555;
+}
+
+.thinking-panel-active .thinking-panel-summary {
+    color: #0078d4;
+    font-weight: 600;
+}
+
+/* Pulsing dot indicator */
+.thinking-panel-pulse {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #0078d4;
+    flex-shrink: 0;
+    animation: thinking-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.4;
+        transform: scale(0.75);
+    }
+}
+
+/* Live status shown when collapsed */
+.thinking-panel-live-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: #888;
+    font-weight: 400;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: italic;
+    padding-left: 4px;
+    border-left: 1px solid #ddd;
+}
+
+/* Body / timeline */
+.thinking-panel-body {
+    padding: 4px 12px 12px;
+    border-top: 1px solid #e8e8e8;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.thinking-panel-timeline {
+    position: relative;
+    padding-left: 4px;
+}
+
+/* Vertical connector line */
+.thinking-panel-timeline::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background-color: #e0e0e0;
+    border-radius: 1px;
+}
+
+/* Individual entry */
+.thinking-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 0;
+    position: relative;
+}
+
+.thinking-entry-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+    width: 22px;
+    text-align: center;
+    z-index: 1;
+    background-color: #fafbfc;
+    padding: 2px 0;
+}
+
+.thinking-entry-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.thinking-entry-label {
+    font-weight: 500;
+    color: #333;
+    line-height: 1.4;
+}
+
+/* Header row with label + run button */
+.thinking-entry-header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.thinking-entry-run-button {
+    font-size: 11px;
+    min-width: unset;
+    padding: 1px 6px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.thinking-entry-detail {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #666;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.thinking-entry-error .thinking-entry-detail {
+    color: #c50f1f;
+}
+
+.thinking-entry-code {
+    margin: 4px 0 0;
+    padding: 8px 10px;
+    background-color: #f0f2f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+.thinking-entry-code code {
+    font-family: inherit;
+    background: none;
+    padding: 0;
+}
+
+.thinking-entry-time {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: #999;
+}
+
+/* Entry type-specific styling */
+.thinking-entry-retry_error .thinking-entry-label {
+    color: #c50f1f;
+}
+
+.thinking-entry-retry_success .thinking-entry-label {
+    color: #107c10;
+}
+
+.thinking-entry-retry_fail .thinking-entry-label {
+    color: #c50f1f;
+    font-weight: 600;
+}
+
+.thinking-entry-retry_start .thinking-entry-label {
+    color: #0078d4;
+}
+
+.thinking-entry-query_generated .thinking-entry-label {
+    color: #0078d4;
+}
+
+.thinking-entry-query_executing .thinking-entry-label {
+    color: #888;
+    font-style: italic;
+}
+
+.thinking-entry-query_succeeded .thinking-entry-label {
+    color: #107c10;
+}

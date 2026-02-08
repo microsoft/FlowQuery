@@ -2,7 +2,7 @@ import React, { Component, createRef, RefObject } from 'react';
 import { Spinner } from '@fluentui/react-components';
 import { ChatMessage, Message } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { FlowQueryAgent } from './FlowQueryAgent';
+import { FlowQueryAgent, ThinkingEntry } from './FlowQueryAgent';
 import { getMaxRetries } from './ApiKeySettings';
 import './ChatContainer.css';
 
@@ -96,18 +96,32 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
             }));
 
             let fullContent = '';
+            let thinkingEntries: ThinkingEntry[] = [];
             
-            for await (const { chunk, done, newMessage } of this.agent.processQueryStream(content, {
+            for await (const { chunk, done, newMessage, thinkingEntry } of this.agent.processQueryStream(content, {
                 systemPrompt: systemPrompt ?? 'You are a helpful assistant. Be concise and informative in your responses.',
                 conversationHistory: conversationHistory.slice(0, -1),
                 showIntermediateSteps,
                 maxRetries: getMaxRetries(),
             })) {
+                // Accumulate thinking entries for the collapsible panel
+                if (thinkingEntry) {
+                    thinkingEntries = [...thinkingEntries, thinkingEntry];
+                    this.setState(prev => ({
+                        messages: prev.messages.map(msg => 
+                            msg.id === currentMessageId 
+                                ? { ...msg, thinkingEntries: thinkingEntries, isThinking: true }
+                                : msg
+                        )
+                    }));
+                }
+
                 // If newMessage flag is set, finalize current message and start a new one
                 if (newMessage) {
                     const previousMessageId = currentMessageId;
                     currentMessageId = this.generateMessageId();
                     fullContent = '';
+                    thinkingEntries = [];
                     const newAssistantMessage: Message = {
                         id: currentMessageId,
                         role: 'assistant',
@@ -118,7 +132,7 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
                     this.setState(prev => ({
                         messages: [...prev.messages.map(msg => 
                             msg.id === previousMessageId 
-                                ? { ...msg, isStreaming: false }
+                                ? { ...msg, isStreaming: false, isThinking: false }
                                 : msg
                         ), newAssistantMessage]
                     }));
@@ -139,7 +153,7 @@ export class ChatContainer extends Component<ChatContainerProps, ChatContainerSt
                     this.setState(prev => ({
                         messages: prev.messages.map(msg => 
                             msg.id === currentMessageId 
-                                ? { ...msg, isStreaming: false }
+                                ? { ...msg, isStreaming: false, isThinking: false }
                                 : msg
                         )
                     }));

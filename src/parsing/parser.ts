@@ -418,7 +418,16 @@ class Parser extends BaseParser {
     }
 
     private parseMatch(): Match | null {
+        let optional = false;
+        if (this.token.isOptional()) {
+            optional = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         if (!this.token.isMatch()) {
+            if (optional) {
+                throw new Error("Expected MATCH after OPTIONAL");
+            }
             return null;
         }
         this.setNextToken();
@@ -427,7 +436,7 @@ class Parser extends BaseParser {
         if (patterns.length === 0) {
             throw new Error("Expected graph pattern");
         }
-        return new Match(patterns);
+        return new Match(patterns, optional);
     }
 
     private parseNode(): Node | null {

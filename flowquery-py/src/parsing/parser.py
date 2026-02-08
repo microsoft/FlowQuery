@@ -318,14 +318,21 @@ class Parser(BaseParser):
         return call
 
     def _parse_match(self) -> Optional[Match]:
+        optional = False
+        if self.token.is_optional():
+            optional = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_match():
+            if optional:
+                raise ValueError("Expected MATCH after OPTIONAL")
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
         patterns = list(self._parse_patterns())
         if len(patterns) == 0:
             raise ValueError("Expected graph pattern")
-        return Match(patterns)
+        return Match(patterns, optional)
 
     def _parse_create(self) -> Optional[Operation]:
         """Parse CREATE VIRTUAL statement for nodes and relationships."""

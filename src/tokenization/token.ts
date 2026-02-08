@@ -507,6 +507,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.MATCH;
     }
 
+    public static get OPTIONAL(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.OPTIONAL);
+    }
+
+    public isOptional(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.OPTIONAL;
+    }
+
     public static get AS(): Token {
         return new Token(TokenType.KEYWORD, Keyword.AS);
     }

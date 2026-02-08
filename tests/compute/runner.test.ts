@@ -1716,6 +1716,194 @@ test("Test match with leftward double graph pattern", async () => {
     expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
 });
 
+test("Test optional match with no matching relationship", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Person 3 has no KNOWS relationship, so OPTIONAL MATCH should return null for friend
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b AS friend
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0].name).toBe("Person 1");
+    expect(results[0].friend).toBeDefined();
+    expect(results[0].friend.name).toBe("Person 2");
+    expect(results[1].name).toBe("Person 2");
+    expect(results[1].friend).toBeNull();
+    expect(results[2].name).toBe("Person 3");
+    expect(results[2].friend).toBeNull();
+});
+
+test("Test optional match where all nodes match", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // All persons have KNOWS relationships, so no null values
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b.name AS friend
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1", friend: "Person 2" });
+    expect(results[1]).toEqual({ name: "Person 2", friend: "Person 1" });
+});
+
+test("Test optional match with no data returns nulls", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // KNOWS relationship type exists but has no data
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b AS friend
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0].name).toBe("Person 1");
+    expect(results[0].friend).toBeNull();
+    expect(results[1].name).toBe("Person 2");
+    expect(results[1].friend).toBeNull();
+});
+
+test("Test optional match with aggregation", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Collect friends per person; Person 2 and 3 have no friends
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, collect(b) AS friends
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0].name).toBe("Person 1");
+    expect(results[0].friends.length).toBe(2);
+    expect(results[1].name).toBe("Person 2");
+    expect(results[1].friends.length).toBe(1); // null is collected
+    expect(results[2].name).toBe("Person 3");
+    expect(results[2].friends.length).toBe(1); // null is collected
+});
+
+test("Test standalone optional match returns data when label exists", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Standalone OPTIONAL MATCH with relationship where only Person 1 has a match
+    const match = new Runner(`
+        OPTIONAL MATCH (a:Person)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b.name AS friend
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Person 1", friend: "Person 2" });
+});
+
+test("Test optional match returns full node when matched", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    // OPTIONAL MATCH on existing label returns actual nodes
+    const match = new Runner(`
+        OPTIONAL MATCH (n:Person)
+        RETURN n.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Person 1" });
+    expect(results[1]).toEqual({ name: "Person 2" });
+});
+
 test("Test schema() returns nodes and relationships with sample data", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Animal) AS {

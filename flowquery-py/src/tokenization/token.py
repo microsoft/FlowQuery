@@ -463,6 +463,13 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.MATCH.value
 
     @staticmethod
+    def OPTIONAL() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.OPTIONAL.value)
+
+    def is_optional(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.OPTIONAL.value
+
+    @staticmethod
     def AS() -> Token:
         return Token(TokenType.KEYWORD, Keyword.AS.value)
 

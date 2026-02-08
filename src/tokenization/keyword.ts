@@ -1,6 +1,7 @@
 enum Keyword {
     RETURN = "RETURN",
     MATCH = "MATCH",
+    OPTIONAL = "OPTIONAL",
     WHERE = "WHERE",
     CREATE = "CREATE",
     VIRTUAL = "VIRTUAL",

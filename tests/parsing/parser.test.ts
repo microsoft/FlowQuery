@@ -1156,3 +1156,79 @@ test("Test parenthesized expression with multiplication", () => {
         "----- Number (3)"
     );
 });
+
+test("Test optional match operation", () => {
+    const parser = new Parser();
+    const ast = parser.parse("OPTIONAL MATCH (n:Person) RETURN n");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+        "- OptionalMatch\n" +
+        "- Return\n" +
+        "-- Expression (n)\n" +
+        "--- Reference (n)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.optional).toBe(true);
+    expect(match.patterns[0].startNode).not.toBeNull();
+    expect(match.patterns[0].startNode!.label).toBe("Person");
+    expect(match.patterns[0].startNode!.identifier).toBe("n");
+});
+
+test("Optional match with relationships", () => {
+    const parser = new Parser();
+    const ast = parser.parse("OPTIONAL MATCH (a:Person)-[:KNOWS]-(b:Person) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- OptionalMatch\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.optional).toBe(true);
+    expect(match.patterns[0].chain.length).toBe(3);
+    const source = match.patterns[0].chain[0] as Node;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    const target = match.patterns[0].chain[2] as Node;
+    expect(source.identifier).toBe("a");
+    expect(source.label).toBe("Person");
+    expect(relationship.type).toBe("KNOWS");
+    expect(target.identifier).toBe("b");
+    expect(target.label).toBe("Person");
+});
+
+test("Match followed by optional match", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]-(b:Person) RETURN a, b");
+    // prettier-ignore
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Match\n" +
+            "- OptionalMatch\n" +
+            "- Return\n" +
+            "-- Expression (a)\n" +
+            "--- Reference (a)\n" +
+            "-- Expression (b)\n" +
+            "--- Reference (b)"
+    );
+    const match = ast.firstChild() as Match;
+    expect(match.optional).toBe(false);
+    const optionalMatch = match.next as Match;
+    expect(optionalMatch.optional).toBe(true);
+});
+
+test("Regular match is not optional", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (n:Person) RETURN n");
+    const match = ast.firstChild() as Match;
+    expect(match.optional).toBe(false);
+});
+
+test("OPTIONAL without MATCH throws error", () => {
+    const parser = new Parser();
+    expect(() => parser.parse("OPTIONAL RETURN 1")).toThrow("Expected MATCH after OPTIONAL");
+});

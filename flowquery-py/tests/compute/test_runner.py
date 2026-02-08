@@ -1852,6 +1852,236 @@ class TestRunner:
         assert results[0]["name"] == "Employee 1"
 
     @pytest.mark.asyncio
+    async def test_optional_match_with_no_matching_relationship(self):
+        """Test optional match with no matching relationship returns null."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPerson)-[:KNOWS]-(:OptPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Person 3 has no KNOWS relationship, so OPTIONAL MATCH should return null for friend
+        match = Runner(
+            """
+            MATCH (a:OptPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"] is not None
+        assert results[0]["friend"]["name"] == "Person 2"
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"] is None
+        assert results[2]["name"] == "Person 3"
+        assert results[2]["friend"] is None
+
+    @pytest.mark.asyncio
+    async def test_optional_match_where_all_nodes_match(self):
+        """Test optional match where all nodes have matching relationships."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAllPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAllPerson)-[:KNOWS]-(:OptAllPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 1}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # All persons have KNOWS relationships, so no null values
+        match = Runner(
+            """
+            MATCH (a:OptAllPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptAllPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"]["name"] == "Person 2"
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"]["name"] == "Person 1"
+
+    @pytest.mark.asyncio
+    async def test_optional_match_with_no_data_returns_nulls(self):
+        """Test optional match with no matching data returns nulls."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptNullPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptNullPerson)-[:KNOWS]-(:OptNullPerson) AS {
+                unwind [] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # KNOWS relationship type exists but has no data
+        match = Runner(
+            """
+            MATCH (a:OptNullPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptNullPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"] is None
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"] is None
+
+    @pytest.mark.asyncio
+    async def test_optional_match_with_aggregation(self):
+        """Test optional match with aggregation (collect friends)."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAggPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAggPerson)-[:KNOWS]-(:OptAggPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Collect friends per person; Person 2 and 3 have no friends
+        match = Runner(
+            """
+            MATCH (a:OptAggPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptAggPerson)
+            RETURN a.name AS name, collect(b) AS friends
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0]["name"] == "Person 1"
+        assert len(results[0]["friends"]) == 2
+        assert results[1]["name"] == "Person 2"
+        assert len(results[1]["friends"]) == 1  # null is collected
+        assert results[2]["name"] == "Person 3"
+        assert len(results[2]["friends"]) == 1  # null is collected
+
+    @pytest.mark.asyncio
+    async def test_standalone_optional_match_returns_data(self):
+        """Test standalone optional match returns data when label exists."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptStandalonePerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptStandalonePerson)-[:KNOWS]-(:OptStandalonePerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Standalone OPTIONAL MATCH with relationship where only Person 1 has a match
+        match = Runner(
+            """
+            OPTIONAL MATCH (a:OptStandalonePerson)-[:KNOWS]->(b:OptStandalonePerson)
+            RETURN a.name AS name, b.name AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Person 1", "friend": "Person 2"}
+
+    @pytest.mark.asyncio
+    async def test_optional_match_returns_full_node_when_matched(self):
+        """Test optional match on existing label returns actual nodes."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptFullPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        # OPTIONAL MATCH on existing label returns actual nodes
+        match = Runner(
+            """
+            OPTIONAL MATCH (n:OptFullPerson)
+            RETURN n.name AS name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Person 1"}
+        assert results[1] == {"name": "Person 2"}
+
+    @pytest.mark.asyncio
     async def test_schema_returns_nodes_and_relationships_with_sample_data(self):
         """Test schema() returns nodes and relationships with sample data."""
         await Runner(

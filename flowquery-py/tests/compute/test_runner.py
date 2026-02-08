@@ -2213,3 +2213,42 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0]["fruit"] == "pineapple"
+
+    @pytest.mark.asyncio
+    async def test_collected_nodes_and_re_matching(self):
+        """Test that collected nodes can be unwound and used as node references in subsequent MATCH."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:Person)-[:KNOWS*0..3]->(b:Person)
+            WITH collect(a) AS persons, b
+            UNWIND persons AS p
+            match (p)-[:KNOWS]->(:Person)
+            return p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 9
+        names = [r["name"] for r in results]
+        assert "Person 1" in names
+        assert "Person 2" in names
+        assert "Person 3" in names

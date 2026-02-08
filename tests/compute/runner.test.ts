@@ -2064,3 +2064,107 @@ test("Test WHERE with CONTAINS combined with AND", async () => {
     expect(results.length).toBe(1);
     expect(results[0].fruit).toBe("pineapple");
 });
+
+test("Test collected nodes and re-matching", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS*0..3]->(b:Person)
+        WITH collect(a) AS persons, b
+        UNWIND persons AS p
+        match (p)-[:KNOWS]->(:Person)
+        return p.name AS name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(9);
+    const names = results.map((r: any) => r.name);
+    expect(names).toContain("Person 1");
+    expect(names).toContain("Person 2");
+    expect(names).toContain("Person 3");
+});
+
+test("Test collected patterns and unwind", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'},
+                {id: 4, name: 'Person 4'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH p=(a:Person)-[:KNOWS*0..3]->(b:Person)
+        WITH collect(p) AS patterns
+        UNWIND patterns AS pattern
+        RETURN pattern
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(10);
+    // Index 0: Person 1 zero-hop - pattern = [node1] (single node)
+    expect(results[0].pattern.length).toBe(1);
+    expect(results[0].pattern[0].id).toBe(1);
+
+    // Index 1: Person 1 -> Person 2 (1-hop)
+    expect(results[1].pattern.length).toBe(3);
+
+    // Index 2: Person 1 -> Person 2 -> Person 3 (2-hop)
+    expect(results[2].pattern.length).toBe(5);
+
+    // Index 3: Person 1 -> Person 2 -> Person 3 -> Person 4 (3-hop)
+    expect(results[3].pattern.length).toBe(7);
+
+    // Index 4: Person 2 zero-hop - pattern = [node2]
+    expect(results[4].pattern.length).toBe(1);
+    expect(results[4].pattern[0].id).toBe(2);
+
+    // Index 5: Person 2 -> Person 3 (1-hop)
+    expect(results[5].pattern.length).toBe(3);
+
+    // Index 6: Person 2 -> Person 3 -> Person 4 (2-hop)
+    expect(results[6].pattern.length).toBe(5);
+
+    // Index 7: Person 3 zero-hop - pattern = [node3]
+    expect(results[7].pattern.length).toBe(1);
+    expect(results[7].pattern[0].id).toBe(3);
+
+    // Index 8: Person 3 -> Person 4 (1-hop)
+    expect(results[8].pattern.length).toBe(3);
+
+    // Index 9: Person 4 zero-hop - pattern = [node4]
+    expect(results[9].pattern.length).toBe(1);
+    expect(results[9].pattern[0].id).toBe(4);
+});

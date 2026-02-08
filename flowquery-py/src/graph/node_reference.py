@@ -2,27 +2,28 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ..parsing.ast_node import ASTNode
 from .node import Node
 
 
 class NodeReference(Node):
     """Represents a reference to an existing node variable."""
 
-    def __init__(self, base: Node, reference: Node) -> None:
+    def __init__(self, base: Node, reference: ASTNode) -> None:
         super().__init__(base.identifier, base.label)
-        self._reference: Node = reference
+        self._reference: ASTNode = reference
         # Copy properties from base
         self._properties = base._properties
         self._outgoing = base.outgoing
         self._incoming = base.incoming
 
     @property
-    def reference(self) -> Node:
+    def reference(self) -> ASTNode:
         return self._reference
 
     # Keep referred as alias for backward compatibility
     @property
-    def referred(self) -> Node:
+    def referred(self) -> ASTNode:
         return self._reference
 
     def value(self) -> Optional[Any]:

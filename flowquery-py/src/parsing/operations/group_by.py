@@ -1,11 +1,21 @@
 """GroupBy implementation for aggregate operations."""
 
+import json
 from typing import Any, Dict, Generator, List, Optional
 
 from ..ast_node import ASTNode
 from ..functions.aggregate_function import AggregateFunction
 from ..functions.reducer_element import ReducerElement
 from .projection import Projection
+
+
+def _make_hashable(value: Any) -> Any:
+    """Convert a value to a hashable form for use as a dict key."""
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True, default=str)
+    if isinstance(value, list):
+        return json.dumps(value, sort_keys=True, default=str)
+    return value
 
 
 class GroupByNode:
@@ -60,10 +70,11 @@ class GroupBy(Projection):
         node = self._current
         for mapper in self.mappers:
             value = mapper.value()
-            child = node.children.get(value)
+            key = _make_hashable(value)
+            child = node.children.get(key)
             if child is None:
                 child = GroupByNode(value)
-                node.children[value] = child
+                node.children[key] = child
             node = child
         self._current = node
 

@@ -467,7 +467,10 @@ class Parser extends BaseParser {
                     reference = inner;
                 }
             }
-            if (reference === undefined || !(reference instanceof Node)) {
+            if (
+                reference === undefined ||
+                (!(reference instanceof Node) && !(reference instanceof Unwind))
+            ) {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }
             node = new NodeReference(node, reference);

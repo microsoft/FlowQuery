@@ -499,7 +499,7 @@ class Parser(BaseParser):
                 inner = ref_child.referred
                 if isinstance(inner, Node):
                     reference = inner
-            if reference is None or not isinstance(reference, Node):
+            if reference is None or (not isinstance(reference, Node) and not isinstance(reference, Unwind)):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
         elif identifier is not None:

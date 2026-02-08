@@ -839,7 +839,7 @@ test("Parse statement with graph pattern in where clause", () => {
     const source = pattern.chain[0] as NodeReference;
     const relationship = pattern.chain[1] as Relationship;
     const target = pattern.chain[2] as Node;
-    expect(source.reference?.identifier).toBe("a");
+    expect((source.reference as Node)?.identifier).toBe("a");
     expect(relationship.type).toBe("KNOWS");
     expect(target.label).toBe("Person");
 });
@@ -909,7 +909,7 @@ test("Test node reference with label creates NodeReference instead of new node",
     expect(firstNode.identifier).toBe("n");
     expect(firstNode.label).toBe("Person");
     expect(secondNode).toBeInstanceOf(NodeReference);
-    expect(secondNode.reference!.identifier).toBe("n");
+    expect((secondNode.reference! as Node).identifier).toBe("n");
     expect(secondNode.label).toBe("Person");
 });
 

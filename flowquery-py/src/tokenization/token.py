@@ -463,6 +463,13 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.MATCH.value
 
     @staticmethod
+    def OPTIONAL() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.OPTIONAL.value)
+
+    def is_optional(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.OPTIONAL.value
+
+    @staticmethod
     def AS() -> Token:
         return Token(TokenType.KEYWORD, Keyword.AS.value)
 
@@ -608,6 +615,20 @@ class Token:
 
     def is_limit(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.LIMIT.value
+
+    @staticmethod
+    def UNION() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.UNION.value)
+
+    def is_union(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.UNION.value
+
+    @staticmethod
+    def ALL() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ALL.value)
+
+    def is_all(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ALL.value
 
     # End of file token
 

@@ -1852,6 +1852,236 @@ class TestRunner:
         assert results[0]["name"] == "Employee 1"
 
     @pytest.mark.asyncio
+    async def test_optional_match_with_no_matching_relationship(self):
+        """Test optional match with no matching relationship returns null."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPerson)-[:KNOWS]-(:OptPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Person 3 has no KNOWS relationship, so OPTIONAL MATCH should return null for friend
+        match = Runner(
+            """
+            MATCH (a:OptPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"] is not None
+        assert results[0]["friend"]["name"] == "Person 2"
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"] is None
+        assert results[2]["name"] == "Person 3"
+        assert results[2]["friend"] is None
+
+    @pytest.mark.asyncio
+    async def test_optional_match_where_all_nodes_match(self):
+        """Test optional match where all nodes have matching relationships."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAllPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAllPerson)-[:KNOWS]-(:OptAllPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 1}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # All persons have KNOWS relationships, so no null values
+        match = Runner(
+            """
+            MATCH (a:OptAllPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptAllPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"]["name"] == "Person 2"
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"]["name"] == "Person 1"
+
+    @pytest.mark.asyncio
+    async def test_optional_match_with_no_data_returns_nulls(self):
+        """Test optional match with no matching data returns nulls."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptNullPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptNullPerson)-[:KNOWS]-(:OptNullPerson) AS {
+                unwind [] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # KNOWS relationship type exists but has no data
+        match = Runner(
+            """
+            MATCH (a:OptNullPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptNullPerson)
+            RETURN a.name AS name, b AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0]["name"] == "Person 1"
+        assert results[0]["friend"] is None
+        assert results[1]["name"] == "Person 2"
+        assert results[1]["friend"] is None
+
+    @pytest.mark.asyncio
+    async def test_optional_match_with_aggregation(self):
+        """Test optional match with aggregation (collect friends)."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAggPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptAggPerson)-[:KNOWS]-(:OptAggPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Collect friends per person; Person 2 and 3 have no friends
+        match = Runner(
+            """
+            MATCH (a:OptAggPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptAggPerson)
+            RETURN a.name AS name, collect(b) AS friends
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0]["name"] == "Person 1"
+        assert len(results[0]["friends"]) == 2
+        assert results[1]["name"] == "Person 2"
+        assert len(results[1]["friends"]) == 1  # null is collected
+        assert results[2]["name"] == "Person 3"
+        assert len(results[2]["friends"]) == 1  # null is collected
+
+    @pytest.mark.asyncio
+    async def test_standalone_optional_match_returns_data(self):
+        """Test standalone optional match returns data when label exists."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptStandalonePerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptStandalonePerson)-[:KNOWS]-(:OptStandalonePerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Standalone OPTIONAL MATCH with relationship where only Person 1 has a match
+        match = Runner(
+            """
+            OPTIONAL MATCH (a:OptStandalonePerson)-[:KNOWS]->(b:OptStandalonePerson)
+            RETURN a.name AS name, b.name AS friend
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Person 1", "friend": "Person 2"}
+
+    @pytest.mark.asyncio
+    async def test_optional_match_returns_full_node_when_matched(self):
+        """Test optional match on existing label returns actual nodes."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptFullPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        # OPTIONAL MATCH on existing label returns actual nodes
+        match = Runner(
+            """
+            OPTIONAL MATCH (n:OptFullPerson)
+            RETURN n.name AS name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Person 1"}
+        assert results[1] == {"name": "Person 2"}
+
+    @pytest.mark.asyncio
     async def test_schema_returns_nodes_and_relationships_with_sample_data(self):
         """Test schema() returns nodes and relationships with sample data."""
         await Runner(
@@ -2269,3 +2499,314 @@ class TestRunner:
         assert "Person 1" in names
         assert "Person 2" in names
         assert "Person 3" in names
+
+    # ============================================================
+    # Add operator tests
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_add_two_integers(self):
+        """Test add two integers."""
+        runner = Runner("return 1 + 2 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 3}
+
+    @pytest.mark.asyncio
+    async def test_add_negative_number(self):
+        """Test add with a negative number."""
+        runner = Runner("return -3 + 7 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 4}
+
+    @pytest.mark.asyncio
+    async def test_add_to_negative_result(self):
+        """Test add to negative result."""
+        runner = Runner("return 0 - 10 + 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -6}
+
+    @pytest.mark.asyncio
+    async def test_add_zero(self):
+        """Test add zero."""
+        runner = Runner("return 42 + 0 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_add_floating_point_numbers(self):
+        """Test add floating point numbers."""
+        runner = Runner("return 1.5 + 2.3 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(3.8)
+
+    @pytest.mark.asyncio
+    async def test_add_integer_and_float(self):
+        """Test add integer and float."""
+        runner = Runner("return 1 + 0.5 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(1.5)
+
+    @pytest.mark.asyncio
+    async def test_add_strings(self):
+        """Test add strings."""
+        runner = Runner('return "hello" + " world" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello world"}
+
+    @pytest.mark.asyncio
+    async def test_add_empty_strings(self):
+        """Test add empty strings."""
+        runner = Runner('return "" + "" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": ""}
+
+    @pytest.mark.asyncio
+    async def test_add_string_and_empty_string(self):
+        """Test add string and empty string."""
+        runner = Runner('return "hello" + "" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_add_two_lists(self):
+        """Test add two lists."""
+        runner = Runner("return [1, 2] + [3, 4] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, 2, 3, 4]}
+
+    @pytest.mark.asyncio
+    async def test_add_empty_list_to_list(self):
+        """Test add empty list to list."""
+        runner = Runner("return [1, 2, 3] + [] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, 2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_add_two_empty_lists(self):
+        """Test add two empty lists."""
+        runner = Runner("return [] + [] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": []}
+
+    @pytest.mark.asyncio
+    async def test_add_lists_with_mixed_types(self):
+        """Test add lists with mixed types."""
+        runner = Runner('return [1, "a"] + [2, "b"] as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, "a", 2, "b"]}
+
+    @pytest.mark.asyncio
+    async def test_add_chained_three_numbers(self):
+        """Test add chained three numbers."""
+        runner = Runner("return 1 + 2 + 3 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 6}
+
+    @pytest.mark.asyncio
+    async def test_add_chained_multiple_numbers(self):
+        """Test add chained multiple numbers."""
+        runner = Runner("return 10 + 20 + 30 + 40 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 100}
+
+    @pytest.mark.asyncio
+    async def test_add_large_numbers(self):
+        """Test add large numbers."""
+        runner = Runner("return 1000000 + 2000000 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 3000000}
+
+    @pytest.mark.asyncio
+    async def test_add_with_unwind(self):
+        """Test add with unwind."""
+        runner = Runner("unwind [1, 2, 3] as x return x + 10 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"result": 11}
+        assert results[1] == {"result": 12}
+        assert results[2] == {"result": 13}
+
+    @pytest.mark.asyncio
+    async def test_add_with_multiple_return_expressions(self):
+        """Test add with multiple return expressions."""
+        runner = Runner("return 1 + 2 as sum1, 3 + 4 as sum2, 5 + 6 as sum3")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"sum1": 3, "sum2": 7, "sum3": 11}
+
+    @pytest.mark.asyncio
+    async def test_add_mixed_with_other_operators(self):
+        """Test add mixed with other operators (precedence)."""
+        runner = Runner("return 2 + 3 * 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 14}
+
+    @pytest.mark.asyncio
+    async def test_add_with_parentheses(self):
+        """Test add with parentheses."""
+        runner = Runner("return (2 + 3) * 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 20}
+
+    @pytest.mark.asyncio
+    async def test_add_nested_lists(self):
+        """Test add nested lists."""
+        runner = Runner("return [[1, 2]] + [[3, 4]] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [[1, 2], [3, 4]]}
+
+    @pytest.mark.asyncio
+    async def test_add_with_with_clause(self):
+        """Test add with with clause."""
+        runner = Runner("with 5 as a, 10 as b return a + b as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 15}
+
+    # ============================================================
+    # UNION and UNION ALL tests
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_union_with_simple_values(self):
+        """Test UNION with simple values."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 2}]
+
+    @pytest.mark.asyncio
+    async def test_union_removes_duplicates(self):
+        """Test UNION removes duplicates."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 1 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_all_keeps_duplicates(self):
+        """Test UNION ALL keeps duplicates."""
+        runner = Runner("WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_multiple_columns(self):
+        """Test UNION with multiple columns."""
+        runner = Runner(
+            "WITH 1 AS a, 'hello' AS b RETURN a, b UNION WITH 2 AS a, 'world' AS b RETURN a, b"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [
+            {"a": 1, "b": "hello"},
+            {"a": 2, "b": "world"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_union_all_with_multiple_columns(self):
+        """Test chained UNION ALL with three branches."""
+        runner = Runner(
+            "WITH 1 AS a RETURN a UNION ALL WITH 2 AS a RETURN a UNION ALL WITH 3 AS a RETURN a"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results == [{"a": 1}, {"a": 2}, {"a": 3}]
+
+    @pytest.mark.asyncio
+    async def test_chained_union_removes_duplicates(self):
+        """Test chained UNION removes duplicates across all branches."""
+        runner = Runner(
+            "WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x UNION WITH 1 AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 2}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_unwind(self):
+        """Test UNION with UNWIND."""
+        runner = Runner(
+            "UNWIND [1, 2] AS x RETURN x UNION UNWIND [3, 4] AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert results == [{"x": 1}, {"x": 2}, {"x": 3}, {"x": 4}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_mismatched_columns(self):
+        """Test UNION with mismatched columns throws error."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 2 AS y RETURN y")
+        with pytest.raises(ValueError, match="All sub queries in a UNION must have the same return column names"):
+            await runner.run()
+
+    @pytest.mark.asyncio
+    async def test_union_with_empty_left_side(self):
+        """Test UNION with empty left side."""
+        runner = Runner(
+            "UNWIND [] AS x RETURN x UNION WITH 1 AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_empty_right_side(self):
+        """Test UNION with empty right side."""
+        runner = Runner(
+            "WITH 1 AS x RETURN x UNION UNWIND [] AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]

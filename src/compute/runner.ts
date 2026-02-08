@@ -1,6 +1,4 @@
 import ASTNode from "../parsing/ast_node";
-import Function from "../parsing/functions/function";
-import { FunctionMetadata } from "../parsing/functions/function_metadata";
 import Operation from "../parsing/operations/operation";
 import Parser from "../parsing/parser";
 
@@ -20,28 +18,6 @@ import Parser from "../parsing/parser";
 class Runner {
     private first: Operation;
     private last: Operation;
-
-    /**
-     * List all registered functions with their metadata.
-     * Added dynamically in index.browser.ts / index.node.ts
-     */
-    static listFunctions: (options?: {
-        category?: string;
-        asyncOnly?: boolean;
-        syncOnly?: boolean;
-    }) => FunctionMetadata[];
-
-    /**
-     * Get metadata for a specific function.
-     * Added dynamically in index.browser.ts / index.node.ts
-     */
-    static getFunctionMetadata: (name: string) => FunctionMetadata | undefined;
-
-    /**
-     * Base Function class for creating custom plugin functions.
-     * Added dynamically in index.browser.ts / index.node.ts
-     */
-    static Function: typeof Function;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.

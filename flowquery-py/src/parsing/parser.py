@@ -20,7 +20,6 @@ from .components.from_ import From
 from .components.headers import Headers
 from .components.null import Null
 from .components.post import Post
-from .context import Context
 from .data_structures.associative_array import AssociativeArray
 from .data_structures.json_array import JSONArray
 from .data_structures.key_value_pair import KeyValuePair
@@ -68,6 +67,7 @@ from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
 from .operations.where import Where
 from .operations.with_op import With
+from .parser_state import ParserState
 
 
 class Parser(BaseParser):
@@ -84,9 +84,7 @@ class Parser(BaseParser):
 
     def __init__(self, tokens: Optional[List[Token]] = None):
         super().__init__(tokens)
-        self._variables: Dict[str, ASTNode] = {}
-        self._context = Context()
-        self._returns = 0
+        self._state = ParserState()
 
     def parse(self, statement: str) -> ASTNode:
         """Parses a FlowQuery statement into an Abstract Syntax Tree.
@@ -124,7 +122,7 @@ class Parser(BaseParser):
             elif operation is None and is_sub_query:
                 return root
 
-            if self._returns > 1:
+            if self._state.returns > 1:
                 raise ValueError("Only one RETURN statement is allowed")
 
             if isinstance(previous, Call) and not previous.has_yield:
@@ -154,26 +152,20 @@ class Parser(BaseParser):
 
         # Handle UNION: wrap left and right pipelines into a Union node
         if not self.token.is_eof() and self.token.is_union():
-            if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
+            if not isinstance(operation, (Return, Call)):
                 raise ValueError(
-                    "Each side of UNION must end with a RETURN, CALL, or CREATE statement"
+                    "Each side of UNION must end with a RETURN or CALL statement"
                 )
             union = self._parse_union()
             assert union is not None
             union.left = root.first_child()  # type: ignore[assignment]
             # Save and reset parser state for right-side scope
-            saved_returns = self._returns
-            saved_variables = dict(self._variables)
-            saved_context = self._context
-            self._returns = 0
-            self._variables = {}
-            self._context = Context()
+            state: ParserState = self._state
+            self._state = ParserState()
             right_root = self._parse_tokenized(is_sub_query)
             union.right = right_root.first_child()  # type: ignore[assignment]
             # Restore parser state
-            self._returns = saved_returns
-            self._variables = saved_variables
-            self._context = saved_context
+            self._state = state
             new_root = ASTNode()
             new_root.add_child(union)
             return new_root
@@ -231,7 +223,7 @@ class Parser(BaseParser):
         else:
             raise ValueError("Expected alias")
         unwind = Unwind(expression)
-        self._variables[alias.get_alias()] = unwind
+        self._state.variables[alias.get_alias()] = unwind
         return unwind
 
     def _parse_return(self) -> Optional[Return]:
@@ -249,7 +241,7 @@ class Parser(BaseParser):
             raise ValueError("Expected expression")
         if distinct or any(expr.has_reducers() for expr in expressions):
             return AggregatedReturn(expressions)
-        self._returns += 1
+        self._state.increment_returns()
         return Return(expressions)
 
     def _parse_where(self) -> Optional[Where]:
@@ -323,7 +315,7 @@ class Parser(BaseParser):
         alias = self._parse_alias()
         if alias is not None:
             load.add_child(alias)
-            self._variables[alias.get_alias()] = load
+            self._state.variables[alias.get_alias()] = load
         else:
             raise ValueError("Expected alias")
         return load
@@ -463,7 +455,7 @@ class Parser(BaseParser):
             if pattern is not None:
                 if identifier is not None:
                     pattern.identifier = identifier
-                    self._variables[identifier] = pattern
+                    self._state.variables[identifier] = pattern
                 yield pattern
             else:
                 break
@@ -543,8 +535,8 @@ class Parser(BaseParser):
         node = Node()
         node.label = label
         node.properties = dict(self._parse_properties())
-        if identifier is not None and identifier in self._variables:
-            reference = self._variables.get(identifier)
+        if identifier is not None and identifier in self._state.variables:
+            reference = self._state.variables.get(identifier)
             # Resolve through Expression -> Reference -> Node (e.g., after WITH)
             ref_child = reference.first_child() if isinstance(reference, Expression) else None
             if isinstance(ref_child, Reference):
@@ -556,7 +548,7 @@ class Parser(BaseParser):
             node = NodeReference(node, reference)
         elif identifier is not None:
             node.identifier = identifier
-            self._variables[identifier] = node
+            self._state.variables[identifier] = node
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected closing parenthesis for node definition")
         self.set_next_token()
@@ -599,8 +591,8 @@ class Parser(BaseParser):
         relationship = Relationship()
         relationship.direction = direction
         relationship.properties = properties
-        if variable is not None and variable in self._variables:
-            reference = self._variables.get(variable)
+        if variable is not None and variable in self._state.variables:
+            reference = self._state.variables.get(variable)
             # Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
             first = reference.first_child() if isinstance(reference, Expression) else None
             if isinstance(first, Reference):
@@ -612,7 +604,7 @@ class Parser(BaseParser):
             relationship = RelationshipReference(relationship, reference)
         elif variable is not None:
             relationship.identifier = variable
-            self._variables[variable] = relationship
+            self._state.variables[variable] = relationship
         if hops is not None:
             relationship.hops = hops
         relationship.type = rel_type
@@ -699,7 +691,7 @@ class Parser(BaseParser):
                     reference = expression.first_child()
                     assert isinstance(reference, Reference)  # For type narrowing
                     expression.set_alias(reference.identifier)
-                    self._variables[reference.identifier] = expression
+                    self._state.variables[reference.identifier] = expression
                 elif (alias_option == AliasOption.REQUIRED and
                       alias is None and
                       not isinstance(expression.first_child(), Reference)):
@@ -708,7 +700,7 @@ class Parser(BaseParser):
                     raise ValueError("Alias not allowed")
                 elif alias_option in (AliasOption.OPTIONAL, AliasOption.REQUIRED) and alias is not None:
                     expression.set_alias(alias.get_alias())
-                    self._variables[alias.get_alias()] = expression
+                    self._state.variables[alias.get_alias()] = expression
                 yield expression
             else:
                 break
@@ -722,7 +714,7 @@ class Parser(BaseParser):
         self._skip_whitespace_and_comments()
         if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
-            reference = Reference(identifier, self._variables.get(identifier))
+            reference = Reference(identifier, self._state.variables.get(identifier))
             self.set_next_token()
             lookup = self._parse_lookup(reference)
             expression.add_node(lookup)
@@ -1070,7 +1062,7 @@ class Parser(BaseParser):
         if not self.token.is_identifier():
             raise ValueError("Expected identifier")
         reference = Reference(self.token.value)
-        self._variables[reference.identifier] = reference
+        self._state.variables[reference.identifier] = reference
         func.add_child(reference)
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
@@ -1104,7 +1096,7 @@ class Parser(BaseParser):
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected right parenthesis")
         self.set_next_token()
-        del self._variables[reference.identifier]
+        del self._state.variables[reference.identifier]
         return func
 
     def _parse_function(self) -> Optional[Function]:
@@ -1120,10 +1112,10 @@ class Parser(BaseParser):
             raise ValueError(f"Unknown function: {name}")
 
         # Check for nested aggregate functions
-        if isinstance(func, AggregateFunction) and self._context.contains_type(AggregateFunction):
+        if isinstance(func, AggregateFunction) and self._state.context.contains_type(AggregateFunction):
             raise ValueError("Aggregate functions cannot be nested")
 
-        self._context.push(func)
+        self._state.context.push(func)
         self.set_next_token()  # skip function name
         self.set_next_token()  # skip left parenthesis
         self._skip_whitespace_and_comments()
@@ -1140,7 +1132,7 @@ class Parser(BaseParser):
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected right parenthesis")
         self.set_next_token()
-        self._context.pop()
+        self._state.context.pop()
         return func
 
     def _parse_async_function(self) -> Optional[AsyncFunction]:

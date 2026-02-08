@@ -63,6 +63,7 @@ import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
 import Where from "./operations/where";
 import With from "./operations/with";
+import ParserState from "./parser_state";
 
 /**
  * Main parser for FlowQuery statements.
@@ -78,9 +79,7 @@ import With from "./operations/with";
  * ```
  */
 class Parser extends BaseParser {
-    private variables: Map<string, ASTNode> = new Map();
-    private context: Context = new Context();
-    private _returns: number = 0;
+    private _state: ParserState = new ParserState();
 
     /**
      * Parses a FlowQuery statement into an Abstract Syntax Tree.
@@ -119,7 +118,7 @@ class Parser extends BaseParser {
             } else if (operation === null && isSubQuery) {
                 return root;
             }
-            if (this._returns > 1) {
+            if (this._state.returns > 1) {
                 throw new Error("Only one RETURN statement is allowed");
             }
             if (previous instanceof Call && !previous.hasYield) {
@@ -150,31 +149,18 @@ class Parser extends BaseParser {
         }
         // Handle UNION: wrap left and right pipelines into a Union node
         if (!this.token.isEOF() && this.token.isUnion()) {
-            if (
-                !(operation instanceof Return) &&
-                !(operation instanceof Call) &&
-                !(operation instanceof CreateNode) &&
-                !(operation instanceof CreateRelationship)
-            ) {
-                throw new Error(
-                    "Each side of UNION must end with a RETURN, CALL, or CREATE statement"
-                );
+            if (!(operation instanceof Return) && !(operation instanceof Call)) {
+                throw new Error("Each side of UNION must end with a RETURN or CALL statement");
             }
             const union = this.parseUnion()!;
             union.left = root.firstChild() as Operation;
             // Save and reset parser state for right-side scope
-            const savedReturns = this._returns;
-            const savedVariables = new Map(this.variables);
-            const savedContext = this.context;
-            this._returns = 0;
-            this.variables = new Map();
-            this.context = new Context();
-            const rightRoot = this._parseTokenized(isSubQuery);
-            union.right = rightRoot.firstChild() as Operation;
+            const state = this._state;
+            this._state = new ParserState();
+            const right = this._parseTokenized(isSubQuery);
+            union.right = right.firstChild() as Operation;
             // Restore parser state
-            this._returns = savedReturns;
-            this.variables = savedVariables;
-            this.context = savedContext;
+            this._state = state;
             const newRoot = new ASTNode();
             newRoot.addChild(union);
             return newRoot;
@@ -253,7 +239,7 @@ class Parser extends BaseParser {
             throw new Error("Expected alias");
         }
         const unwind = new Unwind(expression);
-        this.variables.set(alias.getAlias(), unwind);
+        this._state.variables.set(alias.getAlias(), unwind);
         return unwind;
     }
 
@@ -276,7 +262,7 @@ class Parser extends BaseParser {
         if (distinct || expressions.some((expression: Expression) => expression.has_reducers())) {
             return new AggregatedReturn(expressions);
         }
-        this._returns++;
+        this._state.incrementReturns();
         return new Return(expressions);
     }
 
@@ -359,7 +345,7 @@ class Parser extends BaseParser {
         const alias = this.parseAlias();
         if (alias !== null) {
             load.addChild(alias);
-            this.variables.set(alias.getAlias(), load);
+            this._state.variables.set(alias.getAlias(), load);
         } else {
             throw new Error("Expected alias");
         }
@@ -504,8 +490,8 @@ class Parser extends BaseParser {
         let node = new Node();
         node.properties = new Map(this.parseProperties());
         node.label = label!;
-        if (identifier !== null && this.variables.has(identifier)) {
-            let reference = this.variables.get(identifier);
+        if (identifier !== null && this._state.variables.has(identifier)) {
+            let reference = this._state.variables.get(identifier);
             // Resolve through Expression -> Reference -> Node (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
                 const inner = (reference.firstChild() as Reference).referred;
@@ -522,7 +508,7 @@ class Parser extends BaseParser {
             node = new NodeReference(node, reference);
         } else if (identifier !== null) {
             node.identifier = identifier;
-            this.variables.set(identifier, node);
+            this._state.variables.set(identifier, node);
         }
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected closing parenthesis for node definition");
@@ -589,7 +575,7 @@ class Parser extends BaseParser {
             if (pattern !== null) {
                 if (identifier !== null) {
                     pattern.identifier = identifier;
-                    this.variables.set(identifier, pattern);
+                    this._state.variables.set(identifier, pattern);
                 }
                 yield pattern;
             } else {
@@ -705,8 +691,8 @@ class Parser extends BaseParser {
         let relationship = new Relationship();
         relationship.direction = direction;
         relationship.properties = properties;
-        if (variable !== null && this.variables.has(variable)) {
-            let reference = this.variables.get(variable);
+        if (variable !== null && this._state.variables.has(variable)) {
+            let reference = this._state.variables.get(variable);
             // Resolve through Expression -> Reference -> Relationship (e.g., after WITH)
             if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
                 const inner = (reference.firstChild() as Reference).referred;
@@ -720,7 +706,7 @@ class Parser extends BaseParser {
             relationship = new RelationshipReference(relationship, reference);
         } else if (variable !== null) {
             relationship.identifier = variable;
-            this.variables.set(variable, relationship);
+            this._state.variables.set(variable, relationship);
         }
         if (hops !== null) {
             relationship.hops = hops;
@@ -799,7 +785,7 @@ class Parser extends BaseParser {
                 if (expression.firstChild() instanceof Reference && alias === null) {
                     const reference: Reference = expression.firstChild() as Reference;
                     expression.setAlias(reference.identifier);
-                    this.variables.set(reference.identifier, expression);
+                    this._state.variables.set(reference.identifier, expression);
                 } else if (
                     alias_option === AliasOption.REQUIRED &&
                     alias === null &&
@@ -813,7 +799,7 @@ class Parser extends BaseParser {
                     alias !== null
                 ) {
                     expression.setAlias(alias.getAlias());
-                    this.variables.set(alias.getAlias(), expression);
+                    this._state.variables.set(alias.getAlias(), expression);
                 }
                 yield expression;
             } else {
@@ -835,7 +821,7 @@ class Parser extends BaseParser {
         this.skipWhitespaceAndComments();
         if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
-            const reference = new Reference(identifier, this.variables.get(identifier));
+            const reference = new Reference(identifier, this._state.variables.get(identifier));
             this.setNextToken();
             const lookup = this.parseLookup(reference);
             expression.addNode(lookup);
@@ -1231,10 +1217,13 @@ class Parser extends BaseParser {
             return null;
         }
         const func = FunctionFactory.create(this.token.value);
-        if (func instanceof AggregateFunction && this.context.containsType(AggregateFunction)) {
+        if (
+            func instanceof AggregateFunction &&
+            this._state.context.containsType(AggregateFunction)
+        ) {
             throw new Error("Aggregate functions cannot be nested");
         }
-        this.context.push(func);
+        this._state.context.push(func);
         this.setNextToken();
         this.setNextToken();
         this.skipWhitespaceAndComments();
@@ -1249,7 +1238,7 @@ class Parser extends BaseParser {
             throw new Error("Expected right parenthesis");
         }
         this.setNextToken();
-        this.context.pop();
+        this._state.context.pop();
         return func;
     }
 
@@ -1311,7 +1300,7 @@ class Parser extends BaseParser {
             throw new Error("Expected identifier");
         }
         const reference = new Reference(this.token.value);
-        this.variables.set(reference.identifier, reference);
+        this._state.variables.set(reference.identifier, reference);
         func.addChild(reference);
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
@@ -1354,7 +1343,7 @@ class Parser extends BaseParser {
             throw new Error("Expected right parenthesis");
         }
         this.setNextToken();
-        this.variables.delete(reference.identifier);
+        this._state.variables.delete(reference.identifier);
         return func;
     }
 

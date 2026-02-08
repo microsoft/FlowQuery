@@ -43,6 +43,12 @@ class Context {
     public containsType(type: new (...args: any[]) => ASTNode): boolean {
         return this.nodes.some((v) => v instanceof type);
     }
+
+    public clone(): Context {
+        const newContext = new Context();
+        newContext.nodes = [...this.nodes];
+        return newContext;
+    }
 }
 
 export default Context;

@@ -1,8 +1,9 @@
+import ASTNode from "../parsing/ast_node";
 import Node from "./node";
 
 class NodeReference extends Node {
-    private _reference: Node | null = null;
-    constructor(base: Node, reference: Node) {
+    private _reference: ASTNode | null = null;
+    constructor(base: Node, reference: ASTNode) {
         super();
         this._identifier = base.identifier;
         this._label = base.label;
@@ -11,7 +12,7 @@ class NodeReference extends Node {
         this._incoming = base.incoming;
         this._reference = reference;
     }
-    public get reference(): Node | null {
+    public get reference(): ASTNode | null {
         return this._reference;
     }
     public async next(): Promise<void> {

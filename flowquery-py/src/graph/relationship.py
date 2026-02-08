@@ -123,9 +123,9 @@ class Relationship(ASTNode):
     def get_data(self) -> Optional['RelationshipData']:
         return self._data
 
-    def set_value(self, relationship: 'Relationship') -> None:
+    def set_value(self, relationship: 'Relationship', traversal_id: str = "") -> None:
         """Set value by pushing match to collector."""
-        self._matches.push(relationship)
+        self._matches.push(relationship, traversal_id)
         self._value = self._matches.value()
 
     def value(self) -> Optional[Union[RelationshipMatchRecord, List[RelationshipMatchRecord]]]:
@@ -139,11 +139,13 @@ class Relationship(ASTNode):
         """Set the end node for the current match."""
         self._matches.end_node = node
 
+    def _left_id_or_right_id(self) -> str:
+        return "left_id" if self._direction == "left" else "right_id"
+
     async def find(self, left_id: str, hop: int = 0) -> None:
         """Find relationships starting from the given node ID."""
         # Save original source node
         original = self._source
-        is_left = self._direction == "left"
         if hop > 0:
             # For hops greater than 0, the source becomes the target of the previous hop
             self._source = self._target
@@ -158,30 +160,26 @@ class Relationship(ASTNode):
                 # No relationship match is pushed since no edge is traversed
                 await self._target.find(left_id, hop)
 
-        def find_match(id_: str, h: int) -> bool:
-            if self._data is None:
-                return False
-            if is_left:
-                return self._data.find_reverse(id_, h)
-            return self._data.find(id_, h)
-        follow_id = 'left_id' if is_left else 'right_id'
-        while self._data and find_match(left_id, hop):
+        while self._data and self._data.find(left_id, hop, self._direction):
             data = self._data.current(hop)
-            if data and self._hops and hop + 1 >= self._hops.min:
-                self.set_value(self)
+            if data is None:
+                continue
+            id = data[self._left_id_or_right_id()]
+            if hop + 1 >= self._hops.min:
+                self.set_value(self, left_id)
                 if not self._matches_properties(hop):
                     continue
-                if self._target and follow_id in data:
-                    await self._target.find(data[follow_id], hop)
-                if self._matches.is_circular():
-                    raise ValueError("Circular relationship detected")
-                if self._hops and hop + 1 < self._hops.max:
-                    await self.find(data[follow_id], hop + 1)
+                if self._target:
+                    await self._target.find(id, hop)
+                if hop + 1 < self._hops.max:
+                    if self._matches.is_circular(id):
+                        self._matches.pop()
+                        continue
+                    await self.find(id, hop + 1)
                 self._matches.pop()
-            elif data and self._hops:
+            else:
                 # Below minimum hops: traverse the edge without yielding a match
-                if follow_id in data:
-                    await self.find(data[follow_id], hop + 1)
+                await self.find(id, hop + 1)
 
         # Restore original source node
         self._source = original

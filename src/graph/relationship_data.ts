@@ -8,11 +8,8 @@ class RelationshipData extends Data {
         super._buildIndex("left_id");
         super._buildIndex("right_id");
     }
-    public find(left_id: string, hop: number = 0): boolean {
-        return super._find(left_id, hop, "left_id");
-    }
-    public findReverse(right_id: string, hop: number = 0): boolean {
-        return super._find(right_id, hop, "right_id");
+    public find(id: string, hop: number = 0, direction: "left" | "right" = "right"): boolean {
+        return super._find(id, hop, direction === "left" ? "right_id" : "left_id");
     }
     /*
     ** Get the properties of the current relationship record

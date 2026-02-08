@@ -2371,3 +2371,190 @@ test("Test collected patterns and unwind", async () => {
     expect(results[9].pattern.length).toBe(1);
     expect(results[9].pattern[0].id).toBe(4);
 });
+
+// ============================================================
+// Add operator tests
+// ============================================================
+
+test("Test add two integers", async () => {
+    const runner = new Runner("return 1 + 2 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 3 });
+});
+
+test("Test add negative number", async () => {
+    const runner = new Runner("return -3 + 7 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 4 });
+});
+
+test("Test add to negative result", async () => {
+    const runner = new Runner("return 0 - 10 + 4 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -6 });
+});
+
+test("Test add zero", async () => {
+    const runner = new Runner("return 42 + 0 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 42 });
+});
+
+test("Test add floating point numbers", async () => {
+    const runner = new Runner("return 1.5 + 2.3 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeCloseTo(3.8);
+});
+
+test("Test add integer and float", async () => {
+    const runner = new Runner("return 1 + 0.5 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeCloseTo(1.5);
+});
+
+test("Test add strings", async () => {
+    const runner = new Runner('return "hello" + " world" as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello world" });
+});
+
+test("Test add empty strings", async () => {
+    const runner = new Runner('return "" + "" as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "" });
+});
+
+test("Test add string and empty string", async () => {
+    const runner = new Runner('return "hello" + "" as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test add two lists", async () => {
+    const runner = new Runner("return [1, 2] + [3, 4] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [1, 2, 3, 4] });
+});
+
+test("Test add empty list to list", async () => {
+    const runner = new Runner("return [1, 2, 3] + [] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [1, 2, 3] });
+});
+
+test("Test add two empty lists", async () => {
+    const runner = new Runner("return [] + [] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [] });
+});
+
+test("Test add lists with mixed types", async () => {
+    const runner = new Runner('return [1, "a"] + [2, "b"] as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [1, "a", 2, "b"] });
+});
+
+test("Test add chained three numbers", async () => {
+    const runner = new Runner("return 1 + 2 + 3 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 6 });
+});
+
+test("Test add chained multiple numbers", async () => {
+    const runner = new Runner("return 10 + 20 + 30 + 40 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 100 });
+});
+
+test("Test add large numbers", async () => {
+    const runner = new Runner("return 1000000 + 2000000 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 3000000 });
+});
+
+test("Test add with unwind", async () => {
+    const runner = new Runner("unwind [1, 2, 3] as x return x + 10 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ result: 11 });
+    expect(results[1]).toEqual({ result: 12 });
+    expect(results[2]).toEqual({ result: 13 });
+});
+
+test("Test add with multiple return expressions", async () => {
+    const runner = new Runner("return 1 + 2 as sum1, 3 + 4 as sum2, 5 + 6 as sum3");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ sum1: 3, sum2: 7, sum3: 11 });
+});
+
+test("Test add mixed with other operators", async () => {
+    const runner = new Runner("return 2 + 3 * 4 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 14 });
+});
+
+test("Test add with parentheses", async () => {
+    const runner = new Runner("return (2 + 3) * 4 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 20 });
+});
+
+test("Test add nested lists", async () => {
+    const runner = new Runner("return [[1, 2]] + [[3, 4]] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({
+        result: [
+            [1, 2],
+            [3, 4],
+        ],
+    });
+});
+
+test("Test add with with clause", async () => {
+    const runner = new Runner("with 5 as a, 10 as b return a + b as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 15 });
+});

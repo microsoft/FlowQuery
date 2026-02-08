@@ -2499,3 +2499,207 @@ class TestRunner:
         assert "Person 1" in names
         assert "Person 2" in names
         assert "Person 3" in names
+
+    # ============================================================
+    # Add operator tests
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_add_two_integers(self):
+        """Test add two integers."""
+        runner = Runner("return 1 + 2 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 3}
+
+    @pytest.mark.asyncio
+    async def test_add_negative_number(self):
+        """Test add with a negative number."""
+        runner = Runner("return -3 + 7 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 4}
+
+    @pytest.mark.asyncio
+    async def test_add_to_negative_result(self):
+        """Test add to negative result."""
+        runner = Runner("return 0 - 10 + 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -6}
+
+    @pytest.mark.asyncio
+    async def test_add_zero(self):
+        """Test add zero."""
+        runner = Runner("return 42 + 0 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_add_floating_point_numbers(self):
+        """Test add floating point numbers."""
+        runner = Runner("return 1.5 + 2.3 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(3.8)
+
+    @pytest.mark.asyncio
+    async def test_add_integer_and_float(self):
+        """Test add integer and float."""
+        runner = Runner("return 1 + 0.5 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(1.5)
+
+    @pytest.mark.asyncio
+    async def test_add_strings(self):
+        """Test add strings."""
+        runner = Runner('return "hello" + " world" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello world"}
+
+    @pytest.mark.asyncio
+    async def test_add_empty_strings(self):
+        """Test add empty strings."""
+        runner = Runner('return "" + "" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": ""}
+
+    @pytest.mark.asyncio
+    async def test_add_string_and_empty_string(self):
+        """Test add string and empty string."""
+        runner = Runner('return "hello" + "" as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_add_two_lists(self):
+        """Test add two lists."""
+        runner = Runner("return [1, 2] + [3, 4] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, 2, 3, 4]}
+
+    @pytest.mark.asyncio
+    async def test_add_empty_list_to_list(self):
+        """Test add empty list to list."""
+        runner = Runner("return [1, 2, 3] + [] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, 2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_add_two_empty_lists(self):
+        """Test add two empty lists."""
+        runner = Runner("return [] + [] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": []}
+
+    @pytest.mark.asyncio
+    async def test_add_lists_with_mixed_types(self):
+        """Test add lists with mixed types."""
+        runner = Runner('return [1, "a"] + [2, "b"] as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [1, "a", 2, "b"]}
+
+    @pytest.mark.asyncio
+    async def test_add_chained_three_numbers(self):
+        """Test add chained three numbers."""
+        runner = Runner("return 1 + 2 + 3 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 6}
+
+    @pytest.mark.asyncio
+    async def test_add_chained_multiple_numbers(self):
+        """Test add chained multiple numbers."""
+        runner = Runner("return 10 + 20 + 30 + 40 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 100}
+
+    @pytest.mark.asyncio
+    async def test_add_large_numbers(self):
+        """Test add large numbers."""
+        runner = Runner("return 1000000 + 2000000 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 3000000}
+
+    @pytest.mark.asyncio
+    async def test_add_with_unwind(self):
+        """Test add with unwind."""
+        runner = Runner("unwind [1, 2, 3] as x return x + 10 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"result": 11}
+        assert results[1] == {"result": 12}
+        assert results[2] == {"result": 13}
+
+    @pytest.mark.asyncio
+    async def test_add_with_multiple_return_expressions(self):
+        """Test add with multiple return expressions."""
+        runner = Runner("return 1 + 2 as sum1, 3 + 4 as sum2, 5 + 6 as sum3")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"sum1": 3, "sum2": 7, "sum3": 11}
+
+    @pytest.mark.asyncio
+    async def test_add_mixed_with_other_operators(self):
+        """Test add mixed with other operators (precedence)."""
+        runner = Runner("return 2 + 3 * 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 14}
+
+    @pytest.mark.asyncio
+    async def test_add_with_parentheses(self):
+        """Test add with parentheses."""
+        runner = Runner("return (2 + 3) * 4 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 20}
+
+    @pytest.mark.asyncio
+    async def test_add_nested_lists(self):
+        """Test add nested lists."""
+        runner = Runner("return [[1, 2]] + [[3, 4]] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [[1, 2], [3, 4]]}
+
+    @pytest.mark.asyncio
+    async def test_add_with_with_clause(self):
+        """Test add with with clause."""
+        runner = Runner("with 5 as a, 10 as b return a + b as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 15}

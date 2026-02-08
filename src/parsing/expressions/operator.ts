@@ -43,7 +43,7 @@ abstract class Operator extends ASTNode {
     public get leftAssociative(): boolean {
         return this._leftAssociative;
     }
-    public abstract value(): number;
+    public abstract value(): any;
     public get lhs(): ASTNode {
         return this.getChildren()[0];
     }
@@ -56,8 +56,13 @@ class Add extends Operator {
     constructor() {
         super(1, true);
     }
-    public value(): number {
-        return this.lhs.value() + this.rhs.value();
+    public value(): any {
+        const l = this.lhs.value();
+        const r = this.rhs.value();
+        if (Array.isArray(l) && Array.isArray(r)) {
+            return [...l, ...r];
+        }
+        return l + r;
     }
 }
 

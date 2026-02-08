@@ -58,6 +58,8 @@ import Load from "./operations/load";
 import Match from "./operations/match";
 import Operation from "./operations/operation";
 import Return from "./operations/return";
+import Union from "./operations/union";
+import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
 import Where from "./operations/where";
 import With from "./operations/with";
@@ -107,6 +109,10 @@ class Parser extends BaseParser {
             } else {
                 this.skipWhitespaceAndComments();
             }
+            // UNION separates two query pipelines — break and handle after the loop
+            if (this.token.isUnion()) {
+                break;
+            }
             operation = this.parseOperation();
             if (operation === null && !isSubQuery) {
                 throw new Error("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL");
@@ -141,6 +147,37 @@ class Parser extends BaseParser {
                 operation = limit;
             }
             previous = operation;
+        }
+        // Handle UNION: wrap left and right pipelines into a Union node
+        if (!this.token.isEOF() && this.token.isUnion()) {
+            if (
+                !(operation instanceof Return) &&
+                !(operation instanceof Call) &&
+                !(operation instanceof CreateNode) &&
+                !(operation instanceof CreateRelationship)
+            ) {
+                throw new Error(
+                    "Each side of UNION must end with a RETURN, CALL, or CREATE statement"
+                );
+            }
+            const union = this.parseUnion()!;
+            union.left = root.firstChild() as Operation;
+            // Save and reset parser state for right-side scope
+            const savedReturns = this._returns;
+            const savedVariables = new Map(this.variables);
+            const savedContext = this.context;
+            this._returns = 0;
+            this.variables = new Map();
+            this.context = new Context();
+            const rightRoot = this._parseTokenized(isSubQuery);
+            union.right = rightRoot.firstChild() as Operation;
+            // Restore parser state
+            this._returns = savedReturns;
+            this.variables = savedVariables;
+            this.context = savedContext;
+            const newRoot = new ASTNode();
+            newRoot.addChild(union);
+            return newRoot;
         }
         if (
             !(operation instanceof Return) &&
@@ -1428,6 +1465,22 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         return array;
+    }
+
+    private parseUnion(): Union | UnionAll | null {
+        if (!this.token.isUnion()) {
+            return null;
+        }
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        let union: Union | UnionAll;
+        if (this.token.isAll()) {
+            union = new UnionAll();
+            this.setNextToken();
+        } else {
+            union = new Union();
+        }
+        return union;
     }
 
     private expectAndSkipWhitespaceAndComments(): void {

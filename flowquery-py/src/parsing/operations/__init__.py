@@ -12,6 +12,8 @@ from .match import Match
 from .operation import Operation
 from .projection import Projection
 from .return_op import Return
+from .union import Union
+from .union_all import UnionAll
 from .unwind import Unwind
 from .where import Where
 from .with_op import With
@@ -32,4 +34,6 @@ __all__ = [
     "Match",
     "CreateNode",
     "CreateRelationship",
+    "Union",
+    "UnionAll",
 ]

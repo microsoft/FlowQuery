@@ -63,6 +63,8 @@ from .operations.load import Load
 from .operations.match import Match
 from .operations.operation import Operation
 from .operations.return_op import Return
+from .operations.union import Union
+from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
 from .operations.where import Where
 from .operations.with_op import With
@@ -112,6 +114,10 @@ class Parser(BaseParser):
             else:
                 self._skip_whitespace_and_comments()
 
+            # UNION separates two query pipelines — break and handle after the loop
+            if self.token.is_union():
+                break
+
             operation = self._parse_operation()
             if operation is None and not is_sub_query:
                 raise ValueError("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL")
@@ -145,6 +151,32 @@ class Parser(BaseParser):
                 operation = limit
 
             previous = operation
+
+        # Handle UNION: wrap left and right pipelines into a Union node
+        if not self.token.is_eof() and self.token.is_union():
+            if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
+                raise ValueError(
+                    "Each side of UNION must end with a RETURN, CALL, or CREATE statement"
+                )
+            union = self._parse_union()
+            assert union is not None
+            union.left = root.first_child()  # type: ignore[assignment]
+            # Save and reset parser state for right-side scope
+            saved_returns = self._returns
+            saved_variables = dict(self._variables)
+            saved_context = self._context
+            self._returns = 0
+            self._variables = {}
+            self._context = Context()
+            right_root = self._parse_tokenized(is_sub_query)
+            union.right = right_root.first_child()  # type: ignore[assignment]
+            # Restore parser state
+            self._returns = saved_returns
+            self._variables = saved_variables
+            self._context = saved_context
+            new_root = ASTNode()
+            new_root.add_child(union)
+            return new_root
 
         if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
             raise ValueError("Last statement must be a RETURN, WHERE, CALL, or CREATE statement")
@@ -389,6 +421,19 @@ class Parser(BaseParser):
             return CreateRelationship(relationship, query)
         else:
             return CreateNode(node, query)
+
+    def _parse_union(self) -> Optional[Union]:
+        """Parse a UNION or UNION ALL keyword."""
+        if not self.token.is_union():
+            return None
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if self.token.is_all():
+            union: Union = UnionAll()
+            self.set_next_token()
+        else:
+            union = Union()
+        return union
 
     def _parse_sub_query(self) -> Optional[ASTNode]:
         """Parse a sub-query enclosed in braces."""

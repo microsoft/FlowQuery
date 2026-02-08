@@ -695,6 +695,10 @@ class Token {
         return new Token(TokenType.KEYWORD, Keyword.ALL);
     }
 
+    public isAll(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ALL;
+    }
+
     // End of file token
 
     public static get EOF(): Token {

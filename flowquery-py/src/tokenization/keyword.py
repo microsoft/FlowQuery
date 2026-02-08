@@ -50,3 +50,5 @@ class Keyword(Enum):
     CONTAINS = "CONTAINS"
     STARTS = "STARTS"
     ENDS = "ENDS"
+    UNION = "UNION"
+    ALL = "ALL"

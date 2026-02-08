@@ -2703,3 +2703,110 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"result": 15}
+
+    # ============================================================
+    # UNION and UNION ALL tests
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_union_with_simple_values(self):
+        """Test UNION with simple values."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 2}]
+
+    @pytest.mark.asyncio
+    async def test_union_removes_duplicates(self):
+        """Test UNION removes duplicates."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 1 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_all_keeps_duplicates(self):
+        """Test UNION ALL keeps duplicates."""
+        runner = Runner("WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_multiple_columns(self):
+        """Test UNION with multiple columns."""
+        runner = Runner(
+            "WITH 1 AS a, 'hello' AS b RETURN a, b UNION WITH 2 AS a, 'world' AS b RETURN a, b"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [
+            {"a": 1, "b": "hello"},
+            {"a": 2, "b": "world"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_union_all_with_multiple_columns(self):
+        """Test chained UNION ALL with three branches."""
+        runner = Runner(
+            "WITH 1 AS a RETURN a UNION ALL WITH 2 AS a RETURN a UNION ALL WITH 3 AS a RETURN a"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results == [{"a": 1}, {"a": 2}, {"a": 3}]
+
+    @pytest.mark.asyncio
+    async def test_chained_union_removes_duplicates(self):
+        """Test chained UNION removes duplicates across all branches."""
+        runner = Runner(
+            "WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x UNION WITH 1 AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results == [{"x": 1}, {"x": 2}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_unwind(self):
+        """Test UNION with UNWIND."""
+        runner = Runner(
+            "UNWIND [1, 2] AS x RETURN x UNION UNWIND [3, 4] AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert results == [{"x": 1}, {"x": 2}, {"x": 3}, {"x": 4}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_mismatched_columns(self):
+        """Test UNION with mismatched columns throws error."""
+        runner = Runner("WITH 1 AS x RETURN x UNION WITH 2 AS y RETURN y")
+        with pytest.raises(ValueError, match="All sub queries in a UNION must have the same return column names"):
+            await runner.run()
+
+    @pytest.mark.asyncio
+    async def test_union_with_empty_left_side(self):
+        """Test UNION with empty left side."""
+        runner = Runner(
+            "UNWIND [] AS x RETURN x UNION WITH 1 AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_union_with_empty_right_side(self):
+        """Test UNION with empty right side."""
+        runner = Runner(
+            "WITH 1 AS x RETURN x UNION UNWIND [] AS x RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results == [{"x": 1}]

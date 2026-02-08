@@ -2558,3 +2558,95 @@ test("Test add with with clause", async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ result: 15 });
 });
+
+// ============================================================
+// UNION and UNION ALL tests
+// ============================================================
+
+test("Test UNION with simple values", async () => {
+    const runner = new Runner("WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results).toEqual([{ x: 1 }, { x: 2 }]);
+});
+
+test("Test UNION removes duplicates", async () => {
+    const runner = new Runner("WITH 1 AS x RETURN x UNION WITH 1 AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results).toEqual([{ x: 1 }]);
+});
+
+test("Test UNION ALL keeps duplicates", async () => {
+    const runner = new Runner("WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results).toEqual([{ x: 1 }, { x: 1 }]);
+});
+
+test("Test UNION with multiple columns", async () => {
+    const runner = new Runner(
+        "WITH 1 AS a, 'hello' AS b RETURN a, b UNION WITH 2 AS a, 'world' AS b RETURN a, b"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results).toEqual([
+        { a: 1, b: "hello" },
+        { a: 2, b: "world" },
+    ]);
+});
+
+test("Test UNION ALL with multiple columns", async () => {
+    const runner = new Runner(
+        "WITH 1 AS a RETURN a UNION ALL WITH 2 AS a RETURN a UNION ALL WITH 3 AS a RETURN a"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }]);
+});
+
+test("Test chained UNION removes duplicates across all branches", async () => {
+    const runner = new Runner(
+        "WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x UNION WITH 1 AS x RETURN x"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results).toEqual([{ x: 1 }, { x: 2 }]);
+});
+
+test("Test UNION with unwind", async () => {
+    const runner = new Runner("UNWIND [1, 2] AS x RETURN x UNION UNWIND [3, 4] AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    expect(results).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }, { x: 4 }]);
+});
+
+test("Test UNION with mismatched columns throws error", async () => {
+    const runner = new Runner("WITH 1 AS x RETURN x UNION WITH 2 AS y RETURN y");
+    await expect(runner.run()).rejects.toThrow(
+        "All sub queries in a UNION must have the same return column names"
+    );
+});
+
+test("Test UNION with empty left side", async () => {
+    const runner = new Runner("UNWIND [] AS x RETURN x UNION WITH 1 AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results).toEqual([{ x: 1 }]);
+});
+
+test("Test UNION with empty right side", async () => {
+    const runner = new Runner("WITH 1 AS x RETURN x UNION UNWIND [] AS x RETURN x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results).toEqual([{ x: 1 }]);
+});

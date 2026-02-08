@@ -334,6 +334,20 @@ test("Test aggregated with and return", async () => {
     expect(results[1]).toEqual({ i: 2, sum: 12 });
 });
 
+test("Test aggregated with on empty result set", async () => {
+    const runner = new Runner(
+        `
+        unwind [] as i
+        unwind [1, 2] as j
+        with i, count(j) as cnt
+        return i, cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+});
+
 test("Test aggregated with using collect and return", async () => {
     const runner = new Runner(
         `

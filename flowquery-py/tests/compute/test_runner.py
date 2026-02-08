@@ -379,6 +379,21 @@ class TestRunner:
         assert results[1] == {"i": 2, "sum": 12}
 
     @pytest.mark.asyncio
+    async def test_aggregated_with_on_empty_result_set(self):
+        """Test aggregated with on empty result set does not crash."""
+        runner = Runner(
+            """
+            unwind [] as i
+            unwind [1, 2] as j
+            with i, count(j) as cnt
+            return i, cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
     async def test_aggregated_with_using_collect_and_return(self):
         """Test aggregated with using collect and return."""
         runner = Runner(

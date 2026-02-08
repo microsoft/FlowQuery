@@ -114,6 +114,9 @@ class GroupBy(Projection):
         if node is None:
             node = self._root
 
+        if mapper_index == 0 and len(node.children) == 0 and len(self.mappers) > 0:
+            return
+
         if len(node.children) > 0:
             for child in node.children.values():
                 self.mappers[mapper_index].overridden = child.value

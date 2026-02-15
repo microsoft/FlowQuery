@@ -250,6 +250,99 @@ class TestRunner:
         assert results[0] == {"avg": 1}
 
     @pytest.mark.asyncio
+    async def test_min(self):
+        """Test min aggregate function."""
+        runner = Runner("unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": 1}
+
+    @pytest.mark.asyncio
+    async def test_max(self):
+        """Test max aggregate function."""
+        runner = Runner("unwind [3, 1, 4, 1, 5, 9] as n return max(n) as maximum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": 9}
+
+    @pytest.mark.asyncio
+    async def test_min_with_grouped_values(self):
+        """Test min with grouped values."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, min(j) as minimum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "minimum": 10}
+        assert results[1] == {"i": 2, "minimum": 10}
+
+    @pytest.mark.asyncio
+    async def test_max_with_grouped_values(self):
+        """Test max with grouped values."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, max(j) as maximum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "maximum": 40}
+        assert results[1] == {"i": 2, "maximum": 40}
+
+    @pytest.mark.asyncio
+    async def test_min_with_null(self):
+        """Test min with null."""
+        runner = Runner("return min(null) as minimum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": None}
+
+    @pytest.mark.asyncio
+    async def test_max_with_null(self):
+        """Test max with null."""
+        runner = Runner("return max(null) as maximum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": None}
+
+    @pytest.mark.asyncio
+    async def test_min_with_strings(self):
+        """Test min with string values."""
+        runner = Runner(
+            'unwind ["cherry", "apple", "banana"] as s return min(s) as minimum'
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": "apple"}
+
+    @pytest.mark.asyncio
+    async def test_max_with_strings(self):
+        """Test max with string values."""
+        runner = Runner(
+            'unwind ["cherry", "apple", "banana"] as s return max(s) as maximum'
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": "cherry"}
+
+    @pytest.mark.asyncio
+    async def test_min_and_max_together(self):
+        """Test min and max together."""
+        runner = Runner(
+            "unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum, max(n) as maximum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": 1, "maximum": 9}
+
+    @pytest.mark.asyncio
     async def test_with_and_return(self):
         """Test with and return."""
         runner = Runner("with 1 as a return a")

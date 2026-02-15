@@ -13,6 +13,8 @@ import {
 import "./functions";
 import "./join";
 import "./keys";
+import "./max";
+import "./min";
 import PredicateFunction from "./predicate_function";
 import "./predicate_sum";
 import "./rand";

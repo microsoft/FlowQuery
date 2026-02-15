@@ -21,6 +21,8 @@ from .function_metadata import (
 from .functions import Functions
 from .join import Join
 from .keys import Keys
+from .max_ import Max
+from .min_ import Min
 from .predicate_function import PredicateFunction
 from .predicate_sum import PredicateSum
 from .rand import Rand
@@ -68,6 +70,8 @@ __all__ = [
     "Count",
     "Join",
     "Keys",
+    "Max",
+    "Min",
     "Rand",
     "Range",
     "Replace",

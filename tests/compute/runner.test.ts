@@ -216,6 +216,86 @@ test("Test avg with one value", async () => {
     expect(results[0]).toEqual({ avg: 1 });
 });
 
+test("Test min", async () => {
+    const runner = new Runner("unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: 1 });
+});
+
+test("Test max", async () => {
+    const runner = new Runner("unwind [3, 1, 4, 1, 5, 9] as n return max(n) as maximum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: 9 });
+});
+
+test("Test min with grouped values", async () => {
+    const runner = new Runner(
+        "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, min(j) as minimum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, minimum: 10 });
+    expect(results[1]).toEqual({ i: 2, minimum: 10 });
+});
+
+test("Test max with grouped values", async () => {
+    const runner = new Runner(
+        "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, max(j) as maximum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, maximum: 40 });
+    expect(results[1]).toEqual({ i: 2, maximum: 40 });
+});
+
+test("Test min with null", async () => {
+    const runner = new Runner("return min(null) as minimum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: null });
+});
+
+test("Test max with null", async () => {
+    const runner = new Runner("return max(null) as maximum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: null });
+});
+
+test("Test min with strings", async () => {
+    const runner = new Runner('unwind ["cherry", "apple", "banana"] as s return min(s) as minimum');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: "apple" });
+});
+
+test("Test max with strings", async () => {
+    const runner = new Runner('unwind ["cherry", "apple", "banana"] as s return max(s) as maximum');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: "cherry" });
+});
+
+test("Test min and max together", async () => {
+    const runner = new Runner(
+        "unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum, max(n) as maximum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: 1, maximum: 9 });
+});
+
 test("Test with and return", async () => {
     const runner = new Runner("with 1 as a return a");
     await runner.run();

@@ -12,7 +12,7 @@ export { initializeGraph } from "./initializeGraph";
  */
 export async function getGraphSchema(): Promise<any> {
     const runner = new FlowQuery(
-        `CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample`
+        `CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample RETURN kind, label, type, from_label, to_label, properties, sample`
     );
     await runner.run();
     return runner.results;

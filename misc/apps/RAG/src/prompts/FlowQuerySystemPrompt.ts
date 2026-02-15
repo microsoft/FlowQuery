@@ -83,8 +83,8 @@ FlowQuery is a Cypher-inspired declarative query language for querying graph dat
 
 8. **CALL ... YIELD** - Call async functions and yield results
    \`\`\`
-   CALL schema() YIELD kind, label, type, sample
-   RETURN kind, label, type, sample
+   CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
+   RETURN kind, label, type, from_label, to_label, properties, sample
    \`\`\`
 
 9. **UNION / UNION ALL** - Combine results from multiple sub-queries
@@ -275,66 +275,16 @@ RETURN i=5 AS \\\`isEqual\\\`
 export class FlowQuerySystemPrompt {
     /**
      * Format the graph schema into readable documentation.
-     * Accepts raw schema() results: array of { kind, label, type, sample }
+     * Accepts raw schema() results directly.
      */
     private static formatSchemaDocumentation(schema: any[]): string {
-        const sections: string[] = [];
+        return `## Graph Schema
 
-        sections.push("## Graph Schema\n");
-        sections.push(
-            "The following nodes and relationships are available in the graph for use with `MATCH` queries:\n"
-        );
+The following nodes and relationships are available in the graph for use with \`MATCH\` queries:
 
-        // Filter nodes and relationships from raw schema results
-        const nodes = schema.filter((r) => r.kind === "node");
-        const relationships = schema.filter((r) => r.kind === "relationship");
-
-        // Document nodes
-        sections.push("### Node Labels\n");
-        if (nodes.length > 0) {
-            for (const node of nodes) {
-                sections.push(`#### \`${node.label}\``);
-                // Extract properties from sample data
-                if (node.sample && typeof node.sample === "object") {
-                    const props = Object.entries(node.sample);
-                    if (props.length > 0) {
-                        sections.push("**Properties**:");
-                        for (const [name, value] of props) {
-                            const propType = Array.isArray(value) ? "array" : typeof value;
-                            sections.push(`  - \`${name}\`: ${propType}`);
-                        }
-                    }
-                    sections.push(`**Sample**: \`${JSON.stringify(node.sample)}\``);
-                }
-                sections.push("");
-            }
-        } else {
-            sections.push("No nodes defined.\n");
-        }
-
-        // Document relationships
-        sections.push("### Relationship Types\n");
-        if (relationships.length > 0) {
-            for (const rel of relationships) {
-                sections.push(`#### \`[:${rel.type}]\``);
-                // Extract properties from sample data
-                if (rel.sample && typeof rel.sample === "object") {
-                    const props = Object.entries(rel.sample);
-                    if (props.length > 0) {
-                        sections.push("**Properties**:");
-                        for (const [name, value] of props) {
-                            const propType = Array.isArray(value) ? "array" : typeof value;
-                            sections.push(`  - \`${name}\`: ${propType}`);
-                        }
-                    }
-                }
-                sections.push("");
-            }
-        } else {
-            sections.push("No relationships defined.\n");
-        }
-
-        return sections.join("\n");
+\`\`\`json
+${JSON.stringify(schema, null, 2)}
+\`\`\``;
     }
 
     /**
@@ -449,23 +399,11 @@ You are now receiving the execution results. Your job is to:
      */
     public static async getMinimalPrompt(): Promise<string> {
         const schema = await getGraphSchema();
-        const nodes = schema.filter((r: any) => r.kind === "node");
-        const relationships = schema.filter((r: any) => r.kind === "relationship");
-
-        const nodeList =
-            nodes.length > 0 ? nodes.map((n: any) => `- \`${n.label}\``).join("\n") : "None";
-        const relList =
-            relationships.length > 0
-                ? relationships.map((r: any) => `- \`[:${r.type}]\``).join("\n")
-                : "None";
 
         return `You are a FlowQuery assistant. Generate FlowQuery statements based on user requests.
 
-Available node labels:
-${nodeList}
-
-Available relationships:
-${relList}
+Graph schema:
+${JSON.stringify(schema, null, 2)}
 
 FlowQuery uses Cypher-like syntax: MATCH, OPTIONAL MATCH, WITH, UNWIND, WHERE, RETURN, LOAD, CALL...YIELD, UNION, LIMIT, CASE.
 Use f"..." for string interpolation. Access properties with dot notation or brackets.

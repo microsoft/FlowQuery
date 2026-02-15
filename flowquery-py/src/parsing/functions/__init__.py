@@ -3,6 +3,7 @@
 from .aggregate_function import AggregateFunction
 from .async_function import AsyncFunction
 from .avg import Avg
+from .coalesce import Coalesce
 from .collect import Collect
 from .count import Count
 from .function import Function
@@ -66,6 +67,7 @@ __all__ = [
     # Built-in functions
     "Sum",
     "Avg",
+    "Coalesce",
     "Collect",
     "Count",
     "Join",

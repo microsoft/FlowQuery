@@ -3079,3 +3079,53 @@ test("Test match with ORed relationship types returns correct type in relationsh
     expect(results[0]).toEqual({ from: "NYC", to: "LA", type: "FLIGHT" });
     expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
 });
+
+test("Test coalesce returns first non-null value", async () => {
+    const runner = new Runner("RETURN coalesce(null, null, 'hello', 'world') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test coalesce returns first argument when not null", async () => {
+    const runner = new Runner("RETURN coalesce('first', 'second') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "first" });
+});
+
+test("Test coalesce returns null when all arguments are null", async () => {
+    const runner = new Runner("RETURN coalesce(null, null, null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test coalesce with single non-null argument", async () => {
+    const runner = new Runner("RETURN coalesce(42) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 42 });
+});
+
+test("Test coalesce with mixed types", async () => {
+    const runner = new Runner("RETURN coalesce(null, 42, 'hello') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 42 });
+});
+
+test("Test coalesce with property access", async () => {
+    const runner = new Runner(
+        "WITH {name: 'Alice'} AS person RETURN coalesce(person.nickname, person.name) as result"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "Alice" });
+});

@@ -3233,3 +3233,57 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"sum": 0}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_first_non_null(self):
+        """Test coalesce returns first non-null value."""
+        runner = Runner("RETURN coalesce(null, null, 'hello', 'world') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_first_argument_when_not_null(self):
+        """Test coalesce returns first argument when not null."""
+        runner = Runner("RETURN coalesce('first', 'second') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "first"}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_null_when_all_null(self):
+        """Test coalesce returns null when all arguments are null."""
+        runner = Runner("RETURN coalesce(null, null, null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_single_non_null_argument(self):
+        """Test coalesce with single non-null argument."""
+        runner = Runner("RETURN coalesce(42) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_mixed_types(self):
+        """Test coalesce with mixed types."""
+        runner = Runner("RETURN coalesce(null, 42, 'hello') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_property_access(self):
+        """Test coalesce with property access."""
+        runner = Runner("WITH {name: 'Alice'} AS person RETURN coalesce(person.nickname, person.name) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "Alice"}

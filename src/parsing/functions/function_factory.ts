@@ -1,5 +1,6 @@
 import AsyncFunction from "./async_function";
 import "./avg";
+import "./coalesce";
 import "./collect";
 import "./count";
 import Function from "./function";

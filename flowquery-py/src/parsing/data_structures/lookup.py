@@ -38,6 +38,8 @@ class Lookup(ASTNode):
 
     def value(self) -> Any:
         obj = self.variable.value()
+        if obj is None:
+            return None
         key = self.index.value()
         # Try dict-like access first, then fall back to attribute access for objects
         try:

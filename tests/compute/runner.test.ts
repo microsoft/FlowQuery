@@ -1825,6 +1825,39 @@ test("Test optional match with no matching relationship", async () => {
     expect(results[2].friend).toBeNull();
 });
 
+test("Test optional match property access on null node returns null", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // When accessing b.name and b is null (no match), should return null like Neo4j
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b.name AS friend_name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Person 1", friend_name: "Person 2" });
+    expect(results[1]).toEqual({ name: "Person 2", friend_name: null });
+    expect(results[2]).toEqual({ name: "Person 3", friend_name: null });
+});
+
 test("Test optional match where all nodes match", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {

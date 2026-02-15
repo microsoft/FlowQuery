@@ -1977,6 +1977,46 @@ class TestRunner:
         assert results[2]["friend"] is None
 
     @pytest.mark.asyncio
+    async def test_optional_match_property_access_on_null_node_returns_null(self):
+        """Test that accessing a property on a null node from optional match returns null."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPropPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPropPerson)-[:KNOWS]-(:OptPropPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # When accessing b.name and b is null (no match), should return null like Neo4j
+        match = Runner(
+            """
+            MATCH (a:OptPropPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptPropPerson)
+            RETURN a.name AS name, b.name AS friend_name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Person 1", "friend_name": "Person 2"}
+        assert results[1] == {"name": "Person 2", "friend_name": None}
+        assert results[2] == {"name": "Person 3", "friend_name": None}
+
+    @pytest.mark.asyncio
     async def test_optional_match_where_all_nodes_match(self):
         """Test optional match where all nodes have matching relationships."""
         await Runner(

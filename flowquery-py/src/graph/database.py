@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from .node import Node
@@ -67,24 +67,26 @@ class Database:
                 result.append(physical)
         return result
 
-    async def schema(self) -> list[dict[str, Any]]:
+    async def schema(self) -> List[Dict[str, Any]]:
         """Returns the graph schema with node/relationship labels and sample data."""
-        result: list[dict[str, Any]] = []
+        return [item async for item in self._schema()]
 
+    async def _schema(self) -> AsyncIterator[Dict[str, Any]]:
+        """Async generator for graph schema with node/relationship labels and sample data."""
         for label, physical_node in Database._nodes.items():
             records = await physical_node.data()
-            entry: dict[str, Any] = {"kind": "Node", "label": label}
+            entry: Dict[str, Any] = {"kind": "Node", "label": label}
             if records:
                 sample = {k: v for k, v in records[0].items() if k != "id"}
                 properties = list(sample.keys())
                 if properties:
                     entry["properties"] = properties
                     entry["sample"] = sample
-            result.append(entry)
+            yield entry
 
         for rel_type, physical_rel in Database._relationships.items():
             records = await physical_rel.data()
-            entry_rel: dict[str, Any] = {
+            entry_rel: Dict[str, Any] = {
                 "kind": "Relationship",
                 "type": rel_type,
                 "from_label": physical_rel.source.label if physical_rel.source else None,
@@ -96,9 +98,7 @@ class Database:
                 if properties:
                     entry_rel["properties"] = properties
                     entry_rel["sample"] = sample
-            result.append(entry_rel)
-
-        return result
+            yield entry_rel
 
     async def get_data(self, element: Union['Node', 'Relationship']) -> Union['NodeData', 'RelationshipData']:
         """Gets data for a node or relationship."""

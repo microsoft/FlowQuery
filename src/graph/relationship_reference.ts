@@ -6,7 +6,7 @@ class RelationshipReference extends Relationship {
     constructor(base: Relationship, reference: Relationship) {
         super();
         this._identifier = base.identifier;
-        this._type = base.type;
+        this._types = base.types;
         this._hops = base.hops!;
         this._source = base.source;
         this._target = base.target;

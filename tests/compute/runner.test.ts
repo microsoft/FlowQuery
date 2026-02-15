@@ -2848,3 +2848,117 @@ test("Test sum over empty array returns 0", async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ sum: 0 });
 });
+
+test("Test match with ORed relationship types", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:FOLLOWS]-(:Person) AS {
+            unwind [
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS|FOLLOWS]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Alice", name2: "Bob" });
+    expect(results[1]).toEqual({ name1: "Bob", name2: "Charlie" });
+});
+
+test("Test match with ORed relationship types with optional colon syntax", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Animal) AS {
+            unwind [
+                {id: 1, name: 'Cat'},
+                {id: 2, name: 'Dog'},
+                {id: 3, name: 'Fish'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Animal)-[:CHASES]-(:Animal) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Animal)-[:EATS]-(:Animal) AS {
+            unwind [
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Animal)-[:CHASES|:EATS]->(b:Animal)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Cat", name2: "Dog" });
+    expect(results[1]).toEqual({ name1: "Cat", name2: "Fish" });
+});
+
+test("Test match with ORed relationship types returns correct type in relationship variable", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            unwind [
+                {id: 1, name: 'NYC'},
+                {id: 2, name: 'LA'},
+                {id: 3, name: 'Chicago'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 2, airline: 'Delta'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.airline as airline
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:TRAIN]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 3, line: 'Amtrak'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.line as line
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:City)-[r:FLIGHT|TRAIN]->(b:City)
+        RETURN a.name AS from, b.name AS to, r.type AS type
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ from: "NYC", to: "LA", type: "FLIGHT" });
+    expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
+});

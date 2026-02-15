@@ -673,8 +673,19 @@ class Parser extends BaseParser {
         if (!this.token.isIdentifierOrKeyword()) {
             throw new Error("Expected relationship type identifier");
         }
-        const type: string = this.token.value || "";
+        const types: string[] = [this.token.value || ""];
         this.setNextToken();
+        while (this.token.isPipe()) {
+            this.setNextToken();
+            if (this.token.isColon()) {
+                this.setNextToken();
+            }
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected relationship type identifier after '|'");
+            }
+            types.push(this.token.value || "");
+            this.setNextToken();
+        }
         const hops: Hops | null = this.parseRelationshipHops();
         const properties: Map<string, Expression> = new Map(this.parseProperties());
         if (!this.token.isClosingBracket()) {
@@ -711,7 +722,7 @@ class Parser extends BaseParser {
         if (hops !== null) {
             relationship.hops = hops;
         }
-        relationship.type = type;
+        relationship.types = types;
         return relationship;
     }
 

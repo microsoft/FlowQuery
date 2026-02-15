@@ -576,8 +576,16 @@ class Parser(BaseParser):
         self.set_next_token()
         if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected relationship type identifier")
-        rel_type: str = self.token.value or ""
+        rel_types: List[str] = [self.token.value or ""]
         self.set_next_token()
+        while self.token.is_pipe():
+            self.set_next_token()
+            if self.token.is_colon():
+                self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected relationship type identifier after '|'")
+            rel_types.append(self.token.value or "")
+            self.set_next_token()
         hops = self._parse_relationship_hops()
         properties: Dict[str, Expression] = dict(self._parse_properties())
         if not self.token.is_closing_bracket():
@@ -607,7 +615,7 @@ class Parser(BaseParser):
             self._state.variables[variable] = relationship
         if hops is not None:
             relationship.hops = hops
-        relationship.type = rel_type
+        relationship.types = rel_types
         return relationship
 
     def _parse_properties(self) -> Iterator[Tuple[str, Expression]]:

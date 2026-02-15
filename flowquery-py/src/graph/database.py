@@ -54,6 +54,15 @@ class Database:
         """Gets a relationship from the database."""
         return Database._relationships.get(relationship.type) if relationship.type else None
 
+    def get_relationships(self, relationship: 'Relationship') -> list['PhysicalRelationship']:
+        """Gets multiple physical relationships for ORed types."""
+        result = []
+        for rel_type in relationship.types:
+            physical = Database._relationships.get(rel_type)
+            if physical:
+                result.append(physical)
+        return result
+
     async def schema(self) -> list[dict[str, Any]]:
         """Returns the graph schema with node/relationship labels and sample data."""
         result: list[dict[str, Any]] = []
@@ -87,6 +96,17 @@ class Database:
             data = await node.data()
             return NodeData(data)
         elif isinstance(element, Relationship):
+            if len(element.types) > 1:
+                physicals = self.get_relationships(element)
+                if not physicals:
+                    raise ValueError(f"No physical relationships found for types {', '.join(element.types)}")
+                all_records = []
+                for i, physical in enumerate(physicals):
+                    records = await physical.data()
+                    type_name = element.types[i]
+                    for record in records:
+                        all_records.append({**record, "_type": type_name})
+                return RelationshipData(all_records)
             relationship = self.get_relationship(element)
             if relationship is None:
                 raise ValueError(f"Physical relationship not found for type {element.type}")

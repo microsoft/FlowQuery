@@ -39,6 +39,16 @@ class Database {
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         return Database.relationships.get(relationship.type!) || null;
     }
+    public getRelationships(relationship: Relationship): PhysicalRelationship[] {
+        const result: PhysicalRelationship[] = [];
+        for (const type of relationship.types) {
+            const physical = Database.relationships.get(type);
+            if (physical) {
+                result.push(physical);
+            }
+        }
+        return result;
+    }
     public async schema(): Promise<Record<string, any>[]> {
         const result: Record<string, any>[] = [];
 
@@ -78,6 +88,23 @@ class Database {
             const data = await node.data();
             return new NodeData(data as NodeRecord[]);
         } else if (element instanceof Relationship) {
+            if (element.types.length > 1) {
+                const physicals = this.getRelationships(element);
+                if (physicals.length === 0) {
+                    throw new Error(
+                        `No physical relationships found for types ${element.types.join(", ")}`
+                    );
+                }
+                const allRecords: RelationshipRecord[] = [];
+                for (let i = 0; i < physicals.length; i++) {
+                    const records = (await physicals[i].data()) as RelationshipRecord[];
+                    const typeName = element.types[i];
+                    for (const record of records) {
+                        allRecords.push({ ...record, _type: typeName });
+                    }
+                }
+                return new RelationshipData(allRecords);
+            }
             const relationship = this.getRelationship(element);
             if (relationship === null) {
                 throw new Error(`Physical relationship not found for type ${element.type}`);

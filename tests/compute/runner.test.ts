@@ -216,6 +216,86 @@ test("Test avg with one value", async () => {
     expect(results[0]).toEqual({ avg: 1 });
 });
 
+test("Test min", async () => {
+    const runner = new Runner("unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: 1 });
+});
+
+test("Test max", async () => {
+    const runner = new Runner("unwind [3, 1, 4, 1, 5, 9] as n return max(n) as maximum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: 9 });
+});
+
+test("Test min with grouped values", async () => {
+    const runner = new Runner(
+        "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, min(j) as minimum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, minimum: 10 });
+    expect(results[1]).toEqual({ i: 2, minimum: 10 });
+});
+
+test("Test max with grouped values", async () => {
+    const runner = new Runner(
+        "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, max(j) as maximum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ i: 1, maximum: 40 });
+    expect(results[1]).toEqual({ i: 2, maximum: 40 });
+});
+
+test("Test min with null", async () => {
+    const runner = new Runner("return min(null) as minimum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: null });
+});
+
+test("Test max with null", async () => {
+    const runner = new Runner("return max(null) as maximum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: null });
+});
+
+test("Test min with strings", async () => {
+    const runner = new Runner('unwind ["cherry", "apple", "banana"] as s return min(s) as minimum');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: "apple" });
+});
+
+test("Test max with strings", async () => {
+    const runner = new Runner('unwind ["cherry", "apple", "banana"] as s return max(s) as maximum');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ maximum: "cherry" });
+});
+
+test("Test min and max together", async () => {
+    const runner = new Runner(
+        "unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum, max(n) as maximum"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ minimum: 1, maximum: 9 });
+});
+
 test("Test with and return", async () => {
     const runner = new Runner("with 1 as a return a");
     await runner.run();
@@ -820,6 +900,121 @@ test("Test keys function", async () => {
     const results = runner.results;
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ keys: ["name", "age"] });
+});
+
+test("Test properties function with map", async () => {
+    const runner = new Runner('RETURN properties({name: "Alice", age: 30}) as props');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ props: { name: "Alice", age: 30 } });
+});
+
+test("Test properties function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Animal) AS {
+            UNWIND [
+                {id: 1, name: 'Dog', legs: 4},
+                {id: 2, name: 'Cat', legs: 4}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.legs AS legs
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Animal)
+        RETURN properties(a) AS props
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ props: { name: "Dog", legs: 4 } });
+    expect(results[1]).toEqual({ props: { name: "Cat", legs: 4 } });
+});
+
+test("Test properties function with null", async () => {
+    const runner = new Runner("RETURN properties(null) as props");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ props: null });
+});
+
+test("Test nodes function", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+        RETURN nodes(p) AS cities
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].cities.length).toBe(2);
+    expect(results[0].cities[0].id).toBe(1);
+    expect(results[0].cities[0].name).toBe("New York");
+    expect(results[0].cities[1].id).toBe(2);
+    expect(results[0].cities[1].name).toBe("Boston");
+});
+
+test("Test relationships function", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2, distance: 190}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id, record.distance AS distance
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+        RETURN relationships(p) AS rels
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].rels.length).toBe(1);
+    expect(results[0].rels[0].type).toBe("CONNECTED_TO");
+    expect(results[0].rels[0].properties.distance).toBe(190);
+});
+
+test("Test nodes function with null", async () => {
+    const runner = new Runner("RETURN nodes(null) as n");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ n: [] });
+});
+
+test("Test relationships function with null", async () => {
+    const runner = new Runner("RETURN relationships(null) as r");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ r: [] });
 });
 
 test("Test type function", async () => {
@@ -1823,6 +2018,39 @@ test("Test optional match with no matching relationship", async () => {
     expect(results[1].friend).toBeNull();
     expect(results[2].name).toBe("Person 3");
     expect(results[2].friend).toBeNull();
+});
+
+test("Test optional match property access on null node returns null", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'},
+                {id: 3, name: 'Person 3'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // When accessing b.name and b is null (no match), should return null
+    const match = new Runner(`
+        MATCH (a:Person)
+        OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+        RETURN a.name AS name, b.name AS friend_name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Person 1", friend_name: "Person 2" });
+    expect(results[1]).toEqual({ name: "Person 2", friend_name: null });
+    expect(results[2]).toEqual({ name: "Person 3", friend_name: null });
 });
 
 test("Test optional match where all nodes match", async () => {
@@ -2965,4 +3193,502 @@ test("Test match with ORed relationship types returns correct type in relationsh
     expect(results.length).toBe(2);
     expect(results[0]).toEqual({ from: "NYC", to: "LA", type: "FLIGHT" });
     expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
+});
+
+test("Test coalesce returns first non-null value", async () => {
+    const runner = new Runner("RETURN coalesce(null, null, 'hello', 'world') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test coalesce returns first argument when not null", async () => {
+    const runner = new Runner("RETURN coalesce('first', 'second') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "first" });
+});
+
+test("Test coalesce returns null when all arguments are null", async () => {
+    const runner = new Runner("RETURN coalesce(null, null, null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test coalesce with single non-null argument", async () => {
+    const runner = new Runner("RETURN coalesce(42) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 42 });
+});
+
+test("Test coalesce with mixed types", async () => {
+    const runner = new Runner("RETURN coalesce(null, 42, 'hello') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 42 });
+});
+
+test("Test coalesce with property access", async () => {
+    const runner = new Runner(
+        "WITH {name: 'Alice'} AS person RETURN coalesce(person.nickname, person.name) as result"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "Alice" });
+});
+
+// ============================================================
+// Temporal / Time Functions
+// ============================================================
+
+test("Test datetime() returns current datetime object", async () => {
+    const before = Date.now();
+    const runner = new Runner("RETURN datetime() AS dt");
+    await runner.run();
+    const after = Date.now();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(dt).toBeDefined();
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.month).toBe("number");
+    expect(typeof dt.day).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(typeof dt.minute).toBe("number");
+    expect(typeof dt.second).toBe("number");
+    expect(typeof dt.millisecond).toBe("number");
+    expect(typeof dt.epochMillis).toBe("number");
+    expect(typeof dt.epochSeconds).toBe("number");
+    expect(typeof dt.dayOfWeek).toBe("number");
+    expect(typeof dt.dayOfYear).toBe("number");
+    expect(typeof dt.quarter).toBe("number");
+    expect(typeof dt.formatted).toBe("string");
+    // epochMillis should be between before and after
+    expect(dt.epochMillis).toBeGreaterThanOrEqual(before);
+    expect(dt.epochMillis).toBeLessThanOrEqual(after);
+});
+
+test("Test datetime() with ISO string argument", async () => {
+    const runner = new Runner("RETURN datetime('2025-06-15T12:30:45.123Z') AS dt");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(dt.year).toBe(2025);
+    expect(dt.month).toBe(6);
+    expect(dt.day).toBe(15);
+    expect(dt.hour).toBe(12);
+    expect(dt.minute).toBe(30);
+    expect(dt.second).toBe(45);
+    expect(dt.millisecond).toBe(123);
+    expect(dt.formatted).toBe("2025-06-15T12:30:45.123Z");
+});
+
+test("Test datetime() property access", async () => {
+    const runner = new Runner(
+        "WITH datetime('2025-06-15T12:30:45.123Z') AS dt RETURN dt.year AS year, dt.month AS month, dt.day AS day"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ year: 2025, month: 6, day: 15 });
+});
+
+test("Test date() returns current date object", async () => {
+    const runner = new Runner("RETURN date() AS d");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const d = results[0].d;
+    expect(d).toBeDefined();
+    expect(typeof d.year).toBe("number");
+    expect(typeof d.month).toBe("number");
+    expect(typeof d.day).toBe("number");
+    expect(typeof d.epochMillis).toBe("number");
+    expect(typeof d.dayOfWeek).toBe("number");
+    expect(typeof d.dayOfYear).toBe("number");
+    expect(typeof d.quarter).toBe("number");
+    expect(typeof d.formatted).toBe("string");
+    // Should not have time fields
+    expect(d.hour).toBeUndefined();
+    expect(d.minute).toBeUndefined();
+});
+
+test("Test date() with ISO date string", async () => {
+    const runner = new Runner("RETURN date('2025-06-15') AS d");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const d = results[0].d;
+    expect(d.year).toBe(2025);
+    expect(d.month).toBe(6);
+    expect(d.day).toBe(15);
+    expect(d.formatted).toBe("2025-06-15");
+});
+
+test("Test date() dayOfWeek and quarter", async () => {
+    // 2025-06-15 is a Sunday
+    const runner = new Runner("RETURN date('2025-06-15') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.dayOfWeek).toBe(7); // Sunday = 7 in ISO
+    expect(d.quarter).toBe(2); // June = Q2
+});
+
+test("Test time() returns current UTC time", async () => {
+    const runner = new Runner("RETURN time() AS t");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const t = results[0].t;
+    expect(typeof t.hour).toBe("number");
+    expect(typeof t.minute).toBe("number");
+    expect(typeof t.second).toBe("number");
+    expect(typeof t.millisecond).toBe("number");
+    expect(typeof t.formatted).toBe("string");
+    expect(t.formatted).toMatch(/Z$/); // UTC time ends in Z
+});
+
+test("Test localtime() returns current local time", async () => {
+    const runner = new Runner("RETURN localtime() AS t");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const t = results[0].t;
+    expect(typeof t.hour).toBe("number");
+    expect(typeof t.minute).toBe("number");
+    expect(typeof t.second).toBe("number");
+    expect(typeof t.millisecond).toBe("number");
+    expect(typeof t.formatted).toBe("string");
+    expect(t.formatted).not.toMatch(/Z$/); // Local time does not end in Z
+});
+
+test("Test localdatetime() returns current local datetime", async () => {
+    const runner = new Runner("RETURN localdatetime() AS dt");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.month).toBe("number");
+    expect(typeof dt.day).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(typeof dt.minute).toBe("number");
+    expect(typeof dt.second).toBe("number");
+    expect(typeof dt.millisecond).toBe("number");
+    expect(typeof dt.epochMillis).toBe("number");
+    expect(typeof dt.formatted).toBe("string");
+    expect(dt.formatted).not.toMatch(/Z$/); // Local datetime does not end in Z
+});
+
+test("Test localdatetime() with string argument", async () => {
+    const runner = new Runner("RETURN localdatetime('2025-01-20T08:15:30.500Z') AS dt");
+    await runner.run();
+    const dt = runner.results[0].dt;
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(dt.epochMillis).toBeDefined();
+});
+
+test("Test timestamp() returns epoch millis", async () => {
+    const before = Date.now();
+    const runner = new Runner("RETURN timestamp() AS ts");
+    await runner.run();
+    const after = Date.now();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const ts = results[0].ts;
+    expect(typeof ts).toBe("number");
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
+});
+
+test("Test datetime() epochMillis matches timestamp()", async () => {
+    const runner = new Runner(
+        "WITH datetime() AS dt, timestamp() AS ts RETURN dt.epochMillis AS dtMillis, ts AS tsMillis"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    // They should be very close (within a few ms)
+    expect(Math.abs(results[0].dtMillis - results[0].tsMillis)).toBeLessThan(100);
+});
+
+test("Test date() with property access in WHERE", async () => {
+    const runner = new Runner(
+        "UNWIND [1, 2, 3] AS x WITH x, date('2025-06-15') AS d WHERE d.quarter = 2 RETURN x"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3); // All 3 pass through since Q2 = 2
+});
+
+test("Test datetime() with map argument", async () => {
+    const runner = new Runner(
+        "RETURN datetime({year: 2024, month: 12, day: 25, hour: 10, minute: 30}) AS dt"
+    );
+    await runner.run();
+    const dt = runner.results[0].dt;
+    expect(dt.year).toBe(2024);
+    expect(dt.month).toBe(12);
+    expect(dt.day).toBe(25);
+    expect(dt.quarter).toBe(4); // December = Q4
+});
+
+test("Test date() with map argument", async () => {
+    const runner = new Runner("RETURN date({year: 2025, month: 3, day: 1}) AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.year).toBe(2025);
+    expect(d.month).toBe(3);
+    expect(d.day).toBe(1);
+    expect(d.quarter).toBe(1); // March = Q1
+});
+
+test("Test id() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN id(n) AS nodeId
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ nodeId: 1 });
+    expect(results[1]).toEqual({ nodeId: 2 });
+});
+
+test("Test id() function with null", async () => {
+    const runner = new Runner("RETURN id(null) AS nodeId");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ nodeId: null });
+});
+
+test("Test id() function with relationship", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:City)-[r:CONNECTED_TO]->(b:City)
+        RETURN id(r) AS relId
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ relId: "CONNECTED_TO" });
+});
+
+test("Test elementId() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN elementId(n) AS eid
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ eid: "1" });
+    expect(results[1]).toEqual({ eid: "2" });
+});
+
+test("Test elementId() function with null", async () => {
+    const runner = new Runner("RETURN elementId(null) AS eid");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ eid: null });
+});
+
+test("Test head() function", async () => {
+    const runner = new Runner("RETURN head([1, 2, 3]) AS h");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ h: 1 });
+});
+
+test("Test head() function with empty list", async () => {
+    const runner = new Runner("RETURN head([]) AS h");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ h: null });
+});
+
+test("Test head() function with null", async () => {
+    const runner = new Runner("RETURN head(null) AS h");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ h: null });
+});
+
+test("Test tail() function", async () => {
+    const runner = new Runner("RETURN tail([1, 2, 3]) AS t");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ t: [2, 3] });
+});
+
+test("Test tail() function with single element", async () => {
+    const runner = new Runner("RETURN tail([1]) AS t");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ t: [] });
+});
+
+test("Test tail() function with null", async () => {
+    const runner = new Runner("RETURN tail(null) AS t");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ t: null });
+});
+
+test("Test last() function", async () => {
+    const runner = new Runner("RETURN last([1, 2, 3]) AS l");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ l: 3 });
+});
+
+test("Test last() function with empty list", async () => {
+    const runner = new Runner("RETURN last([]) AS l");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ l: null });
+});
+
+test("Test last() function with null", async () => {
+    const runner = new Runner("RETURN last(null) AS l");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ l: null });
+});
+
+test("Test toInteger() function with string", async () => {
+    const runner = new Runner('RETURN toInteger("42") AS i');
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 42 });
+});
+
+test("Test toInteger() function with float", async () => {
+    const runner = new Runner("RETURN toInteger(3.14) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 3 });
+});
+
+test("Test toInteger() function with boolean", async () => {
+    const runner = new Runner("RETURN toInteger(true) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 1 });
+});
+
+test("Test toInteger() function with null", async () => {
+    const runner = new Runner("RETURN toInteger(null) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: null });
+});
+
+test("Test toFloat() function with string", async () => {
+    const runner = new Runner('RETURN toFloat("3.14") AS f');
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 3.14 });
+});
+
+test("Test toFloat() function with integer", async () => {
+    const runner = new Runner("RETURN toFloat(42) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 42 });
+});
+
+test("Test toFloat() function with boolean", async () => {
+    const runner = new Runner("RETURN toFloat(true) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 1.0 });
+});
+
+test("Test toFloat() function with null", async () => {
+    const runner = new Runner("RETURN toFloat(null) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: null });
+});
+
+test("Test duration() with ISO 8601 string", async () => {
+    const runner = new Runner("RETURN duration('P1Y2M3DT4H5M6S') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.years).toBe(1);
+    expect(d.months).toBe(2);
+    expect(d.days).toBe(3);
+    expect(d.hours).toBe(4);
+    expect(d.minutes).toBe(5);
+    expect(d.seconds).toBe(6);
+    expect(d.totalMonths).toBe(14);
+    expect(d.formatted).toBe("P1Y2M3DT4H5M6S");
+});
+
+test("Test duration() with map argument", async () => {
+    const runner = new Runner("RETURN duration({days: 14, hours: 16}) AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.days).toBe(14);
+    expect(d.hours).toBe(16);
+    expect(d.totalDays).toBe(14);
+    expect(d.totalSeconds).toBe(57600);
+});
+
+test("Test duration() with weeks", async () => {
+    const runner = new Runner("RETURN duration('P2W') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.weeks).toBe(2);
+    expect(d.days).toBe(14);
+    expect(d.totalDays).toBe(14);
+});
+
+test("Test duration() with null", async () => {
+    const runner = new Runner("RETURN duration(null) AS d");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ d: null });
+});
+
+test("Test duration() with time only", async () => {
+    const runner = new Runner("RETURN duration('PT2H30M') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.hours).toBe(2);
+    expect(d.minutes).toBe(30);
+    expect(d.totalSeconds).toBe(9000);
+    expect(d.formatted).toBe("PT2H30M");
 });

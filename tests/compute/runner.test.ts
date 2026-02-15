@@ -1340,6 +1340,60 @@ test("Test match with referenced to previous variable", async () => {
     expect(results[1]).toEqual({ name1: "Person 2", name2: "Person 3", name3: "Person 4" });
 });
 
+test("Test match with aggregated with and subsequent match", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:User) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Carol'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:KNOWS]-(:User) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Project) AS {
+            unwind [
+                {id: 1, name: 'Project A'},
+                {id: 2, name: 'Project B'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:WORKS_ON]-(:Project) AS {
+            unwind [
+                {left_id: 1, right_id: 1},
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (u:User)-[:KNOWS]->(s:User)
+        WITH u, count(s) as acquaintances
+        MATCH (u)-[:WORKS_ON]->(p:Project)
+        RETURN u.name as name, acquaintances, collect(p.name) as projects
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({
+        name: "Alice",
+        acquaintances: 2,
+        projects: ["Project A", "Project B"],
+    });
+});
+
 test("Test match and return full node", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {

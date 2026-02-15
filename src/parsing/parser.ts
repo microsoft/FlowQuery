@@ -501,16 +501,11 @@ class Parser extends BaseParser {
         node.label = label!;
         if (identifier !== null && this._state.variables.has(identifier)) {
             let reference = this._state.variables.get(identifier);
-            // Resolve through Expression -> Reference -> Node (e.g., after WITH)
-            if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
-                const inner = (reference.firstChild() as Reference).referred;
-                if (inner instanceof Node) {
-                    reference = inner;
-                }
-            }
             if (
                 reference === undefined ||
-                (!(reference instanceof Node) && !(reference instanceof Unwind))
+                (!(reference instanceof Node) &&
+                    !(reference instanceof Unwind) &&
+                    !(reference instanceof Expression))
             ) {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }

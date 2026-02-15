@@ -545,13 +545,11 @@ class Parser(BaseParser):
         node.properties = dict(self._parse_properties())
         if identifier is not None and identifier in self._state.variables:
             reference = self._state.variables.get(identifier)
-            # Resolve through Expression -> Reference -> Node (e.g., after WITH)
-            ref_child = reference.first_child() if isinstance(reference, Expression) else None
-            if isinstance(ref_child, Reference):
-                inner = ref_child.referred
-                if isinstance(inner, Node):
-                    reference = inner
-            if reference is None or (not isinstance(reference, Node) and not isinstance(reference, Unwind)):
+            if reference is None or (
+                not isinstance(reference, Node)
+                and not isinstance(reference, Unwind)
+                and not isinstance(reference, Expression)
+            ):
                 raise ValueError(f"Undefined node reference: {identifier}")
             node = NodeReference(node, reference)
         elif identifier is not None:

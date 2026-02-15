@@ -19,7 +19,7 @@
   "dependencies": {
     "@fluentui/react-components": "^9.72.9",
     "@fluentui/react-icons": "^2.0.316",
-    "flowquery": "^1.0.33",
+    "flowquery": "^1.0.35",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",

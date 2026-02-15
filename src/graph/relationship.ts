@@ -9,7 +9,7 @@ import RelationshipMatchCollector, {
 
 class Relationship extends ASTNode {
     protected _identifier: string | null = null;
-    protected _type: string | null = null;
+    protected _types: string[] = [];
     protected _properties: Map<string, Expression> = new Map();
     protected _hops: Hops = new Hops();
 
@@ -25,7 +25,9 @@ class Relationship extends ASTNode {
     constructor(identifier: string | null = null, type: string | null = null) {
         super();
         this._identifier = identifier;
-        this._type = type;
+        if (type !== null) {
+            this._types = [type];
+        }
     }
     public set identifier(identifier: string) {
         this._identifier = identifier;
@@ -34,10 +36,16 @@ class Relationship extends ASTNode {
         return this._identifier;
     }
     public set type(type: string) {
-        this._type = type;
+        this._types = [type];
     }
     public get type(): string | null {
-        return this._type;
+        return this._types.length > 0 ? this._types[0] : null;
+    }
+    public set types(types: string[]) {
+        this._types = types;
+    }
+    public get types(): string[] {
+        return this._types;
     }
     public get properties(): Map<string, Expression> {
         return this._properties;

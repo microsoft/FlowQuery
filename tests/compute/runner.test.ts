@@ -573,6 +573,78 @@ test("Test stringify function", async () => {
     });
 });
 
+test("Test toString function with number", async () => {
+    const runner = new Runner("RETURN toString(42) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "42" });
+});
+
+test("Test toString function with boolean", async () => {
+    const runner = new Runner("RETURN toString(true) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "true" });
+});
+
+test("Test toString function with object", async () => {
+    const runner = new Runner("RETURN toString({a: 1}) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: '{"a":1}' });
+});
+
+test("Test toLower function", async () => {
+    const runner = new Runner('RETURN toLower("Hello World") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello world" });
+});
+
+test("Test toLower function with all uppercase", async () => {
+    const runner = new Runner('RETURN toLower("FOO BAR") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "foo bar" });
+});
+
+test("Test trim function", async () => {
+    const runner = new Runner('RETURN trim("  hello  ") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test trim function with tabs and newlines", async () => {
+    const runner = new Runner('WITH "\tfoo\n" AS s RETURN trim(s) as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "foo" });
+});
+
+test("Test trim function with no whitespace", async () => {
+    const runner = new Runner('RETURN trim("hello") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test trim function with empty string", async () => {
+    const runner = new Runner('RETURN trim("") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "" });
+});
+
 test("Test associative array with key which is keyword", async () => {
     const runner = new Runner("RETURN {return: 1} as aa");
     await runner.run();
@@ -1924,20 +1996,24 @@ test("Test schema() returns nodes and relationships with sample data", async () 
     `).run();
 
     const runner = new Runner(
-        "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+        "CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample RETURN kind, label, type, from_label, to_label, properties, sample"
     );
     await runner.run();
     const results = runner.results;
 
-    const animal = results.find((r: any) => r.kind === "node" && r.label === "Animal");
+    const animal = results.find((r: any) => r.kind === "Node" && r.label === "Animal");
     expect(animal).toBeDefined();
+    expect(animal.properties).toEqual(["species", "legs"]);
     expect(animal.sample).toBeDefined();
     expect(animal.sample).not.toHaveProperty("id");
     expect(animal.sample).toHaveProperty("species");
     expect(animal.sample).toHaveProperty("legs");
 
-    const chases = results.find((r: any) => r.kind === "relationship" && r.type === "CHASES");
+    const chases = results.find((r: any) => r.kind === "Relationship" && r.type === "CHASES");
     expect(chases).toBeDefined();
+    expect(chases.from_label).toBe("Animal");
+    expect(chases.to_label).toBe("Animal");
+    expect(chases.properties).toEqual(["speed"]);
     expect(chases.sample).toBeDefined();
     expect(chases.sample).not.toHaveProperty("left_id");
     expect(chases.sample).not.toHaveProperty("right_id");
@@ -2649,4 +2725,244 @@ test("Test UNION with empty right side", async () => {
     const results = runner.results;
     expect(results.length).toBe(1);
     expect(results).toEqual([{ x: 1 }]);
+});
+
+test("Test language name hits query with virtual graph", async () => {
+    // Create Language nodes
+    await new Runner(`
+        CREATE VIRTUAL (:Language) AS {
+            UNWIND [
+                {id: 1, name: 'Python'},
+                {id: 2, name: 'JavaScript'},
+                {id: 3, name: 'TypeScript'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+
+    // Create Chat nodes with messages
+    await new Runner(`
+        CREATE VIRTUAL (:Chat) AS {
+            UNWIND [
+                {id: 1, name: 'Dev Discussion', messages: [
+                    {From: 'Alice', SentDateTime: '2025-01-01T10:00:00', Content: 'I love Python and JavaScript'},
+                    {From: 'Bob', SentDateTime: '2025-01-01T10:05:00', Content: 'What languages do you prefer?'}
+                ]},
+                {id: 2, name: 'General', messages: [
+                    {From: 'Charlie', SentDateTime: '2025-01-02T09:00:00', Content: 'The weather is nice today'},
+                    {From: 'Alice', SentDateTime: '2025-01-02T09:05:00', Content: 'TypeScript is great for language tooling'}
+                ]}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.messages AS messages
+        }
+    `).run();
+
+    // Create User nodes
+    await new Runner(`
+        CREATE VIRTUAL (:User) AS {
+            UNWIND [
+                {id: 1, displayName: 'Alice'},
+                {id: 2, displayName: 'Bob'},
+                {id: 3, displayName: 'Charlie'}
+            ] AS record
+            RETURN record.id AS id, record.displayName AS displayName
+        }
+    `).run();
+
+    // Create PARTICIPATES_IN relationships
+    await new Runner(`
+        CREATE VIRTUAL (:User)-[:PARTICIPATES_IN]-(:Chat) AS {
+            UNWIND [
+                {left_id: 1, right_id: 1},
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 2},
+                {left_id: 1, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+
+    // Run the original query (using 'sender' alias since 'from' is a reserved keyword)
+    const runner = new Runner(`
+        MATCH (l:Language)
+        WITH collect(distinct l.name) AS langs
+        MATCH (c:Chat)
+        UNWIND c.messages AS msg
+        WITH c, msg, langs,
+             sum(lang IN langs | 1 where toLower(msg.Content) CONTAINS toLower(lang)) AS langNameHits
+        WHERE toLower(msg.Content) CONTAINS "language"
+           OR toLower(msg.Content) CONTAINS "languages"
+           OR langNameHits > 0
+        OPTIONAL MATCH (u:User)-[:PARTICIPATES_IN]->(c)
+        RETURN
+          c.name AS chat,
+          collect(distinct u.displayName) AS participants,
+          msg.From AS sender,
+          msg.SentDateTime AS sentDateTime,
+          msg.Content AS message
+    `);
+    await runner.run();
+    const results = runner.results;
+
+    // Messages that mention a language name or the word "language(s)":
+    // 1. "I love Python and JavaScript" - langNameHits=2 (matches Python and JavaScript)
+    // 2. "What languages do you prefer?" - contains "languages"
+    // 3. "TypeScript is great for language tooling" - langNameHits=1, also contains "language"
+    expect(results.length).toBe(3);
+    expect(results[0].chat).toBe("Dev Discussion");
+    expect(results[0].message).toBe("I love Python and JavaScript");
+    expect(results[0].sender).toBe("Alice");
+    expect(results[1].chat).toBe("Dev Discussion");
+    expect(results[1].message).toBe("What languages do you prefer?");
+    expect(results[1].sender).toBe("Bob");
+    expect(results[2].chat).toBe("General");
+    expect(results[2].message).toBe("TypeScript is great for language tooling");
+    expect(results[2].sender).toBe("Alice");
+});
+
+test("Test sum with empty collected array", async () => {
+    // Reproduces the original bug: collect on empty input should yield []
+    // and sum over that empty array should return 0, not throw
+    const runner = new Runner(`
+        UNWIND [] AS lang
+        WITH collect(distinct lang) AS langs
+        UNWIND ['hello', 'world'] AS msg
+        WITH msg, langs, sum(l IN langs | 1 where toLower(msg) CONTAINS toLower(l)) AS hits
+        RETURN msg, hits
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ msg: "hello", hits: 0 });
+    expect(results[1]).toEqual({ msg: "world", hits: 0 });
+});
+
+test("Test sum where all elements filtered returns 0", async () => {
+    const runner = new Runner("RETURN sum(n in [1, 2, 3] | n where n > 100) as sum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ sum: 0 });
+});
+
+test("Test sum over empty array returns 0", async () => {
+    const runner = new Runner("WITH [] AS arr RETURN sum(n in arr | n) as sum");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ sum: 0 });
+});
+
+test("Test match with ORed relationship types", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:FOLLOWS]-(:Person) AS {
+            unwind [
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[:KNOWS|FOLLOWS]->(b:Person)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Alice", name2: "Bob" });
+    expect(results[1]).toEqual({ name1: "Bob", name2: "Charlie" });
+});
+
+test("Test match with ORed relationship types with optional colon syntax", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Animal) AS {
+            unwind [
+                {id: 1, name: 'Cat'},
+                {id: 2, name: 'Dog'},
+                {id: 3, name: 'Fish'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Animal)-[:CHASES]-(:Animal) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Animal)-[:EATS]-(:Animal) AS {
+            unwind [
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Animal)-[:CHASES|:EATS]->(b:Animal)
+        RETURN a.name AS name1, b.name AS name2
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name1: "Cat", name2: "Dog" });
+    expect(results[1]).toEqual({ name1: "Cat", name2: "Fish" });
+});
+
+test("Test match with ORed relationship types returns correct type in relationship variable", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            unwind [
+                {id: 1, name: 'NYC'},
+                {id: 2, name: 'LA'},
+                {id: 3, name: 'Chicago'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 2, airline: 'Delta'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.airline as airline
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:TRAIN]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 3, line: 'Amtrak'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.line as line
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:City)-[r:FLIGHT|TRAIN]->(b:City)
+        RETURN a.name AS from, b.name AS to, r.type AS type
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ from: "NYC", to: "LA", type: "FLIGHT" });
+    expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
 });

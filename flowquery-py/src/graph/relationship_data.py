@@ -25,11 +25,12 @@ class RelationshipData(Data):
         return self._find(id, hop, key)
 
     def properties(self) -> Optional[Dict[str, Any]]:
-        """Get properties of current relationship, excluding left_id and right_id."""
+        """Get properties of current relationship, excluding left_id, right_id, and _type."""
         current = self.current()
         if current:
             props = dict(current)
             props.pop("left_id", None)
             props.pop("right_id", None)
+            props.pop("_type", None)
             return props
         return None

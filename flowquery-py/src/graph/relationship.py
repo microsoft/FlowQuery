@@ -19,7 +19,7 @@ class Relationship(ASTNode):
     def __init__(self) -> None:
         super().__init__()
         self._identifier: Optional[str] = None
-        self._type: Optional[str] = None
+        self._types: List[str] = []
         self._hops: Hops = Hops()
         self._source: Optional['Node'] = None
         self._target: Optional['Node'] = None
@@ -39,11 +39,19 @@ class Relationship(ASTNode):
 
     @property
     def type(self) -> Optional[str]:
-        return self._type
+        return self._types[0] if self._types else None
 
     @type.setter
     def type(self, value: str) -> None:
-        self._type = value
+        self._types = [value]
+
+    @property
+    def types(self) -> List[str]:
+        return self._types
+
+    @types.setter
+    def types(self, value: List[str]) -> None:
+        self._types = value
 
     @property
     def hops(self) -> Hops:

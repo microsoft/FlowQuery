@@ -9,23 +9,27 @@ from .function_metadata import FunctionDef
 @FunctionDef({
     "description": (
         "Returns the graph schema listing all nodes and relationships "
-        "with a sample of their data."
+        "with their properties and a sample of their data."
     ),
     "category": "async",
     "parameters": [],
     "output": {
-        "description": "Schema entry with kind, label/type, and optional sample data",
+        "description": "Schema entry with label/type, properties, and optional sample data",
         "type": "object",
     },
     "examples": [
-        "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample",
+        "CALL schema() YIELD label, type, from_label, to_label, properties, sample "
+        "RETURN label, type, from_label, to_label, properties, sample",
     ],
 })
 class Schema(AsyncFunction):
     """Returns the graph schema of the database.
 
-    Lists all nodes and relationships with their labels/types and a sample
-    of their data (excluding id from nodes, left_id and right_id from relationships).
+    Lists all nodes and relationships with their labels/types, properties,
+    and a sample of their data (excluding id from nodes, left_id and right_id from relationships).
+
+    Nodes: {label, properties, sample}
+    Relationships: {type, from_label, to_label, properties, sample}
     """
 
     async def generate(self) -> AsyncGenerator[Any, None]:

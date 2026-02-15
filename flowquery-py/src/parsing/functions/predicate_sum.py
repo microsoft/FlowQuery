@@ -1,6 +1,6 @@
 """PredicateSum function."""
 
-from typing import Any, Optional
+from typing import Any
 
 from .function_metadata import FunctionDef
 from .predicate_function import PredicateFunction
@@ -41,12 +41,9 @@ class PredicateSum(PredicateFunction):
         if array is None or not isinstance(array, list):
             raise ValueError("Invalid array for sum function")
 
-        _sum: Optional[Any] = None
+        _sum: int = 0
         for item in array:
             self._value_holder.holder = item
             if self.where is None or self.where.value():
-                if _sum is None:
-                    _sum = self._return.value()
-                else:
-                    _sum += self._return.value()
+                _sum += self._return.value()
         return _sum

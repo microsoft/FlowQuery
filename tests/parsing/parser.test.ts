@@ -750,6 +750,43 @@ test("Match with graph pattern including relationships", () => {
     expect(target.label).toBe("Person");
 });
 
+test("Match with ORed relationship types", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[:KNOWS|FOLLOWS]->(b:Person) RETURN a, b");
+    const match = ast.firstChild() as Match;
+    expect(match.patterns[0].chain.length).toBe(3);
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.types).toEqual(["KNOWS", "FOLLOWS"]);
+    expect(relationship.type).toBe("KNOWS");
+});
+
+test("Match with ORed relationship types with optional colons", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[:KNOWS|:FOLLOWS|:LIKES]->(b:Person) RETURN a, b");
+    const match = ast.firstChild() as Match;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.types).toEqual(["KNOWS", "FOLLOWS", "LIKES"]);
+});
+
+test("Match with ORed relationship types and variable", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[r:KNOWS|FOLLOWS]->(b:Person) RETURN a, r, b");
+    const match = ast.firstChild() as Match;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.identifier).toBe("r");
+    expect(relationship.types).toEqual(["KNOWS", "FOLLOWS"]);
+});
+
+test("Match with ORed relationship types and hops", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[:KNOWS|FOLLOWS*1..3]->(b:Person) RETURN a, b");
+    const match = ast.firstChild() as Match;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.types).toEqual(["KNOWS", "FOLLOWS"]);
+    expect(relationship.hops!.min).toBe(1);
+    expect(relationship.hops!.max).toBe(3);
+});
+
 test("Test not equal operator", () => {
     const parser = new Parser();
     const ast = parser.parse("RETURN 1 <> 2");

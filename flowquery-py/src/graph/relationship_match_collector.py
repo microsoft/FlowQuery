@@ -28,9 +28,15 @@ class RelationshipMatchCollector:
         """Push a new match onto the collector."""
         start_node_value = relationship.source.value() if relationship.source else None
         rel_data = relationship.get_data()
+        current_record = rel_data.current() if rel_data else None
+        default_type = relationship.type or ""
+        if current_record and isinstance(current_record, dict):
+            actual_type = current_record.get('_type', default_type)
+        else:
+            actual_type = default_type
         rel_props: Dict[str, Any] = (rel_data.properties() or {}) if rel_data else {}
         match: RelationshipMatchRecord = {
-            "type": relationship.type or "",
+            "type": actual_type,
             "startNode": start_node_value or {},
             "endNode": None,
             "properties": rel_props,

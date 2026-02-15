@@ -56,7 +56,7 @@ class Database {
 
         for (const [label, physical] of Database.nodes) {
             const records = await physical.data();
-            const entry: Record<string, any> = { label };
+            const entry: Record<string, any> = { kind: "Node", label };
             if (records.length > 0) {
                 const { id, ...sample } = records[0];
                 const properties = Object.keys(sample);
@@ -71,6 +71,7 @@ class Database {
         for (const [type, physical] of Database.relationships) {
             const records = await physical.data();
             const entry: Record<string, any> = {
+                kind: "Relationship",
                 type,
                 from_label: physical.source?.label || null,
                 to_label: physical.target?.label || null,

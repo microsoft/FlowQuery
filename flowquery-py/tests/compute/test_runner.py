@@ -926,6 +926,20 @@ class TestRunner:
         assert len(results) == 50
 
     @pytest.mark.asyncio
+    async def test_limit_as_last_operation(self):
+        """Test limit as the last operation after return."""
+        runner = Runner(
+            """
+            unwind range(1, 10) as i
+            return i
+            limit 5
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+
+    @pytest.mark.asyncio
     async def test_range_lookup(self):
         """Test range lookup."""
         runner = Runner(
@@ -1456,6 +1470,71 @@ class TestRunner:
         assert len(results) == 2
         assert results[0] == {"name1": "Person 1", "name2": "Person 2", "name3": "Person 3"}
         assert results[1] == {"name1": "Person 2", "name2": "Person 3", "name3": "Person 4"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_aggregated_with_and_subsequent_match(self):
+        """Test match with aggregated WITH followed by another match using the same node reference."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:AggUser) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'},
+                    {id: 3, name: 'Carol'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:AggUser)-[:KNOWS]-(:AggUser) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 1, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:AggProject) AS {
+                unwind [
+                    {id: 1, name: 'Project A'},
+                    {id: 2, name: 'Project B'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:AggUser)-[:WORKS_ON]-(:AggProject) AS {
+                unwind [
+                    {left_id: 1, right_id: 1},
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (u:AggUser)-[:KNOWS]->(s:AggUser)
+            WITH u, count(s) as acquaintances
+            MATCH (u)-[:WORKS_ON]->(p:AggProject)
+            RETURN u.name as name, acquaintances, collect(p.name) as projects
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {
+            "name": "Alice",
+            "acquaintances": 2,
+            "projects": ["Project A", "Project B"],
+        }
 
     @pytest.mark.asyncio
     async def test_match_and_return_full_node(self):

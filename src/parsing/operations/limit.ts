@@ -7,6 +7,12 @@ class Limit extends Operation {
         super();
         this.limit = limit;
     }
+    public get isLimitReached(): boolean {
+        return this.count >= this.limit;
+    }
+    public increment(): void {
+        this.count++;
+    }
     public async run(): Promise<void> {
         if (this.count >= this.limit) {
             return;

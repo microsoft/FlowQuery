@@ -4,6 +4,7 @@ import copy
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..ast_node import ASTNode
+from .limit import Limit
 from .projection import Projection
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ class Return(Projection):
         super().__init__(expressions)
         self._where: Optional['Where'] = None
         self._results: List[Dict[str, Any]] = []
+        self._limit: Optional[Limit] = None
 
     @property
     def where(self) -> Any:
@@ -35,8 +37,18 @@ class Return(Projection):
     def where(self, where: 'Where') -> None:
         self._where = where
 
+    @property
+    def limit(self) -> Optional[Limit]:
+        return self._limit
+
+    @limit.setter
+    def limit(self, limit: Limit) -> None:
+        self._limit = limit
+
     async def run(self) -> None:
         if not self.where:
+            return
+        if self._limit is not None and self._limit.is_limit_reached:
             return
         record: Dict[str, Any] = {}
         for expression, alias in self.expressions():
@@ -45,6 +57,8 @@ class Return(Projection):
             value = copy.deepcopy(raw) if isinstance(raw, (dict, list)) else raw
             record[alias] = value
         self._results.append(record)
+        if self._limit is not None:
+            self._limit.increment()
 
     async def initialize(self) -> None:
         self._results = []

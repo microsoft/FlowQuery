@@ -6,6 +6,8 @@ from .avg import Avg
 from .coalesce import Coalesce
 from .collect import Collect
 from .count import Count
+from .date_ import DateFunction
+from .datetime_ import Datetime
 from .function import Function
 from .function_factory import FunctionFactory
 from .function_metadata import (
@@ -22,6 +24,8 @@ from .function_metadata import (
 from .functions import Functions
 from .join import Join
 from .keys import Keys
+from .localdatetime import LocalDatetime
+from .localtime import LocalTime
 from .max_ import Max
 from .min_ import Min
 from .predicate_function import PredicateFunction
@@ -39,6 +43,8 @@ from .stringify import Stringify
 
 # Built-in functions
 from .sum import Sum
+from .time_ import Time
+from .timestamp import Timestamp
 from .to_json import ToJson
 from .to_lower import ToLower
 from .to_string import ToString
@@ -67,6 +73,8 @@ __all__ = [
     # Built-in functions
     "Sum",
     "Avg",
+    "DateFunction",
+    "Datetime",
     "Coalesce",
     "Collect",
     "Count",
@@ -82,11 +90,15 @@ __all__ = [
     "Split",
     "StringDistance",
     "Stringify",
+    "Time",
+    "Timestamp",
     "ToJson",
     "ToLower",
     "ToString",
     "Trim",
     "Type",
+    "LocalDatetime",
+    "LocalTime",
     "Functions",
     "Schema",
     "PredicateSum",

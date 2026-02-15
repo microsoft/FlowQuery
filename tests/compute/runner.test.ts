@@ -3129,3 +3129,211 @@ test("Test coalesce with property access", async () => {
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ result: "Alice" });
 });
+
+// ============================================================
+// Temporal / Time Functions (Neo4j-style)
+// ============================================================
+
+test("Test datetime() returns current datetime object", async () => {
+    const before = Date.now();
+    const runner = new Runner("RETURN datetime() AS dt");
+    await runner.run();
+    const after = Date.now();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(dt).toBeDefined();
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.month).toBe("number");
+    expect(typeof dt.day).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(typeof dt.minute).toBe("number");
+    expect(typeof dt.second).toBe("number");
+    expect(typeof dt.millisecond).toBe("number");
+    expect(typeof dt.epochMillis).toBe("number");
+    expect(typeof dt.epochSeconds).toBe("number");
+    expect(typeof dt.dayOfWeek).toBe("number");
+    expect(typeof dt.dayOfYear).toBe("number");
+    expect(typeof dt.quarter).toBe("number");
+    expect(typeof dt.formatted).toBe("string");
+    // epochMillis should be between before and after
+    expect(dt.epochMillis).toBeGreaterThanOrEqual(before);
+    expect(dt.epochMillis).toBeLessThanOrEqual(after);
+});
+
+test("Test datetime() with ISO string argument", async () => {
+    const runner = new Runner("RETURN datetime('2025-06-15T12:30:45.123Z') AS dt");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(dt.year).toBe(2025);
+    expect(dt.month).toBe(6);
+    expect(dt.day).toBe(15);
+    expect(dt.hour).toBe(12);
+    expect(dt.minute).toBe(30);
+    expect(dt.second).toBe(45);
+    expect(dt.millisecond).toBe(123);
+    expect(dt.formatted).toBe("2025-06-15T12:30:45.123Z");
+});
+
+test("Test datetime() property access", async () => {
+    const runner = new Runner(
+        "WITH datetime('2025-06-15T12:30:45.123Z') AS dt RETURN dt.year AS year, dt.month AS month, dt.day AS day"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ year: 2025, month: 6, day: 15 });
+});
+
+test("Test date() returns current date object", async () => {
+    const runner = new Runner("RETURN date() AS d");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const d = results[0].d;
+    expect(d).toBeDefined();
+    expect(typeof d.year).toBe("number");
+    expect(typeof d.month).toBe("number");
+    expect(typeof d.day).toBe("number");
+    expect(typeof d.epochMillis).toBe("number");
+    expect(typeof d.dayOfWeek).toBe("number");
+    expect(typeof d.dayOfYear).toBe("number");
+    expect(typeof d.quarter).toBe("number");
+    expect(typeof d.formatted).toBe("string");
+    // Should not have time fields
+    expect(d.hour).toBeUndefined();
+    expect(d.minute).toBeUndefined();
+});
+
+test("Test date() with ISO date string", async () => {
+    const runner = new Runner("RETURN date('2025-06-15') AS d");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const d = results[0].d;
+    expect(d.year).toBe(2025);
+    expect(d.month).toBe(6);
+    expect(d.day).toBe(15);
+    expect(d.formatted).toBe("2025-06-15");
+});
+
+test("Test date() dayOfWeek and quarter", async () => {
+    // 2025-06-15 is a Sunday
+    const runner = new Runner("RETURN date('2025-06-15') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.dayOfWeek).toBe(7); // Sunday = 7 in ISO
+    expect(d.quarter).toBe(2); // June = Q2
+});
+
+test("Test time() returns current UTC time", async () => {
+    const runner = new Runner("RETURN time() AS t");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const t = results[0].t;
+    expect(typeof t.hour).toBe("number");
+    expect(typeof t.minute).toBe("number");
+    expect(typeof t.second).toBe("number");
+    expect(typeof t.millisecond).toBe("number");
+    expect(typeof t.formatted).toBe("string");
+    expect(t.formatted).toMatch(/Z$/); // UTC time ends in Z
+});
+
+test("Test localtime() returns current local time", async () => {
+    const runner = new Runner("RETURN localtime() AS t");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const t = results[0].t;
+    expect(typeof t.hour).toBe("number");
+    expect(typeof t.minute).toBe("number");
+    expect(typeof t.second).toBe("number");
+    expect(typeof t.millisecond).toBe("number");
+    expect(typeof t.formatted).toBe("string");
+    expect(t.formatted).not.toMatch(/Z$/); // Local time does not end in Z
+});
+
+test("Test localdatetime() returns current local datetime", async () => {
+    const runner = new Runner("RETURN localdatetime() AS dt");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const dt = results[0].dt;
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.month).toBe("number");
+    expect(typeof dt.day).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(typeof dt.minute).toBe("number");
+    expect(typeof dt.second).toBe("number");
+    expect(typeof dt.millisecond).toBe("number");
+    expect(typeof dt.epochMillis).toBe("number");
+    expect(typeof dt.formatted).toBe("string");
+    expect(dt.formatted).not.toMatch(/Z$/); // Local datetime does not end in Z
+});
+
+test("Test localdatetime() with string argument", async () => {
+    const runner = new Runner("RETURN localdatetime('2025-01-20T08:15:30.500Z') AS dt");
+    await runner.run();
+    const dt = runner.results[0].dt;
+    expect(typeof dt.year).toBe("number");
+    expect(typeof dt.hour).toBe("number");
+    expect(dt.epochMillis).toBeDefined();
+});
+
+test("Test timestamp() returns epoch millis", async () => {
+    const before = Date.now();
+    const runner = new Runner("RETURN timestamp() AS ts");
+    await runner.run();
+    const after = Date.now();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    const ts = results[0].ts;
+    expect(typeof ts).toBe("number");
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
+});
+
+test("Test datetime() epochMillis matches timestamp()", async () => {
+    const runner = new Runner(
+        "WITH datetime() AS dt, timestamp() AS ts RETURN dt.epochMillis AS dtMillis, ts AS tsMillis"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    // They should be very close (within a few ms)
+    expect(Math.abs(results[0].dtMillis - results[0].tsMillis)).toBeLessThan(100);
+});
+
+test("Test date() with property access in WHERE", async () => {
+    const runner = new Runner(
+        "UNWIND [1, 2, 3] AS x WITH x, date('2025-06-15') AS d WHERE d.quarter = 2 RETURN x"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3); // All 3 pass through since Q2 = 2
+});
+
+test("Test datetime() with map argument", async () => {
+    const runner = new Runner(
+        "RETURN datetime({year: 2024, month: 12, day: 25, hour: 10, minute: 30}) AS dt"
+    );
+    await runner.run();
+    const dt = runner.results[0].dt;
+    expect(dt.year).toBe(2024);
+    expect(dt.month).toBe(12);
+    expect(dt.day).toBe(25);
+    expect(dt.quarter).toBe(4); // December = Q4
+});
+
+test("Test date() with map argument", async () => {
+    const runner = new Runner("RETURN date({year: 2025, month: 3, day: 1}) AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.year).toBe(2025);
+    expect(d.month).toBe(3);
+    expect(d.day).toBe(1);
+    expect(d.quarter).toBe(1); // March = Q1
+});

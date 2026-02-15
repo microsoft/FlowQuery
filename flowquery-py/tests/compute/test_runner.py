@@ -3287,3 +3287,230 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"result": "Alice"}
+
+    # ============================================================
+    # Temporal / Time Functions (Neo4j-style)
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_datetime_returns_current_datetime_object(self):
+        """Test datetime() returns current datetime object."""
+        import time
+        before = int(time.time() * 1000)
+        runner = Runner("RETURN datetime() AS dt")
+        await runner.run()
+        after = int(time.time() * 1000)
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert dt is not None
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["month"], int)
+        assert isinstance(dt["day"], int)
+        assert isinstance(dt["hour"], int)
+        assert isinstance(dt["minute"], int)
+        assert isinstance(dt["second"], int)
+        assert isinstance(dt["millisecond"], int)
+        assert isinstance(dt["epochMillis"], int)
+        assert isinstance(dt["epochSeconds"], int)
+        assert isinstance(dt["dayOfWeek"], int)
+        assert isinstance(dt["dayOfYear"], int)
+        assert isinstance(dt["quarter"], int)
+        assert isinstance(dt["formatted"], str)
+        # epochMillis should be between before and after
+        assert dt["epochMillis"] >= before
+        assert dt["epochMillis"] <= after
+
+    @pytest.mark.asyncio
+    async def test_datetime_with_iso_string_argument(self):
+        """Test datetime() with ISO string argument."""
+        runner = Runner("RETURN datetime('2025-06-15T12:30:45.123Z') AS dt")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert dt["year"] == 2025
+        assert dt["month"] == 6
+        assert dt["day"] == 15
+        assert dt["hour"] == 12
+        assert dt["minute"] == 30
+        assert dt["second"] == 45
+        assert dt["millisecond"] == 123
+        assert dt["formatted"] == "2025-06-15T12:30:45.123Z"
+
+    @pytest.mark.asyncio
+    async def test_datetime_property_access(self):
+        """Test datetime() property access."""
+        runner = Runner(
+            "WITH datetime('2025-06-15T12:30:45.123Z') AS dt RETURN dt.year AS year, dt.month AS month, dt.day AS day"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"year": 2025, "month": 6, "day": 15}
+
+    @pytest.mark.asyncio
+    async def test_date_returns_current_date_object(self):
+        """Test date() returns current date object."""
+        runner = Runner("RETURN date() AS d")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        d = results[0]["d"]
+        assert d is not None
+        assert isinstance(d["year"], int)
+        assert isinstance(d["month"], int)
+        assert isinstance(d["day"], int)
+        assert isinstance(d["epochMillis"], int)
+        assert isinstance(d["dayOfWeek"], int)
+        assert isinstance(d["dayOfYear"], int)
+        assert isinstance(d["quarter"], int)
+        assert isinstance(d["formatted"], str)
+        # Should not have time fields
+        assert "hour" not in d
+        assert "minute" not in d
+
+    @pytest.mark.asyncio
+    async def test_date_with_iso_date_string(self):
+        """Test date() with ISO date string."""
+        runner = Runner("RETURN date('2025-06-15') AS d")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        d = results[0]["d"]
+        assert d["year"] == 2025
+        assert d["month"] == 6
+        assert d["day"] == 15
+        assert d["formatted"] == "2025-06-15"
+
+    @pytest.mark.asyncio
+    async def test_date_dayofweek_and_quarter(self):
+        """Test date() dayOfWeek and quarter."""
+        # 2025-06-15 is a Sunday
+        runner = Runner("RETURN date('2025-06-15') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["dayOfWeek"] == 7  # Sunday = 7 in ISO
+        assert d["quarter"] == 2  # June = Q2
+
+    @pytest.mark.asyncio
+    async def test_time_returns_current_utc_time(self):
+        """Test time() returns current UTC time."""
+        runner = Runner("RETURN time() AS t")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        t = results[0]["t"]
+        assert isinstance(t["hour"], int)
+        assert isinstance(t["minute"], int)
+        assert isinstance(t["second"], int)
+        assert isinstance(t["millisecond"], int)
+        assert isinstance(t["formatted"], str)
+        assert t["formatted"].endswith("Z")  # UTC time ends in Z
+
+    @pytest.mark.asyncio
+    async def test_localtime_returns_current_local_time(self):
+        """Test localtime() returns current local time."""
+        runner = Runner("RETURN localtime() AS t")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        t = results[0]["t"]
+        assert isinstance(t["hour"], int)
+        assert isinstance(t["minute"], int)
+        assert isinstance(t["second"], int)
+        assert isinstance(t["millisecond"], int)
+        assert isinstance(t["formatted"], str)
+        assert not t["formatted"].endswith("Z")  # Local time does not end in Z
+
+    @pytest.mark.asyncio
+    async def test_localdatetime_returns_current_local_datetime(self):
+        """Test localdatetime() returns current local datetime."""
+        runner = Runner("RETURN localdatetime() AS dt")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["month"], int)
+        assert isinstance(dt["day"], int)
+        assert isinstance(dt["hour"], int)
+        assert isinstance(dt["minute"], int)
+        assert isinstance(dt["second"], int)
+        assert isinstance(dt["millisecond"], int)
+        assert isinstance(dt["epochMillis"], int)
+        assert isinstance(dt["formatted"], str)
+        assert not dt["formatted"].endswith("Z")  # Local datetime does not end in Z
+
+    @pytest.mark.asyncio
+    async def test_localdatetime_with_string_argument(self):
+        """Test localdatetime() with string argument."""
+        runner = Runner("RETURN localdatetime('2025-01-20T08:15:30.500') AS dt")
+        await runner.run()
+        dt = runner.results[0]["dt"]
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["hour"], int)
+        assert dt["epochMillis"] is not None
+
+    @pytest.mark.asyncio
+    async def test_timestamp_returns_epoch_millis(self):
+        """Test timestamp() returns epoch millis."""
+        import time
+        before = int(time.time() * 1000)
+        runner = Runner("RETURN timestamp() AS ts")
+        await runner.run()
+        after = int(time.time() * 1000)
+        results = runner.results
+        assert len(results) == 1
+        ts = results[0]["ts"]
+        assert isinstance(ts, int)
+        assert ts >= before
+        assert ts <= after
+
+    @pytest.mark.asyncio
+    async def test_datetime_epochmillis_matches_timestamp(self):
+        """Test datetime() epochMillis matches timestamp()."""
+        runner = Runner(
+            "WITH datetime() AS dt, timestamp() AS ts RETURN dt.epochMillis AS dtMillis, ts AS tsMillis"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        # They should be very close (within a few ms)
+        assert abs(results[0]["dtMillis"] - results[0]["tsMillis"]) < 100
+
+    @pytest.mark.asyncio
+    async def test_date_with_property_access_in_where(self):
+        """Test date() with property access in WHERE."""
+        runner = Runner(
+            "UNWIND [1, 2, 3] AS x WITH x, date('2025-06-15') AS d WHERE d.quarter = 2 RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3  # All 3 pass through since Q2 = 2
+
+    @pytest.mark.asyncio
+    async def test_datetime_with_map_argument(self):
+        """Test datetime() with map argument."""
+        runner = Runner(
+            "RETURN datetime({year: 2024, month: 12, day: 25, hour: 10, minute: 30}) AS dt"
+        )
+        await runner.run()
+        dt = runner.results[0]["dt"]
+        assert dt["year"] == 2024
+        assert dt["month"] == 12
+        assert dt["day"] == 25
+        assert dt["quarter"] == 4  # December = Q4
+
+    @pytest.mark.asyncio
+    async def test_date_with_map_argument(self):
+        """Test date() with map argument."""
+        runner = Runner(
+            "RETURN date({year: 2025, month: 3, day: 1}) AS d"
+        )
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["year"] == 2025
+        assert d["month"] == 3
+        assert d["day"] == 1
+        assert d["quarter"] == 1  # March = Q1

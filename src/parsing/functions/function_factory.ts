@@ -3,6 +3,8 @@ import "./avg";
 import "./coalesce";
 import "./collect";
 import "./count";
+import "./date";
+import "./datetime";
 import Function from "./function";
 import {
     AsyncDataProvider,
@@ -14,6 +16,8 @@ import {
 import "./functions";
 import "./join";
 import "./keys";
+import "./localdatetime";
+import "./localtime";
 import "./max";
 import "./min";
 import PredicateFunction from "./predicate_function";
@@ -29,6 +33,8 @@ import "./string_distance";
 import "./stringify";
 // Import built-in functions to ensure their @FunctionDef decorators run
 import "./sum";
+import "./time";
+import "./timestamp";
 import "./to_json";
 import "./to_lower";
 import "./to_string";

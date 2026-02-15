@@ -112,6 +112,9 @@ class Parser extends BaseParser {
             if (this.token.isUnion()) {
                 break;
             }
+            if (this.token.isEOF()) {
+                break;
+            }
             operation = this.parseOperation();
             if (operation === null && !isSubQuery) {
                 throw new Error("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL");
@@ -142,8 +145,12 @@ class Parser extends BaseParser {
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                operation!.addSibling(limit);
-                operation = limit;
+                if (operation instanceof Return) {
+                    (operation as Return).limit = limit;
+                } else {
+                    operation!.addSibling(limit);
+                    operation = limit;
+                }
             }
             previous = operation;
         }
@@ -494,16 +501,11 @@ class Parser extends BaseParser {
         node.label = label!;
         if (identifier !== null && this._state.variables.has(identifier)) {
             let reference = this._state.variables.get(identifier);
-            // Resolve through Expression -> Reference -> Node (e.g., after WITH)
-            if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
-                const inner = (reference.firstChild() as Reference).referred;
-                if (inner instanceof Node) {
-                    reference = inner;
-                }
-            }
             if (
                 reference === undefined ||
-                (!(reference instanceof Node) && !(reference instanceof Unwind))
+                (!(reference instanceof Node) &&
+                    !(reference instanceof Unwind) &&
+                    !(reference instanceof Expression))
             ) {
                 throw new Error(`Undefined node reference: ${identifier}`);
             }

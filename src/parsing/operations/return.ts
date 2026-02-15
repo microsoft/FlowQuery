@@ -1,3 +1,4 @@
+import Limit from "./limit";
 import Projection from "./projection";
 import Where from "./where";
 
@@ -15,6 +16,7 @@ import Where from "./where";
 class Return extends Projection {
     protected _where: Where | null = null;
     protected _results: Record<string, any>[] = [];
+    private _limit: Limit | null = null;
     public set where(where: Where) {
         this._where = where;
     }
@@ -24,8 +26,14 @@ class Return extends Projection {
         }
         return this._where.value();
     }
+    public set limit(limit: Limit) {
+        this._limit = limit;
+    }
     public async run(): Promise<void> {
         if (!this.where) {
+            return;
+        }
+        if (this._limit !== null && this._limit.isLimitReached) {
             return;
         }
         const record: Map<string, any> = new Map();
@@ -35,6 +43,9 @@ class Return extends Projection {
             record.set(alias, value);
         }
         this._results.push(Object.fromEntries(record));
+        if (this._limit !== null) {
+            this._limit.increment();
+        }
     }
     public async initialize(): Promise<void> {
         this._results = [];

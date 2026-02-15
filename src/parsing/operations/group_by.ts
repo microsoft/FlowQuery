@@ -52,10 +52,12 @@ class GroupBy extends Projection {
         let node: Node = this.current;
         for (const mapper of this.mappers) {
             const value: any = mapper.value();
-            let child: Node | undefined = node.children.get(value);
+            const key: string =
+                typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
+            let child: Node | undefined = node.children.get(key);
             if (child === undefined) {
                 child = new Node(value);
-                node.children.set(value, child);
+                node.children.set(key, child);
             }
             node = child;
         }

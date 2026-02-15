@@ -902,6 +902,121 @@ test("Test keys function", async () => {
     expect(results[0]).toEqual({ keys: ["name", "age"] });
 });
 
+test("Test properties function with map", async () => {
+    const runner = new Runner('RETURN properties({name: "Alice", age: 30}) as props');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ props: { name: "Alice", age: 30 } });
+});
+
+test("Test properties function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Animal) AS {
+            UNWIND [
+                {id: 1, name: 'Dog', legs: 4},
+                {id: 2, name: 'Cat', legs: 4}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.legs AS legs
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Animal)
+        RETURN properties(a) AS props
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ props: { name: "Dog", legs: 4 } });
+    expect(results[1]).toEqual({ props: { name: "Cat", legs: 4 } });
+});
+
+test("Test properties function with null", async () => {
+    const runner = new Runner("RETURN properties(null) as props");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ props: null });
+});
+
+test("Test nodes function", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+        RETURN nodes(p) AS cities
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].cities.length).toBe(2);
+    expect(results[0].cities[0].id).toBe(1);
+    expect(results[0].cities[0].name).toBe("New York");
+    expect(results[0].cities[1].id).toBe(2);
+    expect(results[0].cities[1].name).toBe("Boston");
+});
+
+test("Test relationships function", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2, distance: 190}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id, record.distance AS distance
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+        RETURN relationships(p) AS rels
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0].rels.length).toBe(1);
+    expect(results[0].rels[0].type).toBe("CONNECTED_TO");
+    expect(results[0].rels[0].properties.distance).toBe(190);
+});
+
+test("Test nodes function with null", async () => {
+    const runner = new Runner("RETURN nodes(null) as n");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ n: [] });
+});
+
+test("Test relationships function with null", async () => {
+    const runner = new Runner("RETURN relationships(null) as r");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ r: [] });
+});
+
 test("Test type function", async () => {
     const runner = new Runner(`
         RETURN type(123) as type1,
@@ -3336,4 +3451,244 @@ test("Test date() with map argument", async () => {
     expect(d.month).toBe(3);
     expect(d.day).toBe(1);
     expect(d.quarter).toBe(1); // March = Q1
+});
+
+test("Test id() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN id(n) AS nodeId
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ nodeId: 1 });
+    expect(results[1]).toEqual({ nodeId: 2 });
+});
+
+test("Test id() function with null", async () => {
+    const runner = new Runner("RETURN id(null) AS nodeId");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ nodeId: null });
+});
+
+test("Test id() function with relationship", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:City)-[r:CONNECTED_TO]->(b:City)
+        RETURN id(r) AS relId
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ relId: "CONNECTED_TO" });
+});
+
+test("Test elementId() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN elementId(n) AS eid
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ eid: "1" });
+    expect(results[1]).toEqual({ eid: "2" });
+});
+
+test("Test elementId() function with null", async () => {
+    const runner = new Runner("RETURN elementId(null) AS eid");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ eid: null });
+});
+
+test("Test head() function", async () => {
+    const runner = new Runner("RETURN head([1, 2, 3]) AS h");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ h: 1 });
+});
+
+test("Test head() function with empty list", async () => {
+    const runner = new Runner("RETURN head([]) AS h");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ h: null });
+});
+
+test("Test head() function with null", async () => {
+    const runner = new Runner("RETURN head(null) AS h");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ h: null });
+});
+
+test("Test tail() function", async () => {
+    const runner = new Runner("RETURN tail([1, 2, 3]) AS t");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ t: [2, 3] });
+});
+
+test("Test tail() function with single element", async () => {
+    const runner = new Runner("RETURN tail([1]) AS t");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ t: [] });
+});
+
+test("Test tail() function with null", async () => {
+    const runner = new Runner("RETURN tail(null) AS t");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ t: null });
+});
+
+test("Test last() function", async () => {
+    const runner = new Runner("RETURN last([1, 2, 3]) AS l");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ l: 3 });
+});
+
+test("Test last() function with empty list", async () => {
+    const runner = new Runner("RETURN last([]) AS l");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ l: null });
+});
+
+test("Test last() function with null", async () => {
+    const runner = new Runner("RETURN last(null) AS l");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ l: null });
+});
+
+test("Test toInteger() function with string", async () => {
+    const runner = new Runner('RETURN toInteger("42") AS i');
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 42 });
+});
+
+test("Test toInteger() function with float", async () => {
+    const runner = new Runner("RETURN toInteger(3.14) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 3 });
+});
+
+test("Test toInteger() function with boolean", async () => {
+    const runner = new Runner("RETURN toInteger(true) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: 1 });
+});
+
+test("Test toInteger() function with null", async () => {
+    const runner = new Runner("RETURN toInteger(null) AS i");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ i: null });
+});
+
+test("Test toFloat() function with string", async () => {
+    const runner = new Runner('RETURN toFloat("3.14") AS f');
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 3.14 });
+});
+
+test("Test toFloat() function with integer", async () => {
+    const runner = new Runner("RETURN toFloat(42) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 42 });
+});
+
+test("Test toFloat() function with boolean", async () => {
+    const runner = new Runner("RETURN toFloat(true) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: 1.0 });
+});
+
+test("Test toFloat() function with null", async () => {
+    const runner = new Runner("RETURN toFloat(null) AS f");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ f: null });
+});
+
+test("Test duration() with ISO 8601 string", async () => {
+    const runner = new Runner("RETURN duration('P1Y2M3DT4H5M6S') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.years).toBe(1);
+    expect(d.months).toBe(2);
+    expect(d.days).toBe(3);
+    expect(d.hours).toBe(4);
+    expect(d.minutes).toBe(5);
+    expect(d.seconds).toBe(6);
+    expect(d.totalMonths).toBe(14);
+    expect(d.formatted).toBe("P1Y2M3DT4H5M6S");
+});
+
+test("Test duration() with map argument", async () => {
+    const runner = new Runner("RETURN duration({days: 14, hours: 16}) AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.days).toBe(14);
+    expect(d.hours).toBe(16);
+    expect(d.totalDays).toBe(14);
+    expect(d.totalSeconds).toBe(57600);
+});
+
+test("Test duration() with weeks", async () => {
+    const runner = new Runner("RETURN duration('P2W') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.weeks).toBe(2);
+    expect(d.days).toBe(14);
+    expect(d.totalDays).toBe(14);
+});
+
+test("Test duration() with null", async () => {
+    const runner = new Runner("RETURN duration(null) AS d");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ d: null });
+});
+
+test("Test duration() with time only", async () => {
+    const runner = new Runner("RETURN duration('PT2H30M') AS d");
+    await runner.run();
+    const d = runner.results[0].d;
+    expect(d.hours).toBe(2);
+    expect(d.minutes).toBe(30);
+    expect(d.totalSeconds).toBe(9000);
+    expect(d.formatted).toBe("PT2H30M");
 });

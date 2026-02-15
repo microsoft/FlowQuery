@@ -995,6 +995,144 @@ class TestRunner:
         assert results[0] == {"keys": ["name", "age"]}
 
     @pytest.mark.asyncio
+    async def test_properties_function_with_map(self):
+        """Test properties function with a plain map."""
+        runner = Runner('RETURN properties({name: "Alice", age: 30}) as props')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"props": {"name": "Alice", "age": 30}}
+
+    @pytest.mark.asyncio
+    async def test_properties_function_with_node(self):
+        """Test properties function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Animal) AS {
+                UNWIND [
+                    {id: 1, name: 'Dog', legs: 4},
+                    {id: 2, name: 'Cat', legs: 4}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.legs AS legs
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:Animal)
+            RETURN properties(a) AS props
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"props": {"name": "Dog", "legs": 4}}
+        assert results[1] == {"props": {"name": "Cat", "legs": 4}}
+
+    @pytest.mark.asyncio
+    async def test_properties_function_with_null(self):
+        """Test properties function with null."""
+        runner = Runner("RETURN properties(null) as props")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"props": None}
+
+    @pytest.mark.asyncio
+    async def test_nodes_function(self):
+        """Test nodes function with a graph path."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+            RETURN nodes(p) AS cities
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert len(results[0]["cities"]) == 2
+        assert results[0]["cities"][0]["id"] == 1
+        assert results[0]["cities"][0]["name"] == "New York"
+        assert results[0]["cities"][1]["id"] == 2
+        assert results[0]["cities"][1]["name"] == "Boston"
+
+    @pytest.mark.asyncio
+    async def test_relationships_function(self):
+        """Test relationships function with a graph path."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2, distance: 190}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id, record.distance AS distance
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+            RETURN relationships(p) AS rels
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert len(results[0]["rels"]) == 1
+        assert results[0]["rels"][0]["type"] == "CONNECTED_TO"
+        assert results[0]["rels"][0]["properties"]["distance"] == 190
+
+    @pytest.mark.asyncio
+    async def test_nodes_function_with_null(self):
+        """Test nodes function with null."""
+        runner = Runner("RETURN nodes(null) as n")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"n": []}
+
+    @pytest.mark.asyncio
+    async def test_relationships_function_with_null(self):
+        """Test relationships function with null."""
+        runner = Runner("RETURN relationships(null) as r")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"r": []}
+
+    @pytest.mark.asyncio
     async def test_type_function(self):
         """Test type function."""
         runner = Runner(
@@ -3514,3 +3652,284 @@ class TestRunner:
         assert d["month"] == 3
         assert d["day"] == 1
         assert d["quarter"] == 1  # March = Q1
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_node(self):
+        """Test id() function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (n:Person)
+            RETURN id(n) AS nodeId
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"nodeId": 1}
+        assert results[1] == {"nodeId": 2}
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_null(self):
+        """Test id() function with null."""
+        runner = Runner("RETURN id(null) AS nodeId")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"nodeId": None}
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_relationship(self):
+        """Test id() function with a relationship."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:City)-[r:CONNECTED_TO]->(b:City)
+            RETURN id(r) AS relId
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"relId": "CONNECTED_TO"}
+
+    @pytest.mark.asyncio
+    async def test_element_id_function_with_node(self):
+        """Test elementId() function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (n:Person)
+            RETURN elementId(n) AS eid
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"eid": "1"}
+        assert results[1] == {"eid": "2"}
+
+    @pytest.mark.asyncio
+    async def test_element_id_function_with_null(self):
+        """Test elementId() function with null."""
+        runner = Runner("RETURN elementId(null) AS eid")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"eid": None}
+
+    @pytest.mark.asyncio
+    async def test_head_function(self):
+        """Test head() function."""
+        runner = Runner("RETURN head([1, 2, 3]) AS h")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"h": 1}
+
+    @pytest.mark.asyncio
+    async def test_head_function_empty_list(self):
+        """Test head() function with empty list."""
+        runner = Runner("RETURN head([]) AS h")
+        await runner.run()
+        assert runner.results[0] == {"h": None}
+
+    @pytest.mark.asyncio
+    async def test_head_function_null(self):
+        """Test head() function with null."""
+        runner = Runner("RETURN head(null) AS h")
+        await runner.run()
+        assert runner.results[0] == {"h": None}
+
+    @pytest.mark.asyncio
+    async def test_tail_function(self):
+        """Test tail() function."""
+        runner = Runner("RETURN tail([1, 2, 3]) AS t")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"t": [2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_tail_function_single_element(self):
+        """Test tail() function with single element."""
+        runner = Runner("RETURN tail([1]) AS t")
+        await runner.run()
+        assert runner.results[0] == {"t": []}
+
+    @pytest.mark.asyncio
+    async def test_tail_function_null(self):
+        """Test tail() function with null."""
+        runner = Runner("RETURN tail(null) AS t")
+        await runner.run()
+        assert runner.results[0] == {"t": None}
+
+    @pytest.mark.asyncio
+    async def test_last_function(self):
+        """Test last() function."""
+        runner = Runner("RETURN last([1, 2, 3]) AS l")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"l": 3}
+
+    @pytest.mark.asyncio
+    async def test_last_function_empty_list(self):
+        """Test last() function with empty list."""
+        runner = Runner("RETURN last([]) AS l")
+        await runner.run()
+        assert runner.results[0] == {"l": None}
+
+    @pytest.mark.asyncio
+    async def test_last_function_null(self):
+        """Test last() function with null."""
+        runner = Runner("RETURN last(null) AS l")
+        await runner.run()
+        assert runner.results[0] == {"l": None}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_string(self):
+        """Test toInteger() function with string."""
+        runner = Runner('RETURN toInteger("42") AS i')
+        await runner.run()
+        assert runner.results[0] == {"i": 42}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_float(self):
+        """Test toInteger() function with float."""
+        runner = Runner("RETURN toInteger(3.14) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": 3}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_boolean(self):
+        """Test toInteger() function with boolean."""
+        runner = Runner("RETURN toInteger(true) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": 1}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_null(self):
+        """Test toInteger() function with null."""
+        runner = Runner("RETURN toInteger(null) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": None}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_string(self):
+        """Test toFloat() function with string."""
+        runner = Runner('RETURN toFloat("3.14") AS f')
+        await runner.run()
+        assert runner.results[0] == {"f": 3.14}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_integer(self):
+        """Test toFloat() function with integer."""
+        runner = Runner("RETURN toFloat(42) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": 42}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_boolean(self):
+        """Test toFloat() function with boolean."""
+        runner = Runner("RETURN toFloat(true) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": 1.0}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_null(self):
+        """Test toFloat() function with null."""
+        runner = Runner("RETURN toFloat(null) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": None}
+
+    @pytest.mark.asyncio
+    async def test_duration_iso_string(self):
+        """Test duration() with ISO 8601 string."""
+        runner = Runner("RETURN duration('P1Y2M3DT4H5M6S') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["years"] == 1
+        assert d["months"] == 2
+        assert d["days"] == 3
+        assert d["hours"] == 4
+        assert d["minutes"] == 5
+        assert d["seconds"] == 6
+        assert d["totalMonths"] == 14
+        assert d["formatted"] == "P1Y2M3DT4H5M6S"
+
+    @pytest.mark.asyncio
+    async def test_duration_map_argument(self):
+        """Test duration() with map argument."""
+        runner = Runner("RETURN duration({days: 14, hours: 16}) AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["days"] == 14
+        assert d["hours"] == 16
+        assert d["totalDays"] == 14
+        assert d["totalSeconds"] == 57600
+
+    @pytest.mark.asyncio
+    async def test_duration_weeks(self):
+        """Test duration() with weeks."""
+        runner = Runner("RETURN duration('P2W') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["weeks"] == 2
+        assert d["days"] == 14
+        assert d["totalDays"] == 14
+
+    @pytest.mark.asyncio
+    async def test_duration_null(self):
+        """Test duration() with null."""
+        runner = Runner("RETURN duration(null) AS d")
+        await runner.run()
+        assert runner.results[0] == {"d": None}
+
+    @pytest.mark.asyncio
+    async def test_duration_time_only(self):
+        """Test duration() with time-only string."""
+        runner = Runner("RETURN duration('PT2H30M') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["hours"] == 2
+        assert d["minutes"] == 30
+        assert d["totalSeconds"] == 9000
+        assert d["formatted"] == "PT2H30M"

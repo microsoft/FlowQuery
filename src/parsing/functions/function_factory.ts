@@ -5,6 +5,8 @@ import "./collect";
 import "./count";
 import "./date";
 import "./datetime";
+import "./duration";
+import "./element_id";
 import Function from "./function";
 import {
     AsyncDataProvider,
@@ -14,16 +16,22 @@ import {
     getRegisteredFunctionMetadata,
 } from "./function_metadata";
 import "./functions";
+import "./head";
+import "./id";
 import "./join";
 import "./keys";
+import "./last";
 import "./localdatetime";
 import "./localtime";
 import "./max";
 import "./min";
+import "./nodes";
 import PredicateFunction from "./predicate_function";
 import "./predicate_sum";
+import "./properties";
 import "./rand";
 import "./range";
+import "./relationships";
 import "./replace";
 import "./round";
 import "./schema";
@@ -33,8 +41,11 @@ import "./string_distance";
 import "./stringify";
 // Import built-in functions to ensure their @FunctionDef decorators run
 import "./sum";
+import "./tail";
 import "./time";
 import "./timestamp";
+import "./to_float";
+import "./to_integer";
 import "./to_json";
 import "./to_lower";
 import "./to_string";

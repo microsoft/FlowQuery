@@ -22,7 +22,6 @@ class Coalesce(Function):
     """Coalesce function.
 
     Returns the first non-null value from a list of expressions.
-    Equivalent to Neo4j's coalesce() function.
     """
 
     def __init__(self) -> None:
@@ -37,7 +36,7 @@ class Coalesce(Function):
             try:
                 val = child.value()
             except (KeyError, AttributeError):
-                # Treat missing properties/keys as null, matching Neo4j behavior
+                # Treat missing properties/keys as null
                 val = None
             if val is not None:
                 return val

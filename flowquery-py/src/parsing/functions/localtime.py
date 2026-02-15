@@ -38,8 +38,6 @@ class LocalTime(Function):
     Returns a local time value (no timezone offset).
     When called with no arguments, returns the current local time.
     When called with a string argument, parses it.
-
-    Equivalent to Neo4j's localtime() function.
     """
 
     def __init__(self) -> None:

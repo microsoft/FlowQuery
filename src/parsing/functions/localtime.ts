@@ -7,8 +7,6 @@ import { buildTimeObject, parseTemporalArg } from "./temporal_utils";
  * When called with no arguments, returns the current local time.
  * When called with a string argument, parses it.
  *
- * Equivalent to Neo4j's localtime() function.
- *
  * @example
  * ```
  * RETURN localtime() AS now

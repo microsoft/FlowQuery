@@ -8,8 +8,6 @@ import { buildDateObject, parseTemporalArg } from "./temporal_utils";
  * When called with a string argument, parses it as an ISO 8601 date.
  * When called with a map argument, constructs a date from components.
  *
- * Equivalent to Neo4j's date() function.
- *
  * @example
  * ```
  * RETURN date() AS today

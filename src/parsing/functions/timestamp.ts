@@ -4,17 +4,13 @@ import { FunctionDef } from "./function_metadata";
 /**
  * Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
  *
- * Equivalent to Neo4j's timestamp() function.
- *
  * @example
  * ```
  * RETURN timestamp() AS ts
  * ```
  */
 @FunctionDef({
-    description:
-        "Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z). " +
-        "Equivalent to Neo4j's timestamp() function.",
+    description: "Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z).",
     category: "scalar",
     parameters: [],
     output: {

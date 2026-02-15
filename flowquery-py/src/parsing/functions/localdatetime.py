@@ -41,8 +41,6 @@ class LocalDatetime(Function):
     Returns a local datetime value (date + time, no timezone offset).
     When called with no arguments, returns the current local datetime.
     When called with a string argument, parses it as an ISO 8601 datetime.
-
-    Equivalent to Neo4j's localdatetime() function.
     """
 
     def __init__(self) -> None:

@@ -3,7 +3,6 @@ import { FunctionDef } from "./function_metadata";
 
 /**
  * Returns the first non-null value from a list of expressions.
- * Equivalent to Neo4j's coalesce() function.
  *
  * @example
  * ```

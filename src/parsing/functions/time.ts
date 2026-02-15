@@ -7,8 +7,6 @@ import { buildTimeObject, parseTemporalArg } from "./temporal_utils";
  * When called with no arguments, returns the current UTC time.
  * When called with a string argument, parses it as an ISO 8601 time.
  *
- * Equivalent to Neo4j's time() function.
- *
  * @example
  * ```
  * RETURN time() AS now

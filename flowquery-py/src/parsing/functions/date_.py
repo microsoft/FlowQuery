@@ -42,8 +42,6 @@ class DateFunction(Function):
     Returns a date value (no time component).
     When called with no arguments, returns the current date.
     When called with a string argument, parses it as an ISO 8601 date.
-
-    Equivalent to Neo4j's date() function.
     """
 
     def __init__(self) -> None:

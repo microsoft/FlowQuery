@@ -12,11 +12,15 @@ class RelationshipMatchCollector {
     private _nodeIds: Array<string> = [];
 
     public push(relationship: Relationship, traversalId: string): RelationshipMatchRecord {
+        const data = relationship.getData();
+        const currentRecord = data?.current();
+        const actualType =
+            currentRecord && "_type" in currentRecord ? currentRecord["_type"] : relationship.type!;
         const match: RelationshipMatchRecord = {
-            type: relationship.type!,
+            type: actualType,
             startNode: relationship.source?.value() || {},
             endNode: null,
-            properties: relationship.getData()?.properties() as Record<string, any>,
+            properties: data?.properties() as Record<string, any>,
         };
         this._matches.push(match);
         this._nodeIds.push(traversalId);

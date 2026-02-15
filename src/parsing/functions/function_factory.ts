@@ -29,6 +29,7 @@ import "./sum";
 import "./to_json";
 import "./to_lower";
 import "./to_string";
+import "./trim";
 import "./type";
 
 // Re-export AsyncDataProvider for backwards compatibility

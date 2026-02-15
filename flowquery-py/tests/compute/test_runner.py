@@ -682,6 +682,42 @@ class TestRunner:
         assert results[0] == {"result": "foo bar"}
 
     @pytest.mark.asyncio
+    async def test_trim_function(self):
+        """Test trim function."""
+        runner = Runner('RETURN trim("  hello  ") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_trim_function_with_tabs_and_newlines(self):
+        """Test trim function with tabs and newlines."""
+        runner = Runner('WITH "\tfoo\n" AS s RETURN trim(s) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "foo"}
+
+    @pytest.mark.asyncio
+    async def test_trim_function_with_no_whitespace(self):
+        """Test trim function with no whitespace."""
+        runner = Runner('RETURN trim("hello") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_trim_function_with_empty_string(self):
+        """Test trim function with empty string."""
+        runner = Runner('RETURN trim("") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": ""}
+
+    @pytest.mark.asyncio
     async def test_associative_array_with_key_which_is_keyword(self):
         """Test associative array with key which is keyword."""
         runner = Runner("RETURN {return: 1} as aa")
@@ -2152,20 +2188,24 @@ class TestRunner:
         ).run()
 
         runner = Runner(
-            "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+            "CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample RETURN kind, label, type, from_label, to_label, properties, sample"
         )
         await runner.run()
         results = runner.results
 
-        animal = next((r for r in results if r.get("kind") == "node" and r.get("label") == "Animal"), None)
+        animal = next((r for r in results if r.get("kind") == "Node" and r.get("label") == "Animal"), None)
         assert animal is not None
+        assert animal["properties"] == ["species", "legs"]
         assert animal["sample"] is not None
         assert "id" not in animal["sample"]
         assert "species" in animal["sample"]
         assert "legs" in animal["sample"]
 
-        chases = next((r for r in results if r.get("kind") == "relationship" and r.get("type") == "CHASES"), None)
+        chases = next((r for r in results if r.get("kind") == "Relationship" and r.get("type") == "CHASES"), None)
         assert chases is not None
+        assert chases["from_label"] == "Animal"
+        assert chases["to_label"] == "Animal"
+        assert chases["properties"] == ["speed"]
         assert chases["sample"] is not None
         assert "left_id" not in chases["sample"]
         assert "right_id" not in chases["sample"]
@@ -2550,6 +2590,64 @@ class TestRunner:
     # ============================================================
 
     @pytest.mark.asyncio
+    async def test_collected_patterns_and_unwind(self):
+        """Test collecting graph patterns and unwinding them."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'},
+                    {id: 4, name: 'Person 4'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH p=(a:Person)-[:KNOWS*0..3]->(b:Person)
+            WITH collect(p) AS patterns
+            UNWIND patterns AS pattern
+            RETURN pattern
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 10
+        # Index 0: Person 1 zero-hop - pattern = [node1] (single node)
+        assert len(results[0]["pattern"]) == 1
+        assert results[0]["pattern"][0]["id"] == 1
+        # Index 1: Person 1 -> Person 2 (1-hop)
+        assert len(results[1]["pattern"]) == 3
+        # Index 2: Person 1 -> Person 2 -> Person 3 (2-hop)
+        assert len(results[2]["pattern"]) == 5
+        # Index 3: Person 1 -> Person 2 -> Person 3 -> Person 4 (3-hop)
+        assert len(results[3]["pattern"]) == 7
+        # Index 4: Person 2 zero-hop
+        assert len(results[4]["pattern"]) == 1
+        assert results[4]["pattern"][0]["id"] == 2
+        # Index 5: Person 2 -> Person 3 (1-hop)
+        assert len(results[5]["pattern"]) == 3
+        # Index 6: Person 2 -> Person 3 -> Person 4 (2-hop)
+        assert len(results[6]["pattern"]) == 5
+        # Index 7: Person 3 zero-hop
+        assert len(results[7]["pattern"]) == 1
+        assert results[7]["pattern"][0]["id"] == 3
+        # Index 8: Person 3 -> Person 4 (1-hop)
+        assert len(results[8]["pattern"]) == 3
+        # Index 9: Person 4 zero-hop
+        assert len(results[9]["pattern"]) == 1
+        assert results[9]["pattern"][0]["id"] == 4
+
+    @pytest.mark.asyncio
     async def test_add_two_integers(self):
         """Test add two integers."""
         runner = Runner("return 1 + 2 as result")
@@ -2855,3 +2953,150 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results == [{"x": 1}]
+
+    @pytest.mark.asyncio
+    async def test_language_name_hits_query_with_virtual_graph(self):
+        """Test full language-name-hits query with virtual graph.
+
+        Reproduces the original bug: collect(distinct ...) on MATCH results,
+        then sum(lang IN langs | ...) in a WITH clause, was throwing
+        "Invalid array for sum function" because collect() returned null
+        instead of [] when no rows entered aggregation.
+        """
+        # Create Language nodes
+        await Runner(
+            """
+            CREATE VIRTUAL (:Language) AS {
+                UNWIND [
+                    {id: 1, name: 'Python'},
+                    {id: 2, name: 'JavaScript'},
+                    {id: 3, name: 'TypeScript'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+
+        # Create Chat nodes with messages
+        await Runner(
+            """
+            CREATE VIRTUAL (:Chat) AS {
+                UNWIND [
+                    {id: 1, name: 'Dev Discussion', messages: [
+                        {From: 'Alice', SentDateTime: '2025-01-01T10:00:00', Content: 'I love Python and JavaScript'},
+                        {From: 'Bob', SentDateTime: '2025-01-01T10:05:00', Content: 'What languages do you prefer?'}
+                    ]},
+                    {id: 2, name: 'General', messages: [
+                        {From: 'Charlie', SentDateTime: '2025-01-02T09:00:00', Content: 'The weather is nice today'},
+                        {From: 'Alice', SentDateTime: '2025-01-02T09:05:00', Content: 'TypeScript is great for language tooling'}
+                    ]}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.messages AS messages
+            }
+            """
+        ).run()
+
+        # Create User nodes
+        await Runner(
+            """
+            CREATE VIRTUAL (:User) AS {
+                UNWIND [
+                    {id: 1, displayName: 'Alice'},
+                    {id: 2, displayName: 'Bob'},
+                    {id: 3, displayName: 'Charlie'}
+                ] AS record
+                RETURN record.id AS id, record.displayName AS displayName
+            }
+            """
+        ).run()
+
+        # Create PARTICIPATES_IN relationships
+        await Runner(
+            """
+            CREATE VIRTUAL (:User)-[:PARTICIPATES_IN]-(:Chat) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 1},
+                    {left_id: 2, right_id: 1},
+                    {left_id: 3, right_id: 2},
+                    {left_id: 1, right_id: 2}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+
+        # Run the original query (using 'sender' alias since 'from' is a reserved keyword)
+        runner = Runner(
+            """
+            MATCH (l:Language)
+            WITH collect(distinct l.name) AS langs
+            MATCH (c:Chat)
+            UNWIND c.messages AS msg
+            WITH c, msg, langs,
+                 sum(lang IN langs | 1 where toLower(msg.Content) CONTAINS toLower(lang)) AS langNameHits
+            WHERE toLower(msg.Content) CONTAINS "language"
+               OR toLower(msg.Content) CONTAINS "languages"
+               OR langNameHits > 0
+            OPTIONAL MATCH (u:User)-[:PARTICIPATES_IN]->(c)
+            RETURN
+              c.name AS chat,
+              collect(distinct u.displayName) AS participants,
+              msg.From AS sender,
+              msg.SentDateTime AS sentDateTime,
+              msg.Content AS message
+            """
+        )
+        await runner.run()
+        results = runner.results
+
+        # Messages that mention a language name or the word "language(s)":
+        # 1. "I love Python and JavaScript" - langNameHits=2
+        # 2. "What languages do you prefer?" - contains "languages"
+        # 3. "TypeScript is great for language tooling" - langNameHits=1, also "language"
+        assert len(results) == 3
+        assert results[0]["chat"] == "Dev Discussion"
+        assert results[0]["message"] == "I love Python and JavaScript"
+        assert results[0]["sender"] == "Alice"
+        assert results[1]["chat"] == "Dev Discussion"
+        assert results[1]["message"] == "What languages do you prefer?"
+        assert results[1]["sender"] == "Bob"
+        assert results[2]["chat"] == "General"
+        assert results[2]["message"] == "TypeScript is great for language tooling"
+        assert results[2]["sender"] == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_sum_with_empty_collected_array(self):
+        """Reproduces the original bug: collect on empty input should yield []
+        and sum over that empty array should return 0, not throw."""
+        runner = Runner(
+            """
+            UNWIND [] AS lang
+            WITH collect(distinct lang) AS langs
+            UNWIND ['hello', 'world'] AS msg
+            WITH msg, langs, sum(l IN langs | 1 where toLower(msg) CONTAINS toLower(l)) AS hits
+            RETURN msg, hits
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"msg": "hello", "hits": 0}
+        assert results[1] == {"msg": "world", "hits": 0}
+
+    @pytest.mark.asyncio
+    async def test_sum_where_all_elements_filtered_returns_0(self):
+        """Test sum returns 0 when where clause filters everything."""
+        runner = Runner("RETURN sum(n in [1, 2, 3] | n where n > 100) as sum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"sum": 0}
+
+    @pytest.mark.asyncio
+    async def test_sum_over_empty_array_returns_0(self):
+        """Test sum over empty array returns 0."""
+        runner = Runner("WITH [] AS arr RETURN sum(n in arr | n) as sum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"sum": 0}

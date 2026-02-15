@@ -106,7 +106,10 @@ class GroupBy extends Projection {
                 yield* this.generate_results(mapperIndex + 1, child);
             }
         } else {
-            node.elements?.forEach((element, reducerIndex) => {
+            if (node.elements === null) {
+                node.elements = this.reducers.map((reducer) => reducer.element());
+            }
+            node.elements.forEach((element, reducerIndex) => {
                 this.reducers[reducerIndex].overridden = element.value;
             });
             const record: Record<string, any> = {};

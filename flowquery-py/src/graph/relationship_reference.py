@@ -10,8 +10,8 @@ class RelationshipReference(Relationship):
     def __init__(self, relationship: Relationship, referred: ASTNode) -> None:
         super().__init__()
         self._referred = referred
-        if relationship.type:
-            self.type = relationship.type
+        if relationship.types:
+            self.types = relationship.types
 
     @property
     def referred(self) -> ASTNode:

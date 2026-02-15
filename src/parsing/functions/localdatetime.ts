@@ -8,8 +8,6 @@ import { buildDatetimeObject, parseTemporalArg } from "./temporal_utils";
  * When called with a string argument, parses it as an ISO 8601 datetime.
  * When called with a map argument, constructs a datetime from components.
  *
- * Equivalent to Neo4j's localdatetime() function.
- *
  * @example
  * ```
  * RETURN localdatetime() AS now

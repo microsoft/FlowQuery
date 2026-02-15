@@ -2039,7 +2039,7 @@ test("Test optional match property access on null node returns null", async () =
             RETURN record.left_id as left_id, record.right_id as right_id
         }
     `).run();
-    // When accessing b.name and b is null (no match), should return null like Neo4j
+    // When accessing b.name and b is null (no match), should return null
     const match = new Runner(`
         MATCH (a:Person)
         OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
@@ -3246,7 +3246,7 @@ test("Test coalesce with property access", async () => {
 });
 
 // ============================================================
-// Temporal / Time Functions (Neo4j-style)
+// Temporal / Time Functions
 // ============================================================
 
 test("Test datetime() returns current datetime object", async () => {

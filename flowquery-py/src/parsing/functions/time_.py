@@ -38,8 +38,6 @@ class Time(Function):
     Returns a time value (with timezone offset awareness).
     When called with no arguments, returns the current UTC time.
     When called with a string argument, parses it.
-
-    Equivalent to Neo4j's time() function.
     """
 
     def __init__(self) -> None:

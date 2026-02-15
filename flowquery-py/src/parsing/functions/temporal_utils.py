@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 
 def iso_day_of_week(d: date) -> int:
-    """Computes the ISO day of the week (1 = Monday, 7 = Sunday) matching Neo4j convention."""
+    """Computes the ISO day of the week (1 = Monday, 7 = Sunday)."""
     return d.isoweekday()
 
 

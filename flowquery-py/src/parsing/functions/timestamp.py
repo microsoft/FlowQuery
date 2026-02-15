@@ -9,8 +9,7 @@ from .function_metadata import FunctionDef
 
 @FunctionDef({
     "description": (
-        "Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z). "
-        "Equivalent to Neo4j's timestamp() function."
+        "Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z)."
     ),
     "category": "scalar",
     "parameters": [],
@@ -28,7 +27,6 @@ class Timestamp(Function):
     """Timestamp function.
 
     Returns the number of milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
-    Equivalent to Neo4j's timestamp() function.
     """
 
     def __init__(self) -> None:

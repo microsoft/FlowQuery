@@ -6,7 +6,7 @@
  */
 
 /**
- * Computes the ISO day of the week (1 = Monday, 7 = Sunday) matching Neo4j convention.
+ * Computes the ISO day of the week (1 = Monday, 7 = Sunday).
  */
 function isoDayOfWeek(d: Date): number {
     const jsDay = d.getDay(); // 0 = Sunday, 6 = Saturday

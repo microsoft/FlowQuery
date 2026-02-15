@@ -2232,7 +2232,7 @@ class TestRunner:
             }
             """
         ).run()
-        # When accessing b.name and b is null (no match), should return null like Neo4j
+        # When accessing b.name and b is null (no match), should return null
         match = Runner(
             """
             MATCH (a:OptPropPerson)
@@ -3427,7 +3427,7 @@ class TestRunner:
         assert results[0] == {"result": "Alice"}
 
     # ============================================================
-    # Temporal / Time Functions (Neo4j-style)
+    # Temporal / Time Functions
     # ============================================================
 
     @pytest.mark.asyncio

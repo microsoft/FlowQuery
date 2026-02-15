@@ -39,6 +39,7 @@ from .sum import Sum
 from .to_json import ToJson
 from .to_lower import ToLower
 from .to_string import ToString
+from .trim import Trim
 from .type_ import Type
 from .value_holder import ValueHolder
 
@@ -78,6 +79,7 @@ __all__ = [
     "ToJson",
     "ToLower",
     "ToString",
+    "Trim",
     "Type",
     "Functions",
     "Schema",

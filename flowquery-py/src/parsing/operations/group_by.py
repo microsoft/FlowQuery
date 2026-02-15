@@ -122,6 +122,8 @@ class GroupBy(Projection):
                 self.mappers[mapper_index].overridden = child.value
                 yield from self.generate_results(mapper_index + 1, child)
         else:
+            if node.elements is None:
+                node.elements = [reducer.element() for reducer in self.reducers]
             if node.elements:
                 for i, element in enumerate(node.elements):
                     self.reducers[i].overridden = element.value

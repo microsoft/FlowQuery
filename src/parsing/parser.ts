@@ -420,6 +420,8 @@ class Parser extends BaseParser {
             }
             relationship = new Relationship();
             relationship.type = type;
+            relationship.source = node;
+            relationship.target = target;
         }
         this.expectAndSkipWhitespaceAndComments();
         if (!this.token.isAs()) {

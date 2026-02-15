@@ -34,6 +34,8 @@ class Database {
         }
         const physical = new PhysicalRelationship(null, relationship.type);
         physical.statement = statement;
+        physical.source = relationship.source;
+        physical.target = relationship.target;
         Database.relationships.set(relationship.type, physical);
     }
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
@@ -54,10 +56,12 @@ class Database {
 
         for (const [label, physical] of Database.nodes) {
             const records = await physical.data();
-            const entry: Record<string, any> = { kind: "node", label };
+            const entry: Record<string, any> = { kind: "Node", label };
             if (records.length > 0) {
                 const { id, ...sample } = records[0];
-                if (Object.keys(sample).length > 0) {
+                const properties = Object.keys(sample);
+                if (properties.length > 0) {
+                    entry.properties = properties;
                     entry.sample = sample;
                 }
             }
@@ -66,10 +70,17 @@ class Database {
 
         for (const [type, physical] of Database.relationships) {
             const records = await physical.data();
-            const entry: Record<string, any> = { kind: "relationship", type };
+            const entry: Record<string, any> = {
+                kind: "Relationship",
+                type,
+                from_label: physical.source?.label || null,
+                to_label: physical.target?.label || null,
+            };
             if (records.length > 0) {
                 const { left_id, right_id, ...sample } = records[0];
-                if (Object.keys(sample).length > 0) {
+                const properties = Object.keys(sample);
+                if (properties.length > 0) {
+                    entry.properties = properties;
                     entry.sample = sample;
                 }
             }

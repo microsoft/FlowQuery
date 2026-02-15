@@ -2188,20 +2188,24 @@ class TestRunner:
         ).run()
 
         runner = Runner(
-            "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+            "CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample RETURN kind, label, type, from_label, to_label, properties, sample"
         )
         await runner.run()
         results = runner.results
 
-        animal = next((r for r in results if r.get("kind") == "node" and r.get("label") == "Animal"), None)
+        animal = next((r for r in results if r.get("kind") == "Node" and r.get("label") == "Animal"), None)
         assert animal is not None
+        assert animal["properties"] == ["species", "legs"]
         assert animal["sample"] is not None
         assert "id" not in animal["sample"]
         assert "species" in animal["sample"]
         assert "legs" in animal["sample"]
 
-        chases = next((r for r in results if r.get("kind") == "relationship" and r.get("type") == "CHASES"), None)
+        chases = next((r for r in results if r.get("kind") == "Relationship" and r.get("type") == "CHASES"), None)
         assert chases is not None
+        assert chases["from_label"] == "Animal"
+        assert chases["to_label"] == "Animal"
+        assert chases["properties"] == ["speed"]
         assert chases["sample"] is not None
         assert "left_id" not in chases["sample"]
         assert "right_id" not in chases["sample"]

@@ -398,6 +398,8 @@ class Parser(BaseParser):
                 raise ValueError("Expected target node definition")
             relationship = Relationship()
             relationship.type = rel_type
+            relationship.source = node
+            relationship.target = target
 
         self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_as():

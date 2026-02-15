@@ -1996,20 +1996,24 @@ test("Test schema() returns nodes and relationships with sample data", async () 
     `).run();
 
     const runner = new Runner(
-        "CALL schema() YIELD kind, label, type, sample RETURN kind, label, type, sample"
+        "CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample RETURN kind, label, type, from_label, to_label, properties, sample"
     );
     await runner.run();
     const results = runner.results;
 
-    const animal = results.find((r: any) => r.kind === "node" && r.label === "Animal");
+    const animal = results.find((r: any) => r.kind === "Node" && r.label === "Animal");
     expect(animal).toBeDefined();
+    expect(animal.properties).toEqual(["species", "legs"]);
     expect(animal.sample).toBeDefined();
     expect(animal.sample).not.toHaveProperty("id");
     expect(animal.sample).toHaveProperty("species");
     expect(animal.sample).toHaveProperty("legs");
 
-    const chases = results.find((r: any) => r.kind === "relationship" && r.type === "CHASES");
+    const chases = results.find((r: any) => r.kind === "Relationship" && r.type === "CHASES");
     expect(chases).toBeDefined();
+    expect(chases.from_label).toBe("Animal");
+    expect(chases.to_label).toBe("Animal");
+    expect(chases.properties).toEqual(["speed"]);
     expect(chases.sample).toBeDefined();
     expect(chases.sample).not.toHaveProperty("left_id");
     expect(chases.sample).not.toHaveProperty("right_id");

@@ -48,6 +48,10 @@ class Database:
         physical = PhysicalRelationship()
         physical.type = relationship.type
         physical.statement = statement
+        if relationship.source is not None:
+            physical.source = relationship.source
+        if relationship.target is not None:
+            physical.target = relationship.target
         Database._relationships[relationship.type] = physical
 
     def get_relationship(self, relationship: 'Relationship') -> Optional['PhysicalRelationship']:
@@ -69,19 +73,28 @@ class Database:
 
         for label, physical_node in Database._nodes.items():
             records = await physical_node.data()
-            entry: dict[str, Any] = {"kind": "node", "label": label}
+            entry: dict[str, Any] = {"kind": "Node", "label": label}
             if records:
                 sample = {k: v for k, v in records[0].items() if k != "id"}
-                if sample:
+                properties = list(sample.keys())
+                if properties:
+                    entry["properties"] = properties
                     entry["sample"] = sample
             result.append(entry)
 
         for rel_type, physical_rel in Database._relationships.items():
             records = await physical_rel.data()
-            entry_rel: dict[str, Any] = {"kind": "relationship", "type": rel_type}
+            entry_rel: dict[str, Any] = {
+                "kind": "Relationship",
+                "type": rel_type,
+                "from_label": physical_rel.source.label if physical_rel.source else None,
+                "to_label": physical_rel.target.label if physical_rel.target else None,
+            }
             if records:
                 sample = {k: v for k, v in records[0].items() if k not in ("left_id", "right_id")}
-                if sample:
+                properties = list(sample.keys())
+                if properties:
+                    entry_rel["properties"] = properties
                     entry_rel["sample"] = sample
             result.append(entry_rel)
 

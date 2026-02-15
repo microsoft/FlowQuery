@@ -3,8 +3,13 @@
 from .aggregate_function import AggregateFunction
 from .async_function import AsyncFunction
 from .avg import Avg
+from .coalesce import Coalesce
 from .collect import Collect
 from .count import Count
+from .date_ import DateFunction
+from .datetime_ import Datetime
+from .duration import Duration
+from .element_id import ElementId
 from .function import Function
 from .function_factory import FunctionFactory
 from .function_metadata import (
@@ -19,13 +24,23 @@ from .function_metadata import (
     get_registered_function_metadata,
 )
 from .functions import Functions
+from .head import Head
+from .id_ import Id
 from .join import Join
 from .keys import Keys
+from .last import Last
+from .localdatetime import LocalDatetime
+from .localtime import LocalTime
+from .max_ import Max
+from .min_ import Min
+from .nodes import Nodes
 from .predicate_function import PredicateFunction
 from .predicate_sum import PredicateSum
+from .properties import Properties
 from .rand import Rand
 from .range_ import Range
 from .reducer_element import ReducerElement
+from .relationships import Relationships
 from .replace import Replace
 from .round_ import Round
 from .schema import Schema
@@ -33,9 +48,12 @@ from .size import Size
 from .split import Split
 from .string_distance import StringDistance
 from .stringify import Stringify
-
-# Built-in functions
 from .sum import Sum
+from .tail import Tail
+from .time_ import Time
+from .timestamp import Timestamp
+from .to_float import ToFloat
+from .to_integer import ToInteger
 from .to_json import ToJson
 from .to_lower import ToLower
 from .to_string import ToString
@@ -64,10 +82,23 @@ __all__ = [
     # Built-in functions
     "Sum",
     "Avg",
+    "DateFunction",
+    "Datetime",
+    "Coalesce",
     "Collect",
     "Count",
+    "Duration",
+    "ElementId",
+    "Head",
+    "Id",
     "Join",
+    "Last",
     "Keys",
+    "Max",
+    "Min",
+    "Nodes",
+    "Properties",
+    "Relationships",
     "Rand",
     "Range",
     "Replace",
@@ -76,11 +107,18 @@ __all__ = [
     "Split",
     "StringDistance",
     "Stringify",
+    "Tail",
+    "Time",
+    "Timestamp",
+    "ToFloat",
+    "ToInteger",
     "ToJson",
     "ToLower",
     "ToString",
     "Trim",
     "Type",
+    "LocalDatetime",
+    "LocalTime",
     "Functions",
     "Schema",
     "PredicateSum",

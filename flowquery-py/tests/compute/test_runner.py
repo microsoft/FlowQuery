@@ -250,6 +250,99 @@ class TestRunner:
         assert results[0] == {"avg": 1}
 
     @pytest.mark.asyncio
+    async def test_min(self):
+        """Test min aggregate function."""
+        runner = Runner("unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": 1}
+
+    @pytest.mark.asyncio
+    async def test_max(self):
+        """Test max aggregate function."""
+        runner = Runner("unwind [3, 1, 4, 1, 5, 9] as n return max(n) as maximum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": 9}
+
+    @pytest.mark.asyncio
+    async def test_min_with_grouped_values(self):
+        """Test min with grouped values."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, min(j) as minimum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "minimum": 10}
+        assert results[1] == {"i": 2, "minimum": 10}
+
+    @pytest.mark.asyncio
+    async def test_max_with_grouped_values(self):
+        """Test max with grouped values."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as i unwind [10, 20, 30, 40] as j return i, max(j) as maximum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"i": 1, "maximum": 40}
+        assert results[1] == {"i": 2, "maximum": 40}
+
+    @pytest.mark.asyncio
+    async def test_min_with_null(self):
+        """Test min with null."""
+        runner = Runner("return min(null) as minimum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": None}
+
+    @pytest.mark.asyncio
+    async def test_max_with_null(self):
+        """Test max with null."""
+        runner = Runner("return max(null) as maximum")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": None}
+
+    @pytest.mark.asyncio
+    async def test_min_with_strings(self):
+        """Test min with string values."""
+        runner = Runner(
+            'unwind ["cherry", "apple", "banana"] as s return min(s) as minimum'
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": "apple"}
+
+    @pytest.mark.asyncio
+    async def test_max_with_strings(self):
+        """Test max with string values."""
+        runner = Runner(
+            'unwind ["cherry", "apple", "banana"] as s return max(s) as maximum'
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"maximum": "cherry"}
+
+    @pytest.mark.asyncio
+    async def test_min_and_max_together(self):
+        """Test min and max together."""
+        runner = Runner(
+            "unwind [3, 1, 4, 1, 5, 9] as n return min(n) as minimum, max(n) as maximum"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"minimum": 1, "maximum": 9}
+
+    @pytest.mark.asyncio
     async def test_with_and_return(self):
         """Test with and return."""
         runner = Runner("with 1 as a return a")
@@ -900,6 +993,144 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"keys": ["name", "age"]}
+
+    @pytest.mark.asyncio
+    async def test_properties_function_with_map(self):
+        """Test properties function with a plain map."""
+        runner = Runner('RETURN properties({name: "Alice", age: 30}) as props')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"props": {"name": "Alice", "age": 30}}
+
+    @pytest.mark.asyncio
+    async def test_properties_function_with_node(self):
+        """Test properties function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Animal) AS {
+                UNWIND [
+                    {id: 1, name: 'Dog', legs: 4},
+                    {id: 2, name: 'Cat', legs: 4}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.legs AS legs
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:Animal)
+            RETURN properties(a) AS props
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"props": {"name": "Dog", "legs": 4}}
+        assert results[1] == {"props": {"name": "Cat", "legs": 4}}
+
+    @pytest.mark.asyncio
+    async def test_properties_function_with_null(self):
+        """Test properties function with null."""
+        runner = Runner("RETURN properties(null) as props")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"props": None}
+
+    @pytest.mark.asyncio
+    async def test_nodes_function(self):
+        """Test nodes function with a graph path."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+            RETURN nodes(p) AS cities
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert len(results[0]["cities"]) == 2
+        assert results[0]["cities"][0]["id"] == 1
+        assert results[0]["cities"][0]["name"] == "New York"
+        assert results[0]["cities"][1]["id"] == 2
+        assert results[0]["cities"][1]["name"] == "Boston"
+
+    @pytest.mark.asyncio
+    async def test_relationships_function(self):
+        """Test relationships function with a graph path."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2, distance: 190}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id, record.distance AS distance
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+            RETURN relationships(p) AS rels
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert len(results[0]["rels"]) == 1
+        assert results[0]["rels"][0]["type"] == "CONNECTED_TO"
+        assert results[0]["rels"][0]["properties"]["distance"] == 190
+
+    @pytest.mark.asyncio
+    async def test_nodes_function_with_null(self):
+        """Test nodes function with null."""
+        runner = Runner("RETURN nodes(null) as n")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"n": []}
+
+    @pytest.mark.asyncio
+    async def test_relationships_function_with_null(self):
+        """Test relationships function with null."""
+        runner = Runner("RETURN relationships(null) as r")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"r": []}
 
     @pytest.mark.asyncio
     async def test_type_function(self):
@@ -1975,6 +2206,46 @@ class TestRunner:
         assert results[1]["friend"] is None
         assert results[2]["name"] == "Person 3"
         assert results[2]["friend"] is None
+
+    @pytest.mark.asyncio
+    async def test_optional_match_property_access_on_null_node_returns_null(self):
+        """Test that accessing a property on a null node from optional match returns null."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPropPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'},
+                    {id: 3, name: 'Person 3'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OptPropPerson)-[:KNOWS]-(:OptPropPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # When accessing b.name and b is null (no match), should return null like Neo4j
+        match = Runner(
+            """
+            MATCH (a:OptPropPerson)
+            OPTIONAL MATCH (a)-[:KNOWS]->(b:OptPropPerson)
+            RETURN a.name AS name, b.name AS friend_name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Person 1", "friend_name": "Person 2"}
+        assert results[1] == {"name": "Person 2", "friend_name": None}
+        assert results[2] == {"name": "Person 3", "friend_name": None}
 
     @pytest.mark.asyncio
     async def test_optional_match_where_all_nodes_match(self):
@@ -3100,3 +3371,565 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"sum": 0}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_first_non_null(self):
+        """Test coalesce returns first non-null value."""
+        runner = Runner("RETURN coalesce(null, null, 'hello', 'world') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_first_argument_when_not_null(self):
+        """Test coalesce returns first argument when not null."""
+        runner = Runner("RETURN coalesce('first', 'second') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "first"}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_returns_null_when_all_null(self):
+        """Test coalesce returns null when all arguments are null."""
+        runner = Runner("RETURN coalesce(null, null, null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_single_non_null_argument(self):
+        """Test coalesce with single non-null argument."""
+        runner = Runner("RETURN coalesce(42) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_mixed_types(self):
+        """Test coalesce with mixed types."""
+        runner = Runner("RETURN coalesce(null, 42, 'hello') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 42}
+
+    @pytest.mark.asyncio
+    async def test_coalesce_with_property_access(self):
+        """Test coalesce with property access."""
+        runner = Runner("WITH {name: 'Alice'} AS person RETURN coalesce(person.nickname, person.name) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "Alice"}
+
+    # ============================================================
+    # Temporal / Time Functions (Neo4j-style)
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_datetime_returns_current_datetime_object(self):
+        """Test datetime() returns current datetime object."""
+        import time
+        before = int(time.time() * 1000)
+        runner = Runner("RETURN datetime() AS dt")
+        await runner.run()
+        after = int(time.time() * 1000)
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert dt is not None
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["month"], int)
+        assert isinstance(dt["day"], int)
+        assert isinstance(dt["hour"], int)
+        assert isinstance(dt["minute"], int)
+        assert isinstance(dt["second"], int)
+        assert isinstance(dt["millisecond"], int)
+        assert isinstance(dt["epochMillis"], int)
+        assert isinstance(dt["epochSeconds"], int)
+        assert isinstance(dt["dayOfWeek"], int)
+        assert isinstance(dt["dayOfYear"], int)
+        assert isinstance(dt["quarter"], int)
+        assert isinstance(dt["formatted"], str)
+        # epochMillis should be between before and after
+        assert dt["epochMillis"] >= before
+        assert dt["epochMillis"] <= after
+
+    @pytest.mark.asyncio
+    async def test_datetime_with_iso_string_argument(self):
+        """Test datetime() with ISO string argument."""
+        runner = Runner("RETURN datetime('2025-06-15T12:30:45.123Z') AS dt")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert dt["year"] == 2025
+        assert dt["month"] == 6
+        assert dt["day"] == 15
+        assert dt["hour"] == 12
+        assert dt["minute"] == 30
+        assert dt["second"] == 45
+        assert dt["millisecond"] == 123
+        assert dt["formatted"] == "2025-06-15T12:30:45.123Z"
+
+    @pytest.mark.asyncio
+    async def test_datetime_property_access(self):
+        """Test datetime() property access."""
+        runner = Runner(
+            "WITH datetime('2025-06-15T12:30:45.123Z') AS dt RETURN dt.year AS year, dt.month AS month, dt.day AS day"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"year": 2025, "month": 6, "day": 15}
+
+    @pytest.mark.asyncio
+    async def test_date_returns_current_date_object(self):
+        """Test date() returns current date object."""
+        runner = Runner("RETURN date() AS d")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        d = results[0]["d"]
+        assert d is not None
+        assert isinstance(d["year"], int)
+        assert isinstance(d["month"], int)
+        assert isinstance(d["day"], int)
+        assert isinstance(d["epochMillis"], int)
+        assert isinstance(d["dayOfWeek"], int)
+        assert isinstance(d["dayOfYear"], int)
+        assert isinstance(d["quarter"], int)
+        assert isinstance(d["formatted"], str)
+        # Should not have time fields
+        assert "hour" not in d
+        assert "minute" not in d
+
+    @pytest.mark.asyncio
+    async def test_date_with_iso_date_string(self):
+        """Test date() with ISO date string."""
+        runner = Runner("RETURN date('2025-06-15') AS d")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        d = results[0]["d"]
+        assert d["year"] == 2025
+        assert d["month"] == 6
+        assert d["day"] == 15
+        assert d["formatted"] == "2025-06-15"
+
+    @pytest.mark.asyncio
+    async def test_date_dayofweek_and_quarter(self):
+        """Test date() dayOfWeek and quarter."""
+        # 2025-06-15 is a Sunday
+        runner = Runner("RETURN date('2025-06-15') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["dayOfWeek"] == 7  # Sunday = 7 in ISO
+        assert d["quarter"] == 2  # June = Q2
+
+    @pytest.mark.asyncio
+    async def test_time_returns_current_utc_time(self):
+        """Test time() returns current UTC time."""
+        runner = Runner("RETURN time() AS t")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        t = results[0]["t"]
+        assert isinstance(t["hour"], int)
+        assert isinstance(t["minute"], int)
+        assert isinstance(t["second"], int)
+        assert isinstance(t["millisecond"], int)
+        assert isinstance(t["formatted"], str)
+        assert t["formatted"].endswith("Z")  # UTC time ends in Z
+
+    @pytest.mark.asyncio
+    async def test_localtime_returns_current_local_time(self):
+        """Test localtime() returns current local time."""
+        runner = Runner("RETURN localtime() AS t")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        t = results[0]["t"]
+        assert isinstance(t["hour"], int)
+        assert isinstance(t["minute"], int)
+        assert isinstance(t["second"], int)
+        assert isinstance(t["millisecond"], int)
+        assert isinstance(t["formatted"], str)
+        assert not t["formatted"].endswith("Z")  # Local time does not end in Z
+
+    @pytest.mark.asyncio
+    async def test_localdatetime_returns_current_local_datetime(self):
+        """Test localdatetime() returns current local datetime."""
+        runner = Runner("RETURN localdatetime() AS dt")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        dt = results[0]["dt"]
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["month"], int)
+        assert isinstance(dt["day"], int)
+        assert isinstance(dt["hour"], int)
+        assert isinstance(dt["minute"], int)
+        assert isinstance(dt["second"], int)
+        assert isinstance(dt["millisecond"], int)
+        assert isinstance(dt["epochMillis"], int)
+        assert isinstance(dt["formatted"], str)
+        assert not dt["formatted"].endswith("Z")  # Local datetime does not end in Z
+
+    @pytest.mark.asyncio
+    async def test_localdatetime_with_string_argument(self):
+        """Test localdatetime() with string argument."""
+        runner = Runner("RETURN localdatetime('2025-01-20T08:15:30.500') AS dt")
+        await runner.run()
+        dt = runner.results[0]["dt"]
+        assert isinstance(dt["year"], int)
+        assert isinstance(dt["hour"], int)
+        assert dt["epochMillis"] is not None
+
+    @pytest.mark.asyncio
+    async def test_timestamp_returns_epoch_millis(self):
+        """Test timestamp() returns epoch millis."""
+        import time
+        before = int(time.time() * 1000)
+        runner = Runner("RETURN timestamp() AS ts")
+        await runner.run()
+        after = int(time.time() * 1000)
+        results = runner.results
+        assert len(results) == 1
+        ts = results[0]["ts"]
+        assert isinstance(ts, int)
+        assert ts >= before
+        assert ts <= after
+
+    @pytest.mark.asyncio
+    async def test_datetime_epochmillis_matches_timestamp(self):
+        """Test datetime() epochMillis matches timestamp()."""
+        runner = Runner(
+            "WITH datetime() AS dt, timestamp() AS ts RETURN dt.epochMillis AS dtMillis, ts AS tsMillis"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        # They should be very close (within a few ms)
+        assert abs(results[0]["dtMillis"] - results[0]["tsMillis"]) < 100
+
+    @pytest.mark.asyncio
+    async def test_date_with_property_access_in_where(self):
+        """Test date() with property access in WHERE."""
+        runner = Runner(
+            "UNWIND [1, 2, 3] AS x WITH x, date('2025-06-15') AS d WHERE d.quarter = 2 RETURN x"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3  # All 3 pass through since Q2 = 2
+
+    @pytest.mark.asyncio
+    async def test_datetime_with_map_argument(self):
+        """Test datetime() with map argument."""
+        runner = Runner(
+            "RETURN datetime({year: 2024, month: 12, day: 25, hour: 10, minute: 30}) AS dt"
+        )
+        await runner.run()
+        dt = runner.results[0]["dt"]
+        assert dt["year"] == 2024
+        assert dt["month"] == 12
+        assert dt["day"] == 25
+        assert dt["quarter"] == 4  # December = Q4
+
+    @pytest.mark.asyncio
+    async def test_date_with_map_argument(self):
+        """Test date() with map argument."""
+        runner = Runner(
+            "RETURN date({year: 2025, month: 3, day: 1}) AS d"
+        )
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["year"] == 2025
+        assert d["month"] == 3
+        assert d["day"] == 1
+        assert d["quarter"] == 1  # March = Q1
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_node(self):
+        """Test id() function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (n:Person)
+            RETURN id(n) AS nodeId
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"nodeId": 1}
+        assert results[1] == {"nodeId": 2}
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_null(self):
+        """Test id() function with null."""
+        runner = Runner("RETURN id(null) AS nodeId")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"nodeId": None}
+
+    @pytest.mark.asyncio
+    async def test_id_function_with_relationship(self):
+        """Test id() function with a relationship."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:City)-[:CONNECTED_TO]-(:City) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:City)-[r:CONNECTED_TO]->(b:City)
+            RETURN id(r) AS relId
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"relId": "CONNECTED_TO"}
+
+    @pytest.mark.asyncio
+    async def test_element_id_function_with_node(self):
+        """Test elementId() function with a graph node."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (n:Person)
+            RETURN elementId(n) AS eid
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"eid": "1"}
+        assert results[1] == {"eid": "2"}
+
+    @pytest.mark.asyncio
+    async def test_element_id_function_with_null(self):
+        """Test elementId() function with null."""
+        runner = Runner("RETURN elementId(null) AS eid")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"eid": None}
+
+    @pytest.mark.asyncio
+    async def test_head_function(self):
+        """Test head() function."""
+        runner = Runner("RETURN head([1, 2, 3]) AS h")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"h": 1}
+
+    @pytest.mark.asyncio
+    async def test_head_function_empty_list(self):
+        """Test head() function with empty list."""
+        runner = Runner("RETURN head([]) AS h")
+        await runner.run()
+        assert runner.results[0] == {"h": None}
+
+    @pytest.mark.asyncio
+    async def test_head_function_null(self):
+        """Test head() function with null."""
+        runner = Runner("RETURN head(null) AS h")
+        await runner.run()
+        assert runner.results[0] == {"h": None}
+
+    @pytest.mark.asyncio
+    async def test_tail_function(self):
+        """Test tail() function."""
+        runner = Runner("RETURN tail([1, 2, 3]) AS t")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"t": [2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_tail_function_single_element(self):
+        """Test tail() function with single element."""
+        runner = Runner("RETURN tail([1]) AS t")
+        await runner.run()
+        assert runner.results[0] == {"t": []}
+
+    @pytest.mark.asyncio
+    async def test_tail_function_null(self):
+        """Test tail() function with null."""
+        runner = Runner("RETURN tail(null) AS t")
+        await runner.run()
+        assert runner.results[0] == {"t": None}
+
+    @pytest.mark.asyncio
+    async def test_last_function(self):
+        """Test last() function."""
+        runner = Runner("RETURN last([1, 2, 3]) AS l")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"l": 3}
+
+    @pytest.mark.asyncio
+    async def test_last_function_empty_list(self):
+        """Test last() function with empty list."""
+        runner = Runner("RETURN last([]) AS l")
+        await runner.run()
+        assert runner.results[0] == {"l": None}
+
+    @pytest.mark.asyncio
+    async def test_last_function_null(self):
+        """Test last() function with null."""
+        runner = Runner("RETURN last(null) AS l")
+        await runner.run()
+        assert runner.results[0] == {"l": None}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_string(self):
+        """Test toInteger() function with string."""
+        runner = Runner('RETURN toInteger("42") AS i')
+        await runner.run()
+        assert runner.results[0] == {"i": 42}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_float(self):
+        """Test toInteger() function with float."""
+        runner = Runner("RETURN toInteger(3.14) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": 3}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_boolean(self):
+        """Test toInteger() function with boolean."""
+        runner = Runner("RETURN toInteger(true) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": 1}
+
+    @pytest.mark.asyncio
+    async def test_to_integer_function_null(self):
+        """Test toInteger() function with null."""
+        runner = Runner("RETURN toInteger(null) AS i")
+        await runner.run()
+        assert runner.results[0] == {"i": None}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_string(self):
+        """Test toFloat() function with string."""
+        runner = Runner('RETURN toFloat("3.14") AS f')
+        await runner.run()
+        assert runner.results[0] == {"f": 3.14}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_integer(self):
+        """Test toFloat() function with integer."""
+        runner = Runner("RETURN toFloat(42) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": 42}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_boolean(self):
+        """Test toFloat() function with boolean."""
+        runner = Runner("RETURN toFloat(true) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": 1.0}
+
+    @pytest.mark.asyncio
+    async def test_to_float_function_null(self):
+        """Test toFloat() function with null."""
+        runner = Runner("RETURN toFloat(null) AS f")
+        await runner.run()
+        assert runner.results[0] == {"f": None}
+
+    @pytest.mark.asyncio
+    async def test_duration_iso_string(self):
+        """Test duration() with ISO 8601 string."""
+        runner = Runner("RETURN duration('P1Y2M3DT4H5M6S') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["years"] == 1
+        assert d["months"] == 2
+        assert d["days"] == 3
+        assert d["hours"] == 4
+        assert d["minutes"] == 5
+        assert d["seconds"] == 6
+        assert d["totalMonths"] == 14
+        assert d["formatted"] == "P1Y2M3DT4H5M6S"
+
+    @pytest.mark.asyncio
+    async def test_duration_map_argument(self):
+        """Test duration() with map argument."""
+        runner = Runner("RETURN duration({days: 14, hours: 16}) AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["days"] == 14
+        assert d["hours"] == 16
+        assert d["totalDays"] == 14
+        assert d["totalSeconds"] == 57600
+
+    @pytest.mark.asyncio
+    async def test_duration_weeks(self):
+        """Test duration() with weeks."""
+        runner = Runner("RETURN duration('P2W') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["weeks"] == 2
+        assert d["days"] == 14
+        assert d["totalDays"] == 14
+
+    @pytest.mark.asyncio
+    async def test_duration_null(self):
+        """Test duration() with null."""
+        runner = Runner("RETURN duration(null) AS d")
+        await runner.run()
+        assert runner.results[0] == {"d": None}
+
+    @pytest.mark.asyncio
+    async def test_duration_time_only(self):
+        """Test duration() with time-only string."""
+        runner = Runner("RETURN duration('PT2H30M') AS d")
+        await runner.run()
+        d = runner.results[0]["d"]
+        assert d["hours"] == 2
+        assert d["minutes"] == 30
+        assert d["totalSeconds"] == 9000
+        assert d["formatted"] == "PT2H30M"

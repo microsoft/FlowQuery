@@ -2,9 +2,9 @@ import ASTNode from "../ast_node";
 
 /**
  * Represents a lookup operation (array/object indexing) in the AST.
- * 
+ *
  * Lookups access elements from arrays or properties from objects using an index or key.
- * 
+ *
  * @example
  * ```typescript
  * // For array[0] or obj.property or obj["key"]
@@ -33,7 +33,11 @@ class Lookup extends ASTNode {
         return true;
     }
     public value(): any {
-        return this.variable.value()[this.index.value()];
+        const obj = this.variable.value();
+        if (obj === null || obj === undefined) {
+            return null;
+        }
+        return obj[this.index.value()];
     }
 }
 

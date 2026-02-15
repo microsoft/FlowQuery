@@ -926,6 +926,20 @@ class TestRunner:
         assert len(results) == 50
 
     @pytest.mark.asyncio
+    async def test_limit_as_last_operation(self):
+        """Test limit as the last operation after return."""
+        runner = Runner(
+            """
+            unwind range(1, 10) as i
+            return i
+            limit 5
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+
+    @pytest.mark.asyncio
     async def test_range_lookup(self):
         """Test range lookup."""
         runner = Runner(

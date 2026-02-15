@@ -11,6 +11,13 @@ class Limit(Operation):
         self._count = 0
         self._limit = limit
 
+    @property
+    def is_limit_reached(self) -> bool:
+        return self._count >= self._limit
+
+    def increment(self) -> None:
+        self._count += 1
+
     async def run(self) -> None:
         if self._count >= self._limit:
             return

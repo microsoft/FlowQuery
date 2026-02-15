@@ -116,6 +116,9 @@ class Parser(BaseParser):
             if self.token.is_union():
                 break
 
+            if self.token.is_eof():
+                break
+
             operation = self._parse_operation()
             if operation is None and not is_sub_query:
                 raise ValueError("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL")
@@ -145,8 +148,11 @@ class Parser(BaseParser):
 
             limit = self._parse_limit()
             if limit is not None:
-                operation.add_sibling(limit)
-                operation = limit
+                if isinstance(operation, Return):
+                    operation.limit = limit
+                else:
+                    operation.add_sibling(limit)
+                    operation = limit
 
             previous = operation
 

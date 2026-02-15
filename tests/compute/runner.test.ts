@@ -842,6 +842,19 @@ test("Test limit", async () => {
     expect(results.length).toBe(50);
 });
 
+test("Test limit as last operation", async () => {
+    const runner = new Runner(
+        `
+        unwind range(1, 10) as i
+        return i
+        limit 5
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+});
+
 test("Test range lookup", async () => {
     const runner = new Runner(
         `

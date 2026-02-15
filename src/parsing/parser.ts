@@ -112,6 +112,9 @@ class Parser extends BaseParser {
             if (this.token.isUnion()) {
                 break;
             }
+            if (this.token.isEOF()) {
+                break;
+            }
             operation = this.parseOperation();
             if (operation === null && !isSubQuery) {
                 throw new Error("Expected one of WITH, UNWIND, RETURN, LOAD, OR CALL");
@@ -142,8 +145,12 @@ class Parser extends BaseParser {
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                operation!.addSibling(limit);
-                operation = limit;
+                if (operation instanceof Return) {
+                    (operation as Return).limit = limit;
+                } else {
+                    operation!.addSibling(limit);
+                    operation = limit;
+                }
             }
             previous = operation;
         }

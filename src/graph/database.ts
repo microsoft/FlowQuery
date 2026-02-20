@@ -25,6 +25,12 @@ class Database {
         physical.statement = statement;
         Database.nodes.set(node.label, physical);
     }
+    public removeNode(node: Node): void {
+        if (node.label === null) {
+            throw new Error("Node label is null");
+        }
+        Database.nodes.delete(node.label);
+    }
     public getNode(node: Node): PhysicalNode | null {
         return Database.nodes.get(node.label!) || null;
     }
@@ -37,6 +43,12 @@ class Database {
         physical.source = relationship.source;
         physical.target = relationship.target;
         Database.relationships.set(relationship.type, physical);
+    }
+    public removeRelationship(relationship: Relationship): void {
+        if (relationship.type === null) {
+            throw new Error("Relationship type is null");
+        }
+        Database.relationships.delete(relationship.type);
     }
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         return Database.relationships.get(relationship.type!) || null;

@@ -39,6 +39,7 @@ import "./size";
 import "./split";
 import "./string_distance";
 import "./stringify";
+import "./substring";
 // Import built-in functions to ensure their @FunctionDef decorators run
 import "./sum";
 import "./tail";

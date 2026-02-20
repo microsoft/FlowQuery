@@ -3,6 +3,9 @@
 import pytest
 from typing import AsyncIterator
 from flowquery.compute.runner import Runner
+from flowquery.graph.node import Node
+from flowquery.graph.relationship import Relationship
+from flowquery.graph.database import Database
 from flowquery.parsing.functions.async_function import AsyncFunction
 from flowquery.parsing.functions.function_metadata import FunctionDef
 
@@ -805,6 +808,42 @@ class TestRunner:
     async def test_trim_function_with_empty_string(self):
         """Test trim function with empty string."""
         runner = Runner('RETURN trim("") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": ""}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_start_and_length(self):
+        """Test substring function with start and length."""
+        runner = Runner('RETURN substring("hello", 1, 3) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "ell"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_start_only(self):
+        """Test substring function with start only."""
+        runner = Runner('RETURN substring("hello", 2) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "llo"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_zero_start(self):
+        """Test substring function with zero start."""
+        runner = Runner('RETURN substring("hello", 0, 5) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_zero_length(self):
+        """Test substring function with zero length."""
+        runner = Runner('RETURN substring("hello", 1, 0) as result')
         await runner.run()
         results = runner.results
         assert len(results) == 1
@@ -4170,3 +4209,134 @@ class TestRunner:
         assert results[2] == {"x": 5}
         assert results[3] == {"x": 4}
         assert results[4] == {"x": 3}
+
+    @pytest.mark.asyncio
+    async def test_delete_virtual_node_operation(self):
+        """Test delete virtual node operation."""
+        db = Database.get_instance()
+        # Create a virtual node first
+        create = Runner(
+            """
+            CREATE VIRTUAL (:PyDeleteTestPerson) AS {
+                unwind [
+                    {id: 1, name: 'Person 1'},
+                    {id: 2, name: 'Person 2'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        )
+        await create.run()
+        assert db.get_node(Node(None, "PyDeleteTestPerson")) is not None
+
+        # Delete the virtual node
+        del_runner = Runner("DELETE VIRTUAL (:PyDeleteTestPerson)")
+        await del_runner.run()
+        assert len(del_runner.results) == 0
+        assert db.get_node(Node(None, "PyDeleteTestPerson")) is None
+
+    @pytest.mark.asyncio
+    async def test_delete_virtual_node_then_match_throws(self):
+        """Test that matching a deleted virtual node throws."""
+        # Create a virtual node
+        create = Runner(
+            """
+            CREATE VIRTUAL (:PyDeleteMatchPerson) AS {
+                unwind [{id: 1, name: 'Alice'}] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        )
+        await create.run()
+
+        # Verify it can be matched
+        match1 = Runner("MATCH (n:PyDeleteMatchPerson) RETURN n")
+        await match1.run()
+        assert len(match1.results) == 1
+
+        # Delete the virtual node
+        del_runner = Runner("DELETE VIRTUAL (:PyDeleteMatchPerson)")
+        await del_runner.run()
+
+        # Matching should now throw since the node is gone
+        match2 = Runner("MATCH (n:PyDeleteMatchPerson) RETURN n")
+        with pytest.raises(ValueError):
+            await match2.run()
+
+    @pytest.mark.asyncio
+    async def test_delete_virtual_relationship_operation(self):
+        """Test delete virtual relationship operation."""
+        db = Database.get_instance()
+        # Create virtual nodes and relationship
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyDelRelUser) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyDelRelUser)-[:PY_DEL_KNOWS]-(:PyDelRelUser) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+
+        # Verify relationship exists
+        rel = Relationship()
+        rel.type = "PY_DEL_KNOWS"
+        assert db.get_relationship(rel) is not None
+
+        # Delete the virtual relationship
+        del_runner = Runner("DELETE VIRTUAL (:PyDelRelUser)-[:PY_DEL_KNOWS]-(:PyDelRelUser)")
+        await del_runner.run()
+        assert len(del_runner.results) == 0
+        assert db.get_relationship(rel) is None
+
+    @pytest.mark.asyncio
+    async def test_delete_virtual_node_leaves_other_nodes_intact(self):
+        """Test that deleting one virtual node leaves others intact."""
+        db = Database.get_instance()
+        # Create two virtual node types
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyKeepNode) AS {
+                unwind [{id: 1, name: 'Keep'}] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyRemoveNode) AS {
+                unwind [{id: 2, name: 'Remove'}] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+
+        assert db.get_node(Node(None, "PyKeepNode")) is not None
+        assert db.get_node(Node(None, "PyRemoveNode")) is not None
+
+        # Delete only one
+        await Runner("DELETE VIRTUAL (:PyRemoveNode)").run()
+
+        # The other should still exist
+        assert db.get_node(Node(None, "PyKeepNode")) is not None
+        assert db.get_node(Node(None, "PyRemoveNode")) is None
+
+        # The remaining node can still be matched
+        match = Runner("MATCH (n:PyKeepNode) RETURN n")
+        await match.run()
+        assert len(match.results) == 1
+        assert match.results[0]["n"]["name"] == "Keep"

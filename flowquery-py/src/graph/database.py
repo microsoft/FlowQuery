@@ -37,6 +37,12 @@ class Database:
         physical.statement = statement
         Database._nodes[node.label] = physical
 
+    def remove_node(self, node: 'Node') -> None:
+        """Removes a node from the database."""
+        if node.label is None:
+            raise ValueError("Node label is null")
+        Database._nodes.pop(node.label, None)
+
     def get_node(self, node: 'Node') -> Optional['PhysicalNode']:
         """Gets a node from the database."""
         return Database._nodes.get(node.label) if node.label else None
@@ -53,6 +59,12 @@ class Database:
         if relationship.target is not None:
             physical.target = relationship.target
         Database._relationships[relationship.type] = physical
+
+    def remove_relationship(self, relationship: 'Relationship') -> None:
+        """Removes a relationship from the database."""
+        if relationship.type is None:
+            raise ValueError("Relationship type is null")
+        Database._relationships.pop(relationship.type, None)
 
     def get_relationship(self, relationship: 'Relationship') -> Optional['PhysicalRelationship']:
         """Gets a relationship from the database."""

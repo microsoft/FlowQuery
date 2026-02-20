@@ -521,7 +521,7 @@ test("Test non-well formed statements", () => {
         "Only one RETURN statement is allowed"
     );
     expect(() => new Parser().parse("return 1 with 1 as n")).toThrow(
-        "Last statement must be a RETURN, WHERE, CALL, or CREATE statement"
+        "Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement"
     );
 });
 

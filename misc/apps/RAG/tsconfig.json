@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "jsx": "react-jsx",
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "types": ["node", "jest"]
+    "types": ["node"]
   },
   "include": ["src/**/*", "data/**/*"],
   "exclude": ["node_modules", "dist"]

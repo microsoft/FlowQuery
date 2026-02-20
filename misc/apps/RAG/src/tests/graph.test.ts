@@ -6,6 +6,7 @@
  * These tests work correctly when the app runs directly.
  */
 import FlowQuery from "flowquery";
+import { describe, expect, test } from "vitest";
 
 describe("Graph - Basic FlowQuery Operations", () => {
     test("should execute simple WITH/RETURN query", async () => {

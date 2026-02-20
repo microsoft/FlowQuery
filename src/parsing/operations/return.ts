@@ -1,4 +1,5 @@
 import Limit from "./limit";
+import OrderBy from "./order_by";
 import Projection from "./projection";
 import Where from "./where";
 
@@ -17,6 +18,7 @@ class Return extends Projection {
     protected _where: Where | null = null;
     protected _results: Record<string, any>[] = [];
     private _limit: Limit | null = null;
+    protected _orderBy: OrderBy | null = null;
     public set where(where: Where) {
         this._where = where;
     }
@@ -29,11 +31,16 @@ class Return extends Projection {
     public set limit(limit: Limit) {
         this._limit = limit;
     }
+    public set orderBy(orderBy: OrderBy) {
+        this._orderBy = orderBy;
+    }
     public async run(): Promise<void> {
         if (!this.where) {
             return;
         }
-        if (this._limit !== null && this._limit.isLimitReached) {
+        // When ORDER BY is present, skip limit during accumulation;
+        // limit will be applied after sorting in get results()
+        if (this._orderBy === null && this._limit !== null && this._limit.isLimitReached) {
             return;
         }
         const record: Map<string, any> = new Map();
@@ -43,7 +50,7 @@ class Return extends Projection {
             record.set(alias, value);
         }
         this._results.push(Object.fromEntries(record));
-        if (this._limit !== null) {
+        if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();
         }
     }
@@ -51,7 +58,14 @@ class Return extends Projection {
         this._results = [];
     }
     public get results(): Record<string, any>[] {
-        return this._results;
+        let results = this._results;
+        if (this._orderBy !== null) {
+            results = this._orderBy.sort(results);
+        }
+        if (this._orderBy !== null && this._limit !== null) {
+            results = results.slice(0, this._limit.limitValue);
+        }
+        return results;
     }
 }
 

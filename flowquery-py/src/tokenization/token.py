@@ -630,6 +630,34 @@ class Token:
     def is_all(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.ALL.value
 
+    @staticmethod
+    def ORDER() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ORDER.value)
+
+    def is_order(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ORDER.value
+
+    @staticmethod
+    def BY() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.BY.value)
+
+    def is_by(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.BY.value
+
+    @staticmethod
+    def ASC() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ASC.value)
+
+    def is_asc(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ASC.value
+
+    @staticmethod
+    def DESC() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.DESC.value)
+
+    def is_desc(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.DESC.value
+
     # End of file token
 
     @staticmethod

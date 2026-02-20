@@ -57,6 +57,8 @@ from .operations.aggregated_with import AggregatedWith
 from .operations.call import Call
 from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
+from .operations.delete_node import DeleteNode
+from .operations.delete_relationship import DeleteRelationship
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
@@ -185,8 +187,8 @@ class Parser(BaseParser):
             new_root.add_child(union)
             return new_root
 
-        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
-            raise ValueError("Last statement must be a RETURN, WHERE, CALL, or CREATE statement")
+        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
+            raise ValueError("Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement")
 
         return root
 
@@ -198,7 +200,8 @@ class Parser(BaseParser):
             self._parse_load() or
             self._parse_call() or
             self._parse_match() or
-            self._parse_create()
+            self._parse_create() or
+            self._parse_delete()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -430,6 +433,54 @@ class Parser(BaseParser):
             return CreateRelationship(relationship, query)
         else:
             return CreateNode(node, query)
+
+    def _parse_delete(self) -> Optional[Operation]:
+        """Parse DELETE VIRTUAL statement for nodes and relationships."""
+        if not self.token.is_delete():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_virtual():
+            raise ValueError("Expected VIRTUAL")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        node = self._parse_node()
+        if node is None:
+            raise ValueError("Expected node definition")
+
+        relationship: Optional[Relationship] = None
+        if self.token.is_subtract() and self.peek() and self.peek().is_opening_bracket():
+            self.set_next_token()  # skip -
+            self.set_next_token()  # skip [
+            if not self.token.is_colon():
+                raise ValueError("Expected ':' for relationship type")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected relationship type identifier")
+            rel_type = self.token.value or ""
+            self.set_next_token()
+            if not self.token.is_closing_bracket():
+                raise ValueError("Expected closing bracket for relationship definition")
+            self.set_next_token()
+            if not self.token.is_subtract():
+                raise ValueError("Expected '-' for relationship definition")
+            self.set_next_token()
+            # Skip optional direction indicator '>'
+            if self.token.is_greater_than():
+                self.set_next_token()
+            target = self._parse_node()
+            if target is None:
+                raise ValueError("Expected target node definition")
+            relationship = Relationship()
+            relationship.type = rel_type
+            relationship.source = node
+            relationship.target = target
+
+        if relationship is not None:
+            return DeleteRelationship(relationship)
+        else:
+            return DeleteNode(node)
 
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""

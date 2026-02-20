@@ -53,6 +53,8 @@ import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
 import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
+import DeleteNode from "./operations/delete_node";
+import DeleteRelationship from "./operations/delete_relationship";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
@@ -186,9 +188,13 @@ class Parser extends BaseParser {
             !(operation instanceof Return) &&
             !(operation instanceof Call) &&
             !(operation instanceof CreateNode) &&
-            !(operation instanceof CreateRelationship)
+            !(operation instanceof CreateRelationship) &&
+            !(operation instanceof DeleteNode) &&
+            !(operation instanceof DeleteRelationship)
         ) {
-            throw new Error("Last statement must be a RETURN, WHERE, CALL, or CREATE statement");
+            throw new Error(
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement"
+            );
         }
         return root;
     }
@@ -201,6 +207,7 @@ class Parser extends BaseParser {
             this.parseLoad() ||
             this.parseCall() ||
             this.parseCreate() ||
+            this.parseDelete() ||
             this.parseMatch()
         );
     }
@@ -457,6 +464,60 @@ class Parser extends BaseParser {
             create = new CreateNode(node, query);
         }
         return create;
+    }
+
+    private parseDelete(): DeleteNode | DeleteRelationship | null {
+        if (!this.token.isDelete()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: Node | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+            relationship.source = node;
+            relationship.target = target;
+        }
+        let result: DeleteNode | DeleteRelationship;
+        if (relationship !== null) {
+            result = new DeleteRelationship(relationship);
+        } else {
+            result = new DeleteNode(node);
+        }
+        return result;
     }
 
     private parseMatch(): Match | null {

@@ -1,6 +1,7 @@
 import Runner from "../../src/compute/runner";
 import Database from "../../src/graph/database";
 import Node from "../../src/graph/node";
+import Relationship from "../../src/graph/relationship";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 
@@ -3934,4 +3935,118 @@ test("Test order by with where", async () => {
     expect(results[2]).toEqual({ x: 5 });
     expect(results[3]).toEqual({ x: 4 });
     expect(results[4]).toEqual({ x: 3 });
+});
+
+test("Test delete virtual node operation", async () => {
+    const db = Database.getInstance();
+    // Create a virtual node first
+    const create = new Runner(`
+        CREATE VIRTUAL (:DeleteTestPerson) AS {
+            unwind [
+                {id: 1, name: 'Person 1'},
+                {id: 2, name: 'Person 2'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `);
+    await create.run();
+    expect(db.getNode(new Node(null, "DeleteTestPerson"))).not.toBeNull();
+
+    // Delete the virtual node
+    const del = new Runner("DELETE VIRTUAL (:DeleteTestPerson)");
+    await del.run();
+    expect(del.results.length).toBe(0);
+    expect(db.getNode(new Node(null, "DeleteTestPerson"))).toBeNull();
+});
+
+test("Test delete virtual node then match throws", async () => {
+    // Create a virtual node
+    const create = new Runner(`
+        CREATE VIRTUAL (:DeleteMatchPerson) AS {
+            unwind [{id: 1, name: 'Alice'}] as record
+            RETURN record.id as id, record.name as name
+        }
+    `);
+    await create.run();
+
+    // Verify it can be matched
+    const match1 = new Runner("MATCH (n:DeleteMatchPerson) RETURN n");
+    await match1.run();
+    expect(match1.results.length).toBe(1);
+
+    // Delete the virtual node
+    const del = new Runner("DELETE VIRTUAL (:DeleteMatchPerson)");
+    await del.run();
+
+    // Matching should now throw since the node is gone
+    const match2 = new Runner("MATCH (n:DeleteMatchPerson) RETURN n");
+    await expect(match2.run()).rejects.toThrow();
+});
+
+test("Test delete virtual relationship operation", async () => {
+    const db = Database.getInstance();
+    // Create virtual nodes and relationship
+    await new Runner(`
+        CREATE VIRTUAL (:DelRelUser) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+
+    await new Runner(`
+        CREATE VIRTUAL (:DelRelUser)-[:DEL_KNOWS]-(:DelRelUser) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    // Verify relationship exists
+    const rel = new Relationship();
+    rel.type = "DEL_KNOWS";
+    expect(db.getRelationship(rel)).not.toBeNull();
+
+    // Delete the virtual relationship
+    const del = new Runner("DELETE VIRTUAL (:DelRelUser)-[:DEL_KNOWS]-(:DelRelUser)");
+    await del.run();
+    expect(del.results.length).toBe(0);
+    expect(db.getRelationship(rel)).toBeNull();
+});
+
+test("Test delete virtual node leaves other nodes intact", async () => {
+    const db = Database.getInstance();
+    // Create two virtual node types
+    await new Runner(`
+        CREATE VIRTUAL (:KeepNode) AS {
+            unwind [{id: 1, name: 'Keep'}] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+
+    await new Runner(`
+        CREATE VIRTUAL (:RemoveNode) AS {
+            unwind [{id: 2, name: 'Remove'}] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+
+    expect(db.getNode(new Node(null, "KeepNode"))).not.toBeNull();
+    expect(db.getNode(new Node(null, "RemoveNode"))).not.toBeNull();
+
+    // Delete only one
+    await new Runner("DELETE VIRTUAL (:RemoveNode)").run();
+
+    // The other should still exist
+    expect(db.getNode(new Node(null, "KeepNode"))).not.toBeNull();
+    expect(db.getNode(new Node(null, "RemoveNode"))).toBeNull();
+
+    // The remaining node can still be matched
+    const match = new Runner("MATCH (n:KeepNode) RETURN n");
+    await match.run();
+    expect(match.results.length).toBe(1);
+    expect(match.results[0].n.name).toBe("Keep");
 });

@@ -2548,6 +2548,54 @@ test("Test WHERE with IN combined with AND", async () => {
     expect(results.map((r: any) => r.n)).toEqual([10, 15, 20]);
 });
 
+test("Test WHERE with AND before IN", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency in ['expert']
+        return proficiency
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ proficiency: "expert" });
+});
+
+test("Test WHERE with AND before NOT IN", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency not in ['expert']
+        return proficiency
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.proficiency)).toEqual(["intermediate", "beginner"]);
+});
+
+test("Test WHERE with OR before IN", async () => {
+    const runner = new Runner(`
+        unwind range(1, 10) as n
+        with n where 1=0 or n in [3, 7]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.n)).toEqual([3, 7]);
+});
+
+test("Test IN as return expression with AND in WHERE", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency in ['expert']
+        return proficiency, proficiency in ['expert'] as isExpert
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ proficiency: "expert", isExpert: 1 });
+});
+
 test("Test WHERE with CONTAINS", async () => {
     const runner = new Runner(`
         unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit

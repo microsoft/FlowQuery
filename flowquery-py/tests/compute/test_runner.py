@@ -2799,6 +2799,58 @@ class TestRunner:
         assert [r["n"] for r in results] == [10, 15, 20]
 
     @pytest.mark.asyncio
+    async def test_where_with_and_before_in(self):
+        """Test WHERE with AND before IN (IN on right side of AND)."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency in ['expert']
+            return proficiency
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"proficiency": "expert"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_and_before_not_in(self):
+        """Test WHERE with AND before NOT IN."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency not in ['expert']
+            return proficiency
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["proficiency"] for r in results] == ["intermediate", "beginner"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_or_before_in(self):
+        """Test WHERE with OR before IN."""
+        runner = Runner("""
+            unwind range(1, 10) as n
+            with n where 1=0 or n in [3, 7]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["n"] for r in results] == [3, 7]
+
+    @pytest.mark.asyncio
+    async def test_in_as_return_expression_with_and_in_where(self):
+        """Test IN as return expression with AND in WHERE."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency in ['expert']
+            return proficiency, proficiency in ['expert'] as isExpert
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"proficiency": "expert", "isExpert": 1}
+
+    @pytest.mark.asyncio
     async def test_where_with_contains(self):
         """Test WHERE with CONTAINS."""
         runner = Runner("""

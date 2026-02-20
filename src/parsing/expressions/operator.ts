@@ -197,7 +197,7 @@ class Not extends Operator {
 
 class Is extends Operator {
     constructor() {
-        super(-1, true);
+        super(0, true);
     }
     public value(): number {
         return this.lhs.value() == this.rhs.value() ? 1 : 0;
@@ -206,7 +206,7 @@ class Is extends Operator {
 
 class IsNot extends Operator {
     constructor() {
-        super(-1, true);
+        super(0, true);
     }
     public value(): number {
         return this.lhs.value() != this.rhs.value() ? 1 : 0;
@@ -215,7 +215,7 @@ class IsNot extends Operator {
 
 class In extends Operator {
     constructor() {
-        super(-1, true);
+        super(0, true);
     }
     public value(): number {
         const list = this.rhs.value();
@@ -228,7 +228,7 @@ class In extends Operator {
 
 class NotIn extends Operator {
     constructor() {
-        super(-1, true);
+        super(0, true);
     }
     public value(): number {
         const list = this.rhs.value();

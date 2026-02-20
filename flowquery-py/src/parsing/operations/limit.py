@@ -15,6 +15,10 @@ class Limit(Operation):
     def is_limit_reached(self) -> bool:
         return self._count >= self._limit
 
+    @property
+    def limit_value(self) -> int:
+        return self._limit
+
     def increment(self) -> None:
         self._count += 1
 

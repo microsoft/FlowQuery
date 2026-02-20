@@ -10,6 +10,7 @@ from .limit import Limit
 from .load import Load
 from .match import Match
 from .operation import Operation
+from .order_by import OrderBy, SortField
 from .projection import Projection
 from .return_op import Return
 from .union import Union
@@ -36,4 +37,6 @@ __all__ = [
     "CreateRelationship",
     "Union",
     "UnionAll",
+    "OrderBy",
+    "SortField",
 ]

@@ -61,6 +61,7 @@ from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
 from .operations.operation import Operation
+from .operations.order_by import OrderBy, SortField
 from .operations.return_op import Return
 from .operations.union import Union
 from .operations.union_all import UnionAll
@@ -145,6 +146,14 @@ class Parser(BaseParser):
                 else:
                     operation.add_sibling(where)
                     operation = where
+
+            order_by = self._parse_order_by()
+            if order_by is not None:
+                if isinstance(operation, Return):
+                    operation.order_by = order_by
+                else:
+                    operation.add_sibling(order_by)
+                    operation = order_by
 
             limit = self._parse_limit()
             if limit is not None:
@@ -693,6 +702,41 @@ class Parser(BaseParser):
         limit = Limit(int(self.token.value or "0"))
         self.set_next_token()
         return limit
+
+    def _parse_order_by(self) -> Optional[OrderBy]:
+        self._skip_whitespace_and_comments()
+        if not self.token.is_order():
+            return None
+        self._expect_previous_token_to_be_whitespace_or_comment()
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_by():
+            raise ValueError("Expected BY after ORDER")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        fields: list[SortField] = []
+        while True:
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected field name in ORDER BY")
+            field = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            direction = "asc"
+            if self.token.is_asc():
+                direction = "asc"
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+            elif self.token.is_desc():
+                direction = "desc"
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+            fields.append(SortField(field, direction))
+            if self.token.is_comma():
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+            else:
+                break
+        return OrderBy(fields)
 
     def _parse_expressions(
         self, alias_option: AliasOption = AliasOption.NOT_ALLOWED

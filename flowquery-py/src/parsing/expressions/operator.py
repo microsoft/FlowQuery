@@ -163,7 +163,7 @@ class Not(Operator):
 
 class Is(Operator):
     def __init__(self) -> None:
-        super().__init__(-1, True)
+        super().__init__(0, True)
 
     def value(self) -> int:
         return 1 if self.lhs.value() == self.rhs.value() else 0
@@ -171,7 +171,7 @@ class Is(Operator):
 
 class IsNot(Operator):
     def __init__(self) -> None:
-        super().__init__(-1, True)
+        super().__init__(0, True)
 
     def value(self) -> int:
         return 1 if self.lhs.value() != self.rhs.value() else 0
@@ -179,7 +179,7 @@ class IsNot(Operator):
 
 class In(Operator):
     def __init__(self) -> None:
-        super().__init__(-1, True)
+        super().__init__(0, True)
 
     def value(self) -> int:
         lst = self.rhs.value()
@@ -190,7 +190,7 @@ class In(Operator):
 
 class NotIn(Operator):
     def __init__(self) -> None:
-        super().__init__(-1, True)
+        super().__init__(0, True)
 
     def value(self) -> int:
         lst = self.rhs.value()

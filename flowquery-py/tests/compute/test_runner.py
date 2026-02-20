@@ -811,6 +811,42 @@ class TestRunner:
         assert results[0] == {"result": ""}
 
     @pytest.mark.asyncio
+    async def test_substring_function_with_start_and_length(self):
+        """Test substring function with start and length."""
+        runner = Runner('RETURN substring("hello", 1, 3) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "ell"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_start_only(self):
+        """Test substring function with start only."""
+        runner = Runner('RETURN substring("hello", 2) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "llo"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_zero_start(self):
+        """Test substring function with zero start."""
+        runner = Runner('RETURN substring("hello", 0, 5) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_substring_function_with_zero_length(self):
+        """Test substring function with zero length."""
+        runner = Runner('RETURN substring("hello", 1, 0) as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": ""}
+
+    @pytest.mark.asyncio
     async def test_associative_array_with_key_which_is_keyword(self):
         """Test associative array with key which is keyword."""
         runner = Runner("RETURN {return: 1} as aa")

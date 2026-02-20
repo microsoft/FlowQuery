@@ -725,6 +725,38 @@ test("Test trim function with empty string", async () => {
     expect(results[0]).toEqual({ result: "" });
 });
 
+test("Test substring function with start and length", async () => {
+    const runner = new Runner('RETURN substring("hello", 1, 3) as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "ell" });
+});
+
+test("Test substring function with start only", async () => {
+    const runner = new Runner('RETURN substring("hello", 2) as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "llo" });
+});
+
+test("Test substring function with zero start", async () => {
+    const runner = new Runner('RETURN substring("hello", 0, 5) as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "hello" });
+});
+
+test("Test substring function with zero length", async () => {
+    const runner = new Runner('RETURN substring("hello", 1, 0) as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "" });
+});
+
 test("Test associative array with key which is keyword", async () => {
     const runner = new Runner("RETURN {return: 1} as aa");
     await runner.run();

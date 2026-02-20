@@ -2548,6 +2548,54 @@ test("Test WHERE with IN combined with AND", async () => {
     expect(results.map((r: any) => r.n)).toEqual([10, 15, 20]);
 });
 
+test("Test WHERE with AND before IN", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency in ['expert']
+        return proficiency
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ proficiency: "expert" });
+});
+
+test("Test WHERE with AND before NOT IN", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency not in ['expert']
+        return proficiency
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.proficiency)).toEqual(["intermediate", "beginner"]);
+});
+
+test("Test WHERE with OR before IN", async () => {
+    const runner = new Runner(`
+        unwind range(1, 10) as n
+        with n where 1=0 or n in [3, 7]
+        return n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.n)).toEqual([3, 7]);
+});
+
+test("Test IN as return expression with AND in WHERE", async () => {
+    const runner = new Runner(`
+        unwind ['expert', 'intermediate', 'beginner'] as proficiency
+        with proficiency where 1=1 and proficiency in ['expert']
+        return proficiency, proficiency in ['expert'] as isExpert
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ proficiency: "expert", isExpert: 1 });
+});
+
 test("Test WHERE with CONTAINS", async () => {
     const runner = new Runner(`
         unwind ['apple', 'banana', 'grape', 'pineapple'] as fruit
@@ -3758,4 +3806,100 @@ test("Test duration() with time only", async () => {
     expect(d.minutes).toBe(30);
     expect(d.totalSeconds).toBe(9000);
     expect(d.formatted).toBe("PT2H30M");
+});
+
+// ORDER BY tests
+
+test("Test order by ascending", async () => {
+    const runner = new Runner("unwind [3, 1, 2] as x return x order by x");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: 1 });
+    expect(results[1]).toEqual({ x: 2 });
+    expect(results[2]).toEqual({ x: 3 });
+});
+
+test("Test order by descending", async () => {
+    const runner = new Runner("unwind [3, 1, 2] as x return x order by x desc");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: 3 });
+    expect(results[1]).toEqual({ x: 2 });
+    expect(results[2]).toEqual({ x: 1 });
+});
+
+test("Test order by ascending explicit", async () => {
+    const runner = new Runner("unwind [3, 1, 2] as x return x order by x asc");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: 1 });
+    expect(results[1]).toEqual({ x: 2 });
+    expect(results[2]).toEqual({ x: 3 });
+});
+
+test("Test order by with multiple fields", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: 25}, {name: 'Alice', age: 25}] as person
+        return person.name as name, person.age as age
+        order by name asc, age asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", age: 25 });
+    expect(results[1]).toEqual({ name: "Alice", age: 30 });
+    expect(results[2]).toEqual({ name: "Bob", age: 25 });
+});
+
+test("Test order by with strings", async () => {
+    const runner = new Runner(
+        "unwind ['banana', 'apple', 'cherry'] as fruit return fruit order by fruit"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ fruit: "apple" });
+    expect(results[1]).toEqual({ fruit: "banana" });
+    expect(results[2]).toEqual({ fruit: "cherry" });
+});
+
+test("Test order by with aggregated return", async () => {
+    const runner = new Runner(`
+        unwind [1, 1, 2, 2, 3, 3] as x
+        return x, count(x) as cnt
+        order by x desc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: 3, cnt: 2 });
+    expect(results[1]).toEqual({ x: 2, cnt: 2 });
+    expect(results[2]).toEqual({ x: 1, cnt: 2 });
+});
+
+test("Test order by with limit", async () => {
+    const runner = new Runner("unwind [3, 1, 4, 1, 5, 9, 2, 6] as x return x order by x limit 3");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ x: 1 });
+    expect(results[1]).toEqual({ x: 1 });
+    expect(results[2]).toEqual({ x: 2 });
+});
+
+test("Test order by with where", async () => {
+    const runner = new Runner(
+        "unwind [3, 1, 4, 1, 5, 9, 2, 6] as x return x where x > 2 order by x desc"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+    expect(results[0]).toEqual({ x: 9 });
+    expect(results[1]).toEqual({ x: 6 });
+    expect(results[2]).toEqual({ x: 5 });
+    expect(results[3]).toEqual({ x: 4 });
+    expect(results[4]).toEqual({ x: 3 });
 });

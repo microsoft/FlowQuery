@@ -10,6 +10,9 @@ class Limit extends Operation {
     public get isLimitReached(): boolean {
         return this.count >= this.limit;
     }
+    public get limitValue(): number {
+        return this.limit;
+    }
     public increment(): void {
         this.count++;
     }

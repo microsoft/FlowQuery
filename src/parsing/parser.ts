@@ -57,6 +57,7 @@ import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
 import Operation from "./operations/operation";
+import OrderBy, { SortField } from "./operations/order_by";
 import Return from "./operations/return";
 import Union from "./operations/union";
 import UnionAll from "./operations/union_all";
@@ -141,6 +142,15 @@ class Parser extends BaseParser {
                 } else {
                     operation!.addSibling(where);
                     operation = where;
+                }
+            }
+            const orderBy = this.parseOrderBy();
+            if (orderBy !== null) {
+                if (operation instanceof Return) {
+                    (operation as Return).orderBy = orderBy;
+                } else {
+                    operation!.addSibling(orderBy);
+                    operation = orderBy;
                 }
             }
             const limit = this.parseLimit();
@@ -788,6 +798,48 @@ class Parser extends BaseParser {
         const limit = new Limit(parseInt(this.token.value || "0"));
         this.setNextToken();
         return limit;
+    }
+
+    private parseOrderBy(): OrderBy | null {
+        this.skipWhitespaceAndComments();
+        if (!this.token.isOrder()) {
+            return null;
+        }
+        this.expectPreviousTokenToBeWhitespaceOrComment();
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isByKeyword()) {
+            throw new Error("Expected BY after ORDER");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const fields: SortField[] = [];
+        while (true) {
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected field name in ORDER BY");
+            }
+            const field = this.token.value!;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            let direction: "asc" | "desc" = "asc";
+            if (this.token.isAsc()) {
+                direction = "asc";
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            } else if (this.token.isDesc()) {
+                direction = "desc";
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            }
+            fields.push({ field, direction });
+            if (this.token.isComma()) {
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            } else {
+                break;
+            }
+        }
+        return new OrderBy(fields);
     }
 
     private *parseExpressions(

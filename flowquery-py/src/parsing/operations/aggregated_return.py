@@ -19,4 +19,7 @@ class AggregatedReturn(Return):
     def results(self) -> List[Dict[str, Any]]:
         if self._where is not None:
             self._group_by.where = self._where
-        return list(self._group_by.generate_results())
+        results = list(self._group_by.generate_results())
+        if self._order_by is not None:
+            results = self._order_by.sort(results)
+        return results

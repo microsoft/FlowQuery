@@ -2799,6 +2799,58 @@ class TestRunner:
         assert [r["n"] for r in results] == [10, 15, 20]
 
     @pytest.mark.asyncio
+    async def test_where_with_and_before_in(self):
+        """Test WHERE with AND before IN (IN on right side of AND)."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency in ['expert']
+            return proficiency
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"proficiency": "expert"}
+
+    @pytest.mark.asyncio
+    async def test_where_with_and_before_not_in(self):
+        """Test WHERE with AND before NOT IN."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency not in ['expert']
+            return proficiency
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["proficiency"] for r in results] == ["intermediate", "beginner"]
+
+    @pytest.mark.asyncio
+    async def test_where_with_or_before_in(self):
+        """Test WHERE with OR before IN."""
+        runner = Runner("""
+            unwind range(1, 10) as n
+            with n where 1=0 or n in [3, 7]
+            return n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["n"] for r in results] == [3, 7]
+
+    @pytest.mark.asyncio
+    async def test_in_as_return_expression_with_and_in_where(self):
+        """Test IN as return expression with AND in WHERE."""
+        runner = Runner("""
+            unwind ['expert', 'intermediate', 'beginner'] as proficiency
+            with proficiency where 1=1 and proficiency in ['expert']
+            return proficiency, proficiency in ['expert'] as isExpert
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"proficiency": "expert", "isExpert": 1}
+
+    @pytest.mark.asyncio
     async def test_where_with_contains(self):
         """Test WHERE with CONTAINS."""
         runner = Runner("""
@@ -4012,3 +4064,109 @@ class TestRunner:
         assert d["minutes"] == 30
         assert d["totalSeconds"] == 9000
         assert d["formatted"] == "PT2H30M"
+
+    # ORDER BY tests
+
+    @pytest.mark.asyncio
+    async def test_order_by_ascending(self):
+        """Test ORDER BY ascending (default)."""
+        runner = Runner("unwind [3, 1, 2] as x return x order by x")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": 1}
+        assert results[1] == {"x": 2}
+        assert results[2] == {"x": 3}
+
+    @pytest.mark.asyncio
+    async def test_order_by_descending(self):
+        """Test ORDER BY descending."""
+        runner = Runner("unwind [3, 1, 2] as x return x order by x desc")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": 3}
+        assert results[1] == {"x": 2}
+        assert results[2] == {"x": 1}
+
+    @pytest.mark.asyncio
+    async def test_order_by_ascending_explicit(self):
+        """Test ORDER BY with explicit ASC."""
+        runner = Runner("unwind [3, 1, 2] as x return x order by x asc")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": 1}
+        assert results[1] == {"x": 2}
+        assert results[2] == {"x": 3}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_multiple_fields(self):
+        """Test ORDER BY with multiple sort fields."""
+        runner = Runner(
+            "unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: 25}, {name: 'Alice', age: 25}] as person "
+            "return person.name as name, person.age as age "
+            "order by name asc, age asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "age": 25}
+        assert results[1] == {"name": "Alice", "age": 30}
+        assert results[2] == {"name": "Bob", "age": 25}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_strings(self):
+        """Test ORDER BY with string values."""
+        runner = Runner(
+            "unwind ['banana', 'apple', 'cherry'] as fruit return fruit order by fruit"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"fruit": "apple"}
+        assert results[1] == {"fruit": "banana"}
+        assert results[2] == {"fruit": "cherry"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_aggregated_return(self):
+        """Test ORDER BY with aggregated RETURN."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2, 3, 3] as x "
+            "return x, count(x) as cnt "
+            "order by x desc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": 3, "cnt": 2}
+        assert results[1] == {"x": 2, "cnt": 2}
+        assert results[2] == {"x": 1, "cnt": 2}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_limit(self):
+        """Test ORDER BY combined with LIMIT."""
+        runner = Runner(
+            "unwind [3, 1, 4, 1, 5, 9, 2, 6] as x return x order by x limit 3"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"x": 1}
+        assert results[1] == {"x": 1}
+        assert results[2] == {"x": 2}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_where(self):
+        """Test ORDER BY combined with WHERE."""
+        runner = Runner(
+            "unwind [3, 1, 4, 1, 5, 9, 2, 6] as x return x where x > 2 order by x desc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+        assert results[0] == {"x": 9}
+        assert results[1] == {"x": 6}
+        assert results[2] == {"x": 5}
+        assert results[3] == {"x": 4}
+        assert results[4] == {"x": 3}

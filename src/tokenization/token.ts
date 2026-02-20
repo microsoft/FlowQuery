@@ -675,6 +675,38 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.DISTINCT;
     }
 
+    public static get ORDER(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ORDER);
+    }
+
+    public isOrder(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ORDER;
+    }
+
+    public static get BY(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.BY);
+    }
+
+    public isByKeyword(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.BY;
+    }
+
+    public static get ASC(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ASC);
+    }
+
+    public isAsc(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ASC;
+    }
+
+    public static get DESC(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.DESC);
+    }
+
+    public isDesc(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.DESC;
+    }
+
     public static get LIMIT(): Token {
         return new Token(TokenType.KEYWORD, Keyword.LIMIT);
     }

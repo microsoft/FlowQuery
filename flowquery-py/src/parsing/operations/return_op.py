@@ -68,6 +68,9 @@ class Return(Projection):
             # Deep copy objects to preserve their state
             value = copy.deepcopy(raw) if isinstance(raw, (dict, list)) else raw
             record[alias] = value
+        # Capture sort-key values while expression bindings are still live.
+        if self._order_by is not None:
+            self._order_by.capture_sort_keys()
         self._results.append(record)
         if self._order_by is None and self._limit is not None:
             self._limit.increment()

@@ -4114,6 +4114,126 @@ test("Test order by with where", async () => {
     expect(results[4]).toEqual({ x: 3 });
 });
 
+test("Test order by with property access expression", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Charlie', age: 30}, {name: 'Alice', age: 25}, {name: 'Bob', age: 35}] as person
+        return person.name as name, person.age as age
+        order by person.name asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", age: 25 });
+    expect(results[1]).toEqual({ name: "Bob", age: 35 });
+    expect(results[2]).toEqual({ name: "Charlie", age: 30 });
+});
+
+test("Test order by with function expression", async () => {
+    const runner = new Runner(`
+        unwind ['BANANA', 'apple', 'Cherry'] as fruit
+        return fruit
+        order by toLower(fruit)
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ fruit: "apple" });
+    expect(results[1]).toEqual({ fruit: "BANANA" });
+    expect(results[2]).toEqual({ fruit: "Cherry" });
+});
+
+test("Test order by with function expression descending", async () => {
+    const runner = new Runner(`
+        unwind ['BANANA', 'apple', 'Cherry'] as fruit
+        return fruit
+        order by toLower(fruit) desc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ fruit: "Cherry" });
+    expect(results[1]).toEqual({ fruit: "BANANA" });
+    expect(results[2]).toEqual({ fruit: "apple" });
+});
+
+test("Test order by with nested function expression", async () => {
+    const runner = new Runner(`
+        unwind ['Alice', 'Bob', 'ALICE', 'bob'] as name
+        return name
+        order by string_distance(toLower(name), toLower('alice')) asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    // 'Alice' and 'ALICE' have distance 0 from 'alice', should come first
+    expect(results[0].name).toBe("Alice");
+    expect(results[1].name).toBe("ALICE");
+    // 'Bob' and 'bob' have higher distance from 'alice'
+    expect(results[2].name).toBe("Bob");
+    expect(results[3].name).toBe("bob");
+});
+
+test("Test order by with arithmetic expression", async () => {
+    const runner = new Runner(`
+        unwind [{a: 3, b: 1}, {a: 1, b: 5}, {a: 2, b: 2}] as item
+        return item.a as a, item.b as b
+        order by item.a + item.b asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ a: 3, b: 1 }); // sum = 4
+    expect(results[1]).toEqual({ a: 2, b: 2 }); // sum = 4
+    expect(results[2]).toEqual({ a: 1, b: 5 }); // sum = 6
+});
+
+test("Test order by expression does not leak synthetic keys", async () => {
+    const runner = new Runner(`
+        unwind ['B', 'a', 'C'] as x
+        return x
+        order by toLower(x) asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    // Results should only contain 'x', no __orderBy_ keys
+    for (const r of results) {
+        expect(Object.keys(r)).toEqual(["x"]);
+    }
+    expect(results[0]).toEqual({ x: "a" });
+    expect(results[1]).toEqual({ x: "B" });
+    expect(results[2]).toEqual({ x: "C" });
+});
+
+test("Test order by with expression and limit", async () => {
+    const runner = new Runner(`
+        unwind ['BANANA', 'apple', 'Cherry', 'date', 'ELDERBERRY'] as fruit
+        return fruit
+        order by toLower(fruit) asc
+        limit 3
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ fruit: "apple" });
+    expect(results[1]).toEqual({ fruit: "BANANA" });
+    expect(results[2]).toEqual({ fruit: "Cherry" });
+});
+
+test("Test order by with mixed simple and expression fields", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Alice', score: 3}, {name: 'Alice', score: 1}, {name: 'Bob', score: 2}] as item
+        return item.name as name, item.score as score
+        order by name asc, item.score desc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", score: 3 }); // Alice, score 3 desc
+    expect(results[1]).toEqual({ name: "Alice", score: 1 }); // Alice, score 1 desc
+    expect(results[2]).toEqual({ name: "Bob", score: 2 }); // Bob
+});
+
 test("Test delete virtual node operation", async () => {
     const db = Database.getInstance();
     // Create a virtual node first

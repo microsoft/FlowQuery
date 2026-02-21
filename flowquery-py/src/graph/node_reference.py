@@ -32,10 +32,11 @@ class NodeReference(Node):
     async def next(self) -> None:
         """Process next using the referenced node's value."""
         ref_value = self._reference.value()
-        if ref_value is not None:
-            self.set_value(dict(ref_value))
-            if self._outgoing and self._value:
-                await self._outgoing.find(self._value['id'])
+        if ref_value is None:
+            return
+        self.set_value(dict(ref_value))
+        if self._outgoing and self._value:
+            await self._outgoing.find(self._value['id'])
         await self.run_todo_next()
 
     async def find(self, id_: str, hop: int = 0) -> None:

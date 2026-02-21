@@ -4395,3 +4395,160 @@ class TestRunner:
             "mentorJobTitle": "Staff Engineer",
             "mentorDepartment": "Engineering",
         }
+
+    @pytest.mark.asyncio
+    async def test_chained_optional_match_with_null_intermediate_node(self):
+        """Test chained OPTIONAL MATCH where intermediate node is null doesn't crash."""
+        # Chain: Alice -> Bob -> Charlie (no outgoing)
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainEmp) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'},
+                    {id: 3, name: 'Charlie'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainEmp)-[:REPORTS_TO]-(:ChainEmp) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+
+        # Alice -> Bob -> Charlie -> null -> null
+        runner = Runner(
+            """
+            MATCH (u:ChainEmp)
+            WHERE u.name = "Alice"
+            OPTIONAL MATCH (u)-[:REPORTS_TO]->(m1:ChainEmp)
+            OPTIONAL MATCH (m1)-[:REPORTS_TO]->(m2:ChainEmp)
+            OPTIONAL MATCH (m2)-[:REPORTS_TO]->(m3:ChainEmp)
+            OPTIONAL MATCH (m3)-[:REPORTS_TO]->(m4:ChainEmp)
+            RETURN
+                u.name AS user,
+                m1.name AS manager1,
+                m2.name AS manager2,
+                m3.name AS manager3,
+                m4.name AS manager4
+            """
+        )
+        await runner.run()
+        results = runner.results
+
+        assert len(results) == 1
+        assert results[0]["user"] == "Alice"
+        assert results[0]["manager1"] == "Bob"
+        assert results[0]["manager2"] == "Charlie"
+        assert results[0]["manager3"] is None
+        assert results[0]["manager4"] is None
+
+    @pytest.mark.asyncio
+    async def test_chained_optional_match_all_null_from_first(self):
+        """Test chained OPTIONAL MATCH where first optional returns null propagates nulls."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainWorker) AS {
+                unwind [
+                    {id: 1, name: 'Solo'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainWorker)-[:MANAGES]-(:ChainWorker) AS {
+                unwind [] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+
+        # Solo has no MANAGES relationship
+        runner = Runner(
+            """
+            MATCH (u:ChainWorker)
+            OPTIONAL MATCH (u)-[:MANAGES]->(m1:ChainWorker)
+            OPTIONAL MATCH (m1)-[:MANAGES]->(m2:ChainWorker)
+            OPTIONAL MATCH (m2)-[:MANAGES]->(m3:ChainWorker)
+            RETURN
+                u.name AS user,
+                m1.name AS mgr1,
+                m2.name AS mgr2,
+                m3.name AS mgr3
+            """
+        )
+        await runner.run()
+        results = runner.results
+
+        assert len(results) == 1
+        assert results[0]["user"] == "Solo"
+        assert results[0]["mgr1"] is None
+        assert results[0]["mgr2"] is None
+        assert results[0]["mgr3"] is None
+
+    @pytest.mark.asyncio
+    async def test_chained_optional_match_mixed_null_and_non_null(self):
+        """Test chained OPTIONAL MATCH with multiple start nodes having different chain depths."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainStaff) AS {
+                unwind [
+                    {id: 1, name: 'Dev'},
+                    {id: 2, name: 'Lead'},
+                    {id: 3, name: 'Director'},
+                    {id: 4, name: 'Intern'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:ChainStaff)-[:REPORTS_TO]-(:ChainStaff) AS {
+                unwind [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+
+        # Dev -> Lead -> Director -> null
+        # Intern -> null -> null -> null
+        runner = Runner(
+            """
+            MATCH (u:ChainStaff)
+            WHERE u.name = "Dev" OR u.name = "Intern"
+            OPTIONAL MATCH (u)-[:REPORTS_TO]->(m1:ChainStaff)
+            OPTIONAL MATCH (m1)-[:REPORTS_TO]->(m2:ChainStaff)
+            OPTIONAL MATCH (m2)-[:REPORTS_TO]->(m3:ChainStaff)
+            RETURN
+                u.name AS user,
+                m1.name AS mgr1,
+                m2.name AS mgr2,
+                m3.name AS mgr3
+            """
+        )
+        await runner.run()
+        results = runner.results
+
+        assert len(results) == 2
+        dev = next(r for r in results if r["user"] == "Dev")
+        assert dev["mgr1"] == "Lead"
+        assert dev["mgr2"] == "Director"
+        assert dev["mgr3"] is None
+        intern = next(r for r in results if r["user"] == "Intern")
+        assert intern["mgr1"] is None
+        assert intern["mgr2"] is None
+        assert intern["mgr3"] is None

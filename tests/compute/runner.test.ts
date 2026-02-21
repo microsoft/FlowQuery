@@ -4097,3 +4097,145 @@ test("Test RETURN alias shadowing graph variable in same RETURN clause", async (
         mentorDepartment: "Engineering",
     });
 });
+
+test("Test chained optional match with null intermediate node", async () => {
+    // Create a chain: A -> B -> C (C has no outgoing REPORTS_TO)
+    await new Runner(`
+        CREATE VIRTUAL (:Employee) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Employee)-[:REPORTS_TO]-(:Employee) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    // Alice -> Bob -> Charlie -> null -> null
+    // m1=Bob, m2=Charlie, m3=null, m4=null (should not crash)
+    const runner = new Runner(`
+        MATCH (u:Employee)
+        WHERE u.name = "Alice"
+        OPTIONAL MATCH (u)-[:REPORTS_TO]->(m1:Employee)
+        OPTIONAL MATCH (m1)-[:REPORTS_TO]->(m2:Employee)
+        OPTIONAL MATCH (m2)-[:REPORTS_TO]->(m3:Employee)
+        OPTIONAL MATCH (m3)-[:REPORTS_TO]->(m4:Employee)
+        RETURN
+            u.name AS user,
+            m1.name AS manager1,
+            m2.name AS manager2,
+            m3.name AS manager3,
+            m4.name AS manager4
+    `);
+    await runner.run();
+    const results = runner.results;
+
+    expect(results.length).toBe(1);
+    expect(results[0].user).toBe("Alice");
+    expect(results[0].manager1).toBe("Bob");
+    expect(results[0].manager2).toBe("Charlie");
+    expect(results[0].manager3).toBeNull();
+    expect(results[0].manager4).toBeNull();
+});
+
+test("Test chained optional match all null from first optional", async () => {
+    // Create nodes with no relationships
+    await new Runner(`
+        CREATE VIRTUAL (:Worker) AS {
+            unwind [
+                {id: 1, name: 'Solo'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Worker)-[:MANAGES]-(:Worker) AS {
+            unwind [] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    // Solo has no MANAGES relationship at all
+    // m1=null, m2=null, m3=null
+    const runner = new Runner(`
+        MATCH (u:Worker)
+        OPTIONAL MATCH (u)-[:MANAGES]->(m1:Worker)
+        OPTIONAL MATCH (m1)-[:MANAGES]->(m2:Worker)
+        OPTIONAL MATCH (m2)-[:MANAGES]->(m3:Worker)
+        RETURN
+            u.name AS user,
+            m1.name AS mgr1,
+            m2.name AS mgr2,
+            m3.name AS mgr3
+    `);
+    await runner.run();
+    const results = runner.results;
+
+    expect(results.length).toBe(1);
+    expect(results[0].user).toBe("Solo");
+    expect(results[0].mgr1).toBeNull();
+    expect(results[0].mgr2).toBeNull();
+    expect(results[0].mgr3).toBeNull();
+});
+
+test("Test chained optional match with mixed null and non-null paths", async () => {
+    // Two starting nodes: one with full chain, one with partial
+    await new Runner(`
+        CREATE VIRTUAL (:Staff) AS {
+            unwind [
+                {id: 1, name: 'Dev'},
+                {id: 2, name: 'Lead'},
+                {id: 3, name: 'Director'},
+                {id: 4, name: 'Intern'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Staff)-[:REPORTS_TO]-(:Staff) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    // Dev -> Lead -> Director -> null
+    // Intern -> null -> null -> null
+    const runner = new Runner(`
+        MATCH (u:Staff)
+        WHERE u.name = "Dev" OR u.name = "Intern"
+        OPTIONAL MATCH (u)-[:REPORTS_TO]->(m1:Staff)
+        OPTIONAL MATCH (m1)-[:REPORTS_TO]->(m2:Staff)
+        OPTIONAL MATCH (m2)-[:REPORTS_TO]->(m3:Staff)
+        RETURN
+            u.name AS user,
+            m1.name AS mgr1,
+            m2.name AS mgr2,
+            m3.name AS mgr3
+    `);
+    await runner.run();
+    const results = runner.results;
+
+    expect(results.length).toBe(2);
+    // Dev's chain
+    const dev = results.find((r: any) => r.user === "Dev");
+    expect(dev.mgr1).toBe("Lead");
+    expect(dev.mgr2).toBe("Director");
+    expect(dev.mgr3).toBeNull();
+    // Intern's chain
+    const intern = results.find((r: any) => r.user === "Intern");
+    expect(intern.mgr1).toBeNull();
+    expect(intern.mgr2).toBeNull();
+    expect(intern.mgr3).toBeNull();
+});

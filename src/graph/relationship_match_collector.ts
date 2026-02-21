@@ -5,6 +5,7 @@ export type RelationshipMatchRecord = {
     startNode: Record<string, any>;
     endNode: Record<string, any> | null;
     properties: Record<string, any>;
+    [key: string]: any;
 };
 
 class RelationshipMatchCollector {
@@ -16,11 +17,13 @@ class RelationshipMatchCollector {
         const currentRecord = data?.current();
         const actualType =
             currentRecord && "_type" in currentRecord ? currentRecord["_type"] : relationship.type!;
+        const relProperties = data?.properties() as Record<string, any>;
         const match: RelationshipMatchRecord = {
+            ...(relProperties || {}),
             type: actualType,
             startNode: relationship.source?.value() || {},
             endNode: null,
-            properties: data?.properties() as Record<string, any>,
+            properties: relProperties,
         };
         this._matches.push(match);
         this._nodeIds.push(traversalId);

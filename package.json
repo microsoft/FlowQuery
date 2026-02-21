@@ -21,6 +21,9 @@
       "types": "./dist/extensibility.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
   "bin": {
     "flowquery": "./dist/index.js"
   },

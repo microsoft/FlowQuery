@@ -3343,6 +3343,69 @@ test("Test match with ORed relationship types returns correct type in relationsh
     expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
 });
 
+test("Test relationship properties can be accessed directly via dot notation", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            unwind [
+                {id: 1, name: 'NYC'},
+                {id: 2, name: 'LA'},
+                {id: 3, name: 'Chicago'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+            unwind [
+                {left_id: 1, right_id: 2, airline: 'Delta', duration: 5}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.airline as airline, record.duration as duration
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:City)-[r:FLIGHT]->(b:City)
+        RETURN a.name AS from, b.name AS to, r.airline AS airline, r.duration AS duration
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ from: "NYC", to: "LA", airline: "Delta", duration: 5 });
+});
+
+test("Test relationship properties accessible via both direct access and properties()", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2, since: 2020, strength: 'strong'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.since as since, record.strength as strength
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:Person)-[r:KNOWS]->(b:Person)
+        RETURN a.name AS from, b.name AS to, r.since AS since, r.strength AS strength, properties(r).since AS propSince
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({
+        from: "Alice",
+        to: "Bob",
+        since: 2020,
+        strength: "strong",
+        propSince: 2020,
+    });
+});
+
 test("Test coalesce returns first non-null value", async () => {
     const runner = new Runner("RETURN coalesce(null, null, 'hello', 'world') as result");
     await runner.run();

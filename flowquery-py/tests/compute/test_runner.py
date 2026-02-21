@@ -3543,6 +3543,76 @@ class TestRunner:
         assert results[0] == {"sum": 0}
 
     @pytest.mark.asyncio
+    async def test_relationship_properties_direct_dot_notation(self):
+        """Test relationship properties can be accessed directly via dot notation."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:RCity) AS {
+                unwind [
+                    {id: 1, name: 'NYC'},
+                    {id: 2, name: 'LA'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:RCity)-[:RFLIGHT]-(:RCity) AS {
+                unwind [
+                    {left_id: 1, right_id: 2, airline: 'Delta', duration: 5}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.airline as airline, record.duration as duration
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:RCity)-[r:RFLIGHT]->(b:RCity)
+            RETURN a.name AS from, b.name AS to, r.airline AS airline, r.duration AS duration
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"from": "NYC", "to": "LA", "airline": "Delta", "duration": 5}
+
+    @pytest.mark.asyncio
+    async def test_relationship_properties_direct_and_via_properties_function(self):
+        """Test relationship properties accessible via both direct access and properties()."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:RPerson) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:RPerson)-[:RKNOWS]-(:RPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2, since: 2020, strength: 'strong'}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.since as since, record.strength as strength
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:RPerson)-[r:RKNOWS]->(b:RPerson)
+            RETURN a.name AS from, b.name AS to, r.since AS since, r.strength AS strength, properties(r).since AS propSince
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 1
+        assert results[0] == {"from": "Alice", "to": "Bob", "since": 2020, "strength": "strong", "propSince": 2020}
+
+    @pytest.mark.asyncio
     async def test_coalesce_returns_first_non_null(self):
         """Test coalesce returns first non-null value."""
         runner = Runner("RETURN coalesce(null, null, 'hello', 'world') as result")

@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from .node import Node
     from .relationship import Relationship
 
-
-class RelationshipMatchRecord(TypedDict, total=False):
-    """Represents a matched relationship record."""
-    type: str
-    startNode: Any
-    endNode: Any
-    properties: Dict[str, Any]
+# A relationship match record is a plain dict with known keys (type,
+# startNode, endNode, properties) plus any extra relationship-property
+# keys spread at the top level – mirroring the TypeScript version that
+# uses an index signature ``[key: string]: any``.
+RelationshipMatchRecord = Dict[str, Any]
 
 
 class RelationshipMatchCollector:
@@ -36,6 +34,7 @@ class RelationshipMatchCollector:
             actual_type = default_type
         rel_props: Dict[str, Any] = (rel_data.properties() or {}) if rel_data else {}
         match: RelationshipMatchRecord = {
+            **rel_props,
             "type": actual_type,
             "startNode": start_node_value or {},
             "endNode": None,

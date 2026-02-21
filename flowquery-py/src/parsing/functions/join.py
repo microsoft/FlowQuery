@@ -42,6 +42,8 @@ class Join(Function):
     def value(self) -> Any:
         array = self.get_children()[0].value()
         delimiter = self.get_children()[1].value()
+        if array is None:
+            return None
         if not isinstance(array, list) or not isinstance(delimiter, str):
             raise ValueError("Invalid arguments for join function")
         return delimiter.join(str(item) for item in array)

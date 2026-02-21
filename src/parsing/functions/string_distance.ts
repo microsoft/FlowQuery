@@ -68,6 +68,9 @@ class StringDistance extends Function {
     public value(): any {
         const str1 = this.getChildren()[0].value();
         const str2 = this.getChildren()[1].value();
+        if (str1 === null || str1 === undefined || str2 === null || str2 === undefined) {
+            return null;
+        }
         if (typeof str1 !== "string" || typeof str2 !== "string") {
             throw new Error(
                 "Invalid arguments for string_distance function: both arguments must be strings"

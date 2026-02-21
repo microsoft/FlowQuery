@@ -849,6 +849,134 @@ class TestRunner:
         assert len(results) == 1
         assert results[0] == {"result": ""}
 
+    # --- Null propagation tests ---
+
+    @pytest.mark.asyncio
+    async def test_to_lower_with_null_returns_null(self):
+        """Test toLower with null returns null."""
+        runner = Runner("RETURN toLower(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_trim_with_null_returns_null(self):
+        """Test trim with null returns null."""
+        runner = Runner("RETURN trim(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_replace_with_null_returns_null(self):
+        """Test replace with null returns null."""
+        runner = Runner("RETURN replace(null, 'a', 'b') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_substring_with_null_returns_null(self):
+        """Test substring with null returns null."""
+        runner = Runner("RETURN substring(null, 0, 3) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_split_with_null_returns_null(self):
+        """Test split with null returns null."""
+        runner = Runner("RETURN split(null, ',') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_size_with_null_returns_null(self):
+        """Test size with null returns null."""
+        runner = Runner("RETURN size(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_round_with_null_returns_null(self):
+        """Test round with null returns null."""
+        runner = Runner("RETURN round(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_join_with_null_returns_null(self):
+        """Test join with null returns null."""
+        runner = Runner("RETURN join(null, ',') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_string_distance_with_null_returns_null(self):
+        """Test string_distance with null returns null."""
+        runner = Runner("RETURN string_distance(null, 'hello') as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_stringify_with_null_returns_null(self):
+        """Test stringify with null returns null."""
+        runner = Runner("RETURN stringify(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_tojson_with_null_returns_null(self):
+        """Test tojson with null returns null."""
+        runner = Runner("RETURN tojson(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_range_with_null_returns_null(self):
+        """Test range with null returns null."""
+        runner = Runner("RETURN range(null, 5) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_to_string_with_null_returns_null(self):
+        """Test toString with null returns null."""
+        runner = Runner("RETURN toString(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_keys_with_null_returns_null(self):
+        """Test keys with null returns null."""
+        runner = Runner("RETURN keys(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
     @pytest.mark.asyncio
     async def test_associative_array_with_key_which_is_keyword(self):
         """Test associative array with key which is keyword."""

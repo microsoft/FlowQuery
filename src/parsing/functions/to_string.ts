@@ -20,7 +20,7 @@ class ToString extends Function {
     public value(): any {
         const val = this.getChildren()[0].value();
         if (val === null || val === undefined) {
-            return String(val);
+            return null;
         }
         if (typeof val === "object") {
             return JSON.stringify(val);

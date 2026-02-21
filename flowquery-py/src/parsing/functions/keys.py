@@ -28,7 +28,7 @@ class Keys(Function):
     def value(self) -> Any:
         obj = self.get_children()[0].value()
         if obj is None:
-            return []
+            return None
         if not isinstance(obj, dict):
             raise ValueError("keys() expects an object, not an array or primitive")
         return list(obj.keys())

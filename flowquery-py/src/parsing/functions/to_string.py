@@ -33,7 +33,7 @@ class ToString(Function):
     def value(self) -> Any:
         val = self.get_children()[0].value()
         if val is None:
-            return "null"
+            return None
         if isinstance(val, bool):
             return str(val).lower()
         if isinstance(val, (dict, list)):

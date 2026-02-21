@@ -52,6 +52,8 @@ class Substring(Function):
         original = children[0].value()
         start = children[1].value()
 
+        if original is None:
+            return None
         if not isinstance(original, str):
             raise ValueError(
                 "Invalid argument for substring function: expected a string as the first argument"

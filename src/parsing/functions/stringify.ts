@@ -1,16 +1,14 @@
 import ASTNode from "../ast_node";
-import Function from "./function";
 import Number from "../expressions/number";
+import Function from "./function";
 import { FunctionDef } from "./function_metadata";
 
 @FunctionDef({
     description: "Converts a value to its JSON string representation",
     category: "scalar",
-    parameters: [
-        { name: "value", description: "Value to stringify", type: "any" }
-    ],
-    output: { description: "JSON string", type: "string", example: "{\"a\":1}" },
-    examples: ["WITH {a: 1} AS obj RETURN stringify(obj)"]
+    parameters: [{ name: "value", description: "Value to stringify", type: "any" }],
+    output: { description: "JSON string", type: "string", example: '{"a":1}' },
+    examples: ["WITH {a: 1} AS obj RETURN stringify(obj)"],
 })
 class Stringify extends Function {
     constructor() {
@@ -18,7 +16,7 @@ class Stringify extends Function {
         this._expectedParameterCount = 2;
     }
     public set parameters(nodes: ASTNode[]) {
-        if(nodes.length === 1) {
+        if (nodes.length === 1) {
             nodes.push(new Number("3")); // Default to 3 if only one parameter is provided
         }
         super.parameters = nodes;
@@ -26,6 +24,9 @@ class Stringify extends Function {
     public value(): any {
         const value = this.getChildren()[0].value();
         const indent = parseInt(this.getChildren()[1].value());
+        if (value === null || value === undefined) {
+            return null;
+        }
         if (typeof value !== "object") {
             throw new Error("Invalid argument for stringify function");
         }

@@ -32,6 +32,8 @@ class Replace(Function):
         text = self.get_children()[0].value()
         pattern = self.get_children()[1].value()
         replacement = self.get_children()[2].value()
+        if text is None:
+            return None
         if not isinstance(text, str) or not isinstance(pattern, str) or not isinstance(replacement, str):
             raise ValueError("Invalid arguments for replace function")
         return re.sub(re.escape(pattern), replacement, text)

@@ -15,6 +15,9 @@ class ToLower extends Function {
     }
     public value(): any {
         const val = this.getChildren()[0].value();
+        if (val === null || val === undefined) {
+            return null;
+        }
         if (typeof val !== "string") {
             throw new Error("Invalid argument for toLower function: expected a string");
         }

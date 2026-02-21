@@ -37,6 +37,9 @@ class Substring extends Function {
         const original = children[0].value();
         const start = children[1].value();
 
+        if (original === null || original === undefined) {
+            return null;
+        }
         if (typeof original !== "string") {
             throw new Error(
                 "Invalid argument for substring function: expected a string as the first argument"

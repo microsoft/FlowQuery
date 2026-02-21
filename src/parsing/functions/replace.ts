@@ -7,10 +7,10 @@ import { FunctionDef } from "./function_metadata";
     parameters: [
         { name: "text", description: "Source string", type: "string" },
         { name: "pattern", description: "Pattern to find", type: "string" },
-        { name: "replacement", description: "Replacement string", type: "string" }
+        { name: "replacement", description: "Replacement string", type: "string" },
     ],
     output: { description: "String with replacements", type: "string", example: "hello world" },
-    examples: ["WITH 'hello there' AS s RETURN replace(s, 'there', 'world')"]
+    examples: ["WITH 'hello there' AS s RETURN replace(s, 'there', 'world')"],
 })
 class Replace extends Function {
     constructor() {
@@ -21,7 +21,14 @@ class Replace extends Function {
         const str = this.getChildren()[0].value();
         const search = this.getChildren()[1].value();
         const replacement = this.getChildren()[2].value();
-        if (typeof str !== "string" || typeof search !== "string" || typeof replacement !== "string") {
+        if (str === null || str === undefined) {
+            return null;
+        }
+        if (
+            typeof str !== "string" ||
+            typeof search !== "string" ||
+            typeof replacement !== "string"
+        ) {
             throw new Error("Invalid arguments for replace function");
         }
         return str.replace(new RegExp(search, "g"), replacement);

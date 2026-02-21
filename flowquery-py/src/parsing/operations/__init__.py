@@ -5,6 +5,8 @@ from .aggregated_with import AggregatedWith
 from .call import Call
 from .create_node import CreateNode
 from .create_relationship import CreateRelationship
+from .delete_node import DeleteNode
+from .delete_relationship import DeleteRelationship
 from .group_by import GroupBy
 from .limit import Limit
 from .load import Load
@@ -35,6 +37,8 @@ __all__ = [
     "Match",
     "CreateNode",
     "CreateRelationship",
+    "DeleteNode",
+    "DeleteRelationship",
     "Union",
     "UnionAll",
     "OrderBy",

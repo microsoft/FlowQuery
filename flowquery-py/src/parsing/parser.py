@@ -57,6 +57,8 @@ from .operations.aggregated_with import AggregatedWith
 from .operations.call import Call
 from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
+from .operations.delete_node import DeleteNode
+from .operations.delete_relationship import DeleteRelationship
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
@@ -185,8 +187,8 @@ class Parser(BaseParser):
             new_root.add_child(union)
             return new_root
 
-        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship)):
-            raise ValueError("Last statement must be a RETURN, WHERE, CALL, or CREATE statement")
+        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
+            raise ValueError("Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement")
 
         return root
 
@@ -198,7 +200,8 @@ class Parser(BaseParser):
             self._parse_load() or
             self._parse_call() or
             self._parse_match() or
-            self._parse_create()
+            self._parse_create() or
+            self._parse_delete()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -211,7 +214,7 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-        expressions = list(self._parse_expressions(AliasOption.REQUIRED))
+        expressions = self._parse_expressions(AliasOption.REQUIRED)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
         if distinct or any(expr.has_reducers() for expr in expressions):
@@ -251,7 +254,7 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-        expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
+        expressions = self._parse_expressions(AliasOption.OPTIONAL)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
         if distinct or any(expr.has_reducers() for expr in expressions):
@@ -350,7 +353,7 @@ class Parser(BaseParser):
             self._expect_previous_token_to_be_whitespace_or_comment()
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-            expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
+            expressions = self._parse_expressions(AliasOption.OPTIONAL)
             if len(expressions) == 0:
                 raise ValueError("Expected at least one expression")
             call.yielded = expressions  # type: ignore[assignment]
@@ -430,6 +433,54 @@ class Parser(BaseParser):
             return CreateRelationship(relationship, query)
         else:
             return CreateNode(node, query)
+
+    def _parse_delete(self) -> Optional[Operation]:
+        """Parse DELETE VIRTUAL statement for nodes and relationships."""
+        if not self.token.is_delete():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_virtual():
+            raise ValueError("Expected VIRTUAL")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        node = self._parse_node()
+        if node is None:
+            raise ValueError("Expected node definition")
+
+        relationship: Optional[Relationship] = None
+        if self.token.is_subtract() and self.peek() and self.peek().is_opening_bracket():
+            self.set_next_token()  # skip -
+            self.set_next_token()  # skip [
+            if not self.token.is_colon():
+                raise ValueError("Expected ':' for relationship type")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected relationship type identifier")
+            rel_type = self.token.value or ""
+            self.set_next_token()
+            if not self.token.is_closing_bracket():
+                raise ValueError("Expected closing bracket for relationship definition")
+            self.set_next_token()
+            if not self.token.is_subtract():
+                raise ValueError("Expected '-' for relationship definition")
+            self.set_next_token()
+            # Skip optional direction indicator '>'
+            if self.token.is_greater_than():
+                self.set_next_token()
+            target = self._parse_node()
+            if target is None:
+                raise ValueError("Expected target node definition")
+            relationship = Relationship()
+            relationship.type = rel_type
+            relationship.source = node
+            relationship.target = target
+
+        if relationship is not None:
+            return DeleteRelationship(relationship)
+        else:
+            return DeleteNode(node)
 
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""
@@ -740,16 +791,30 @@ class Parser(BaseParser):
 
     def _parse_expressions(
         self, alias_option: AliasOption = AliasOption.NOT_ALLOWED
-    ) -> Iterator[Expression]:
+    ) -> List[Expression]:
+        """Parse a comma-separated list of expressions with deferred variable
+        registration.  Aliases set by earlier expressions in the same clause
+        won't shadow variables needed by later expressions
+        (e.g. ``RETURN a.x AS a, a.y AS b``)."""
+        parsed = list(self.__parse_expressions(alias_option))
+        for expression, variable_name in parsed:
+            if variable_name is not None:
+                self._state.variables[variable_name] = expression
+        return [expression for expression, _ in parsed]
+
+    def __parse_expressions(
+        self, alias_option: AliasOption
+    ) -> Iterator[Tuple[Expression, Optional[str]]]:
         while True:
             expression = self._parse_expression()
             if expression is not None:
+                variable_name: Optional[str] = None
                 alias = self._parse_alias()
                 if isinstance(expression.first_child(), Reference) and alias is None:
                     reference = expression.first_child()
                     assert isinstance(reference, Reference)  # For type narrowing
                     expression.set_alias(reference.identifier)
-                    self._state.variables[reference.identifier] = expression
+                    variable_name = reference.identifier
                 elif (alias_option == AliasOption.REQUIRED and
                       alias is None and
                       not isinstance(expression.first_child(), Reference)):
@@ -758,8 +823,8 @@ class Parser(BaseParser):
                     raise ValueError("Alias not allowed")
                 elif alias_option in (AliasOption.OPTIONAL, AliasOption.REQUIRED) and alias is not None:
                     expression.set_alias(alias.get_alias())
-                    self._state.variables[alias.get_alias()] = expression
-                yield expression
+                    variable_name = alias.get_alias()
+                yield expression, variable_name
             else:
                 break
             self._skip_whitespace_and_comments()

@@ -53,6 +53,8 @@ import AggregatedWith from "./operations/aggregated_with";
 import Call from "./operations/call";
 import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
+import DeleteNode from "./operations/delete_node";
+import DeleteRelationship from "./operations/delete_relationship";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
@@ -186,9 +188,13 @@ class Parser extends BaseParser {
             !(operation instanceof Return) &&
             !(operation instanceof Call) &&
             !(operation instanceof CreateNode) &&
-            !(operation instanceof CreateRelationship)
+            !(operation instanceof CreateRelationship) &&
+            !(operation instanceof DeleteNode) &&
+            !(operation instanceof DeleteRelationship)
         ) {
-            throw new Error("Last statement must be a RETURN, WHERE, CALL, or CREATE statement");
+            throw new Error(
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement"
+            );
         }
         return root;
     }
@@ -201,6 +207,7 @@ class Parser extends BaseParser {
             this.parseLoad() ||
             this.parseCall() ||
             this.parseCreate() ||
+            this.parseDelete() ||
             this.parseMatch()
         );
     }
@@ -217,7 +224,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        const expressions = Array.from(this.parseExpressions(AliasOption.REQUIRED));
+        const expressions = this.parseExpressions(AliasOption.REQUIRED);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
@@ -272,7 +279,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        const expressions = Array.from(this.parseExpressions(AliasOption.OPTIONAL));
+        const expressions = this.parseExpressions(AliasOption.OPTIONAL);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
@@ -386,7 +393,7 @@ class Parser extends BaseParser {
             this.expectPreviousTokenToBeWhitespaceOrComment();
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
-            const expressions = Array.from(this.parseExpressions(AliasOption.OPTIONAL));
+            const expressions = this.parseExpressions(AliasOption.OPTIONAL);
             if (expressions.length === 0) {
                 throw new Error("Expected at least one expression");
             }
@@ -457,6 +464,60 @@ class Parser extends BaseParser {
             create = new CreateNode(node, query);
         }
         return create;
+    }
+
+    private parseDelete(): DeleteNode | DeleteRelationship | null {
+        if (!this.token.isDelete()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: Node | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+            relationship.source = node;
+            relationship.target = target;
+        }
+        let result: DeleteNode | DeleteRelationship;
+        if (relationship !== null) {
+            result = new DeleteRelationship(relationship);
+        } else {
+            result = new DeleteNode(node);
+        }
+        return result;
     }
 
     private parseMatch(): Match | null {
@@ -842,36 +903,52 @@ class Parser extends BaseParser {
         return new OrderBy(fields);
     }
 
-    private *parseExpressions(
-        alias_option: AliasOption = AliasOption.NOT_ALLOWED
-    ): IterableIterator<Expression> {
+    /**
+     * Parses a comma-separated list of expressions with deferred variable
+     * registration.  Aliases set by earlier expressions in the same clause
+     * won't shadow variables needed by later expressions
+     * (e.g. `RETURN a.x AS a, a.y AS b`).
+     */
+    private parseExpressions(alias_option: AliasOption = AliasOption.NOT_ALLOWED): Expression[] {
+        const parsed = Array.from(this._parseExpressions(alias_option));
+        for (const [expression, variableName] of parsed) {
+            if (variableName !== null) {
+                this._state.variables.set(variableName, expression);
+            }
+        }
+        return parsed.map(([expression]) => expression);
+    }
+
+    private *_parseExpressions(
+        alias_option: AliasOption
+    ): IterableIterator<[Expression, string | null]> {
         while (true) {
             const expression: Expression | null = this.parseExpression();
-            if (expression !== null) {
-                const alias = this.parseAlias();
-                if (expression.firstChild() instanceof Reference && alias === null) {
-                    const reference: Reference = expression.firstChild() as Reference;
-                    expression.setAlias(reference.identifier);
-                    this._state.variables.set(reference.identifier, expression);
-                } else if (
-                    alias_option === AliasOption.REQUIRED &&
-                    alias === null &&
-                    !(expression.firstChild() instanceof Reference)
-                ) {
-                    throw new Error("Alias required");
-                } else if (alias_option === AliasOption.NOT_ALLOWED && alias !== null) {
-                    throw new Error("Alias not allowed");
-                } else if (
-                    [AliasOption.OPTIONAL, AliasOption.REQUIRED].includes(alias_option) &&
-                    alias !== null
-                ) {
-                    expression.setAlias(alias.getAlias());
-                    this._state.variables.set(alias.getAlias(), expression);
-                }
-                yield expression;
-            } else {
+            if (expression === null) {
                 break;
             }
+            let variableName: string | null = null;
+            const alias = this.parseAlias();
+            if (expression.firstChild() instanceof Reference && alias === null) {
+                const reference: Reference = expression.firstChild() as Reference;
+                expression.setAlias(reference.identifier);
+                variableName = reference.identifier;
+            } else if (
+                alias_option === AliasOption.REQUIRED &&
+                alias === null &&
+                !(expression.firstChild() instanceof Reference)
+            ) {
+                throw new Error("Alias required");
+            } else if (alias_option === AliasOption.NOT_ALLOWED && alias !== null) {
+                throw new Error("Alias not allowed");
+            } else if (
+                [AliasOption.OPTIONAL, AliasOption.REQUIRED].includes(alias_option) &&
+                alias !== null
+            ) {
+                expression.setAlias(alias.getAlias());
+                variableName = alias.getAlias();
+            }
+            yield [expression, variableName];
             this.skipWhitespaceAndComments();
             if (!this.token.isComma()) {
                 break;
@@ -1299,7 +1376,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        func.parameters = Array.from(this.parseExpressions(AliasOption.NOT_ALLOWED));
+        func.parameters = this.parseExpressions(AliasOption.NOT_ALLOWED);
         this.skipWhitespaceAndComments();
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected right parenthesis");
@@ -1333,7 +1410,7 @@ class Parser extends BaseParser {
         this.setNextToken(); // skip function name
         this.setNextToken(); // skip left parenthesis
         this.skipWhitespaceAndComments();
-        asyncFunc.parameters = Array.from(this.parseExpressions(AliasOption.NOT_ALLOWED));
+        asyncFunc.parameters = this.parseExpressions(AliasOption.NOT_ALLOWED);
         this.skipWhitespaceAndComments();
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected right parenthesis");

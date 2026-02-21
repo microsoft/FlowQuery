@@ -48,6 +48,7 @@ from .size import Size
 from .split import Split
 from .string_distance import StringDistance
 from .stringify import Stringify
+from .substring import Substring
 from .sum import Sum
 from .tail import Tail
 from .time_ import Time
@@ -107,6 +108,7 @@ __all__ = [
     "Split",
     "StringDistance",
     "Stringify",
+    "Substring",
     "Tail",
     "Time",
     "Timestamp",

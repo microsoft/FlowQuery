@@ -1325,3 +1325,36 @@ test("ORDER BY with expression and LIMIT parses correctly", () => {
     );
     expect(ast).toBeDefined();
 });
+
+test("Test list comprehension with mapping", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN [n IN [1, 2, 3] | n * 2] AS doubled");
+    expect(ast.print()).toContain("ListComprehension");
+});
+
+test("Test list comprehension with WHERE and mapping", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN [n IN [1, 2, 3] WHERE n > 1 | n * 2] AS result");
+    expect(ast.print()).toContain("ListComprehension");
+    expect(ast.print()).toContain("Where");
+});
+
+test("Test list comprehension with WHERE only", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN [n IN [1, 2, 3, 4] WHERE n > 2] AS filtered");
+    expect(ast.print()).toContain("ListComprehension");
+    expect(ast.print()).toContain("Where");
+});
+
+test("Test list comprehension identity", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN [n IN [1, 2, 3]] AS result");
+    expect(ast.print()).toContain("ListComprehension");
+});
+
+test("Regular JSON array still parses correctly alongside list comprehension", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN [1, 2, 3] AS arr");
+    expect(ast.print()).toContain("JSONArray");
+    expect(ast.print()).not.toContain("ListComprehension");
+});

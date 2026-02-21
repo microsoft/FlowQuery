@@ -1235,3 +1235,39 @@ class TestParser:
             "return x order by toLower(x) asc limit 2"
         )
         assert ast is not None
+
+    def test_list_comprehension_with_mapping(self):
+        """Test list comprehension with mapping parses correctly."""
+        parser = Parser()
+        ast = parser.parse("RETURN [n IN [1, 2, 3] | n * 2] AS doubled")
+        assert "ListComprehension" in ast.print()
+
+    def test_list_comprehension_with_where_and_mapping(self):
+        """Test list comprehension with WHERE and mapping."""
+        parser = Parser()
+        ast = parser.parse("RETURN [n IN [1, 2, 3] WHERE n > 1 | n * 2] AS result")
+        output = ast.print()
+        assert "ListComprehension" in output
+        assert "Where" in output
+
+    def test_list_comprehension_with_where_only(self):
+        """Test list comprehension with WHERE only."""
+        parser = Parser()
+        ast = parser.parse("RETURN [n IN [1, 2, 3, 4] WHERE n > 2] AS filtered")
+        output = ast.print()
+        assert "ListComprehension" in output
+        assert "Where" in output
+
+    def test_list_comprehension_identity(self):
+        """Test list comprehension identity."""
+        parser = Parser()
+        ast = parser.parse("RETURN [n IN [1, 2, 3]] AS result")
+        assert "ListComprehension" in ast.print()
+
+    def test_regular_json_array_still_parses(self):
+        """Regular JSON array still parses correctly alongside list comprehension."""
+        parser = Parser()
+        ast = parser.parse("RETURN [1, 2, 3] AS arr")
+        output = ast.print()
+        assert "JSONArray" in output
+        assert "ListComprehension" not in output

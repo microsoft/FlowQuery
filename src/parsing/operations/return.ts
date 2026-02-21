@@ -49,6 +49,10 @@ class Return extends Projection {
             const value: any = typeof raw === "object" && raw !== null ? structuredClone(raw) : raw;
             record.set(alias, value);
         }
+        // Capture sort-key values while expression bindings are still live.
+        if (this._orderBy !== null) {
+            this._orderBy.captureSortKeys();
+        }
         this._results.push(Object.fromEntries(record));
         if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();

@@ -876,11 +876,10 @@ class Parser extends BaseParser {
         this.expectAndSkipWhitespaceAndComments();
         const fields: SortField[] = [];
         while (true) {
-            if (!this.token.isIdentifierOrKeyword()) {
-                throw new Error("Expected field name in ORDER BY");
+            const expression: Expression | null = this.parseExpression();
+            if (expression === null) {
+                throw new Error("Expected expression in ORDER BY");
             }
-            const field = this.token.value!;
-            this.setNextToken();
             this.skipWhitespaceAndComments();
             let direction: "asc" | "desc" = "asc";
             if (this.token.isAsc()) {
@@ -892,7 +891,7 @@ class Parser extends BaseParser {
                 this.setNextToken();
                 this.skipWhitespaceAndComments();
             }
-            fields.push({ field, direction });
+            fields.push({ direction, expression });
             if (this.token.isComma()) {
                 this.setNextToken();
                 this.skipWhitespaceAndComments();

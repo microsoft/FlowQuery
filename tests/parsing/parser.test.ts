@@ -1269,3 +1269,59 @@ test("OPTIONAL without MATCH throws error", () => {
     const parser = new Parser();
     expect(() => parser.parse("OPTIONAL RETURN 1")).toThrow("Expected MATCH after OPTIONAL");
 });
+
+// ORDER BY expression tests
+
+test("ORDER BY with simple identifier parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse("unwind [1, 2] as x return x order by x");
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with property access parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind [{name: 'Bob'}, {name: 'Alice'}] as person return person.name as name order by person.name asc"
+    );
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with function call parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind ['HELLO', 'WORLD'] as word return word order by toLower(word) asc"
+    );
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with nested function calls parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind ['Alice', 'Bob'] as name return name order by string_distance(toLower(name), toLower('alice')) asc"
+    );
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with arithmetic expression parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind [{a: 3, b: 1}, {a: 1, b: 5}] as item return item.a as a, item.b as b order by item.a + item.b desc"
+    );
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with multiple expression fields parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind [{a: 1, b: 2}] as item return item.a as a, item.b as b order by toLower(item.a) asc, item.b desc"
+    );
+    expect(ast).toBeDefined();
+});
+
+test("ORDER BY with expression and LIMIT parses correctly", () => {
+    const parser = new Parser();
+    const ast = parser.parse(
+        "unwind ['c', 'a', 'b'] as x return x order by toLower(x) asc limit 2"
+    );
+    expect(ast).toBeDefined();
+});

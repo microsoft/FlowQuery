@@ -1172,3 +1172,66 @@ class TestParser:
         parser = Parser()
         with pytest.raises(Exception, match="Expected MATCH after OPTIONAL"):
             parser.parse("OPTIONAL RETURN 1")
+
+    # ORDER BY expression tests
+
+    def test_order_by_simple_identifier(self):
+        """Test ORDER BY with a simple identifier parses correctly."""
+        parser = Parser()
+        ast = parser.parse("unwind [1, 2] as x return x order by x")
+        assert ast is not None
+
+    def test_order_by_property_access(self):
+        """Test ORDER BY with property access parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind [{name: 'Bob'}, {name: 'Alice'}] as person "
+            "return person.name as name order by person.name asc"
+        )
+        assert ast is not None
+
+    def test_order_by_function_call(self):
+        """Test ORDER BY with function call parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind ['HELLO', 'WORLD'] as word "
+            "return word order by toLower(word) asc"
+        )
+        assert ast is not None
+
+    def test_order_by_nested_function_calls(self):
+        """Test ORDER BY with nested function calls parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind ['Alice', 'Bob'] as name "
+            "return name order by string_distance(toLower(name), toLower('alice')) asc"
+        )
+        assert ast is not None
+
+    def test_order_by_arithmetic_expression(self):
+        """Test ORDER BY with arithmetic expression parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind [{a: 3, b: 1}, {a: 1, b: 5}] as item "
+            "return item.a as a, item.b as b order by item.a + item.b desc"
+        )
+        assert ast is not None
+
+    def test_order_by_multiple_expression_fields(self):
+        """Test ORDER BY with multiple expression fields parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind [{a: 1, b: 2}] as item "
+            "return item.a as a, item.b as b "
+            "order by toLower(item.a) asc, item.b desc"
+        )
+        assert ast is not None
+
+    def test_order_by_expression_with_limit(self):
+        """Test ORDER BY with expression and LIMIT parses correctly."""
+        parser = Parser()
+        ast = parser.parse(
+            "unwind ['c', 'a', 'b'] as x "
+            "return x order by toLower(x) asc limit 2"
+        )
+        assert ast is not None

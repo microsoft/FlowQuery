@@ -767,10 +767,9 @@ class Parser(BaseParser):
         self._expect_and_skip_whitespace_and_comments()
         fields: list[SortField] = []
         while True:
-            if not self.token.is_identifier_or_keyword():
-                raise ValueError("Expected field name in ORDER BY")
-            field = self.token.value
-            self.set_next_token()
+            expression = self._parse_expression()
+            if expression is None:
+                raise ValueError("Expected expression in ORDER BY")
             self._skip_whitespace_and_comments()
             direction = "asc"
             if self.token.is_asc():
@@ -781,7 +780,7 @@ class Parser(BaseParser):
                 direction = "desc"
                 self.set_next_token()
                 self._skip_whitespace_and_comments()
-            fields.append(SortField(field, direction))
+            fields.append(SortField(expression, direction))
             if self.token.is_comma():
                 self.set_next_token()
                 self._skip_whitespace_and_comments()

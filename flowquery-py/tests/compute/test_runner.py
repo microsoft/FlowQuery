@@ -4409,6 +4409,133 @@ class TestRunner:
         assert results[4] == {"x": 3}
 
     @pytest.mark.asyncio
+    async def test_order_by_with_property_access_expression(self):
+        """Test ORDER BY with property access expression."""
+        runner = Runner(
+            "unwind [{name: 'Charlie', age: 30}, {name: 'Alice', age: 25}, {name: 'Bob', age: 35}] as person "
+            "return person.name as name, person.age as age "
+            "order by person.name asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "age": 25}
+        assert results[1] == {"name": "Bob", "age": 35}
+        assert results[2] == {"name": "Charlie", "age": 30}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_function_expression(self):
+        """Test ORDER BY with function expression."""
+        runner = Runner(
+            "unwind ['BANANA', 'apple', 'Cherry'] as fruit "
+            "return fruit "
+            "order by toLower(fruit)"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"fruit": "apple"}
+        assert results[1] == {"fruit": "BANANA"}
+        assert results[2] == {"fruit": "Cherry"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_function_expression_descending(self):
+        """Test ORDER BY with function expression descending."""
+        runner = Runner(
+            "unwind ['BANANA', 'apple', 'Cherry'] as fruit "
+            "return fruit "
+            "order by toLower(fruit) desc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"fruit": "Cherry"}
+        assert results[1] == {"fruit": "BANANA"}
+        assert results[2] == {"fruit": "apple"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_nested_function_expression(self):
+        """Test ORDER BY with nested function expression."""
+        runner = Runner(
+            "unwind ['Alice', 'Bob', 'ALICE', 'bob'] as name "
+            "return name "
+            "order by string_distance(toLower(name), toLower('alice')) asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        # 'Alice' and 'ALICE' have distance 0 from 'alice', should come first
+        assert results[0]["name"] == "Alice"
+        assert results[1]["name"] == "ALICE"
+        # 'Bob' and 'bob' have higher distance from 'alice'
+        assert results[2]["name"] == "Bob"
+        assert results[3]["name"] == "bob"
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_arithmetic_expression(self):
+        """Test ORDER BY with arithmetic expression."""
+        runner = Runner(
+            "unwind [{a: 3, b: 1}, {a: 1, b: 5}, {a: 2, b: 2}] as item "
+            "return item.a as a, item.b as b "
+            "order by item.a + item.b asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"a": 3, "b": 1}  # sum = 4
+        assert results[1] == {"a": 2, "b": 2}  # sum = 4
+        assert results[2] == {"a": 1, "b": 5}  # sum = 6
+
+    @pytest.mark.asyncio
+    async def test_order_by_expression_does_not_leak_synthetic_keys(self):
+        """Test ORDER BY expression does not leak synthetic keys."""
+        runner = Runner(
+            "unwind ['B', 'a', 'C'] as x "
+            "return x "
+            "order by toLower(x) asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        # Results should only contain 'x', no extra keys
+        for r in results:
+            assert list(r.keys()) == ["x"]
+        assert results[0] == {"x": "a"}
+        assert results[1] == {"x": "B"}
+        assert results[2] == {"x": "C"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_expression_and_limit(self):
+        """Test ORDER BY with expression and limit."""
+        runner = Runner(
+            "unwind ['BANANA', 'apple', 'Cherry', 'date', 'ELDERBERRY'] as fruit "
+            "return fruit "
+            "order by toLower(fruit) asc "
+            "limit 3"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"fruit": "apple"}
+        assert results[1] == {"fruit": "BANANA"}
+        assert results[2] == {"fruit": "Cherry"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_mixed_simple_and_expression_fields(self):
+        """Test ORDER BY with mixed simple and expression fields."""
+        runner = Runner(
+            "unwind [{name: 'Alice', score: 3}, {name: 'Alice', score: 1}, {name: 'Bob', score: 2}] as item "
+            "return item.name as name, item.score as score "
+            "order by name asc, item.score desc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "score": 3}  # Alice, score 3 desc
+        assert results[1] == {"name": "Alice", "score": 1}  # Alice, score 1 desc
+        assert results[2] == {"name": "Bob", "score": 2}    # Bob
+
+    @pytest.mark.asyncio
     async def test_delete_virtual_node_operation(self):
         """Test delete virtual node operation."""
         db = Database.get_instance()

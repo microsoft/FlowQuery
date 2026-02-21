@@ -34,6 +34,8 @@ class Range(Function):
     def value(self) -> Any:
         start = self.get_children()[0].value()
         end = self.get_children()[1].value()
+        if start is None or end is None:
+            return None
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
             raise ValueError("Invalid arguments for range function")
         return list(range(int(start), int(end) + 1))

@@ -1,6 +1,6 @@
 import ASTNode from "../ast_node";
-import Function from "./function";
 import String from "../expressions/string";
+import Function from "./function";
 import { FunctionDef } from "./function_metadata";
 
 @FunctionDef({
@@ -8,10 +8,15 @@ import { FunctionDef } from "./function_metadata";
     category: "scalar",
     parameters: [
         { name: "text", description: "String to split", type: "string" },
-        { name: "delimiter", description: "Delimiter to split by", type: "string" }
+        { name: "delimiter", description: "Delimiter to split by", type: "string" },
     ],
-    output: { description: "Array of string parts", type: "array", items: { type: "string" }, example: ["a", "b", "c"] },
-    examples: ["WITH 'a,b,c' AS s RETURN split(s, ',')"]
+    output: {
+        description: "Array of string parts",
+        type: "array",
+        items: { type: "string" },
+        example: ["a", "b", "c"],
+    },
+    examples: ["WITH 'a,b,c' AS s RETURN split(s, ',')"],
 })
 class Split extends Function {
     constructor() {
@@ -19,7 +24,7 @@ class Split extends Function {
         this._expectedParameterCount = 2;
     }
     public set parameters(nodes: ASTNode[]) {
-        if(nodes.length === 1) {
+        if (nodes.length === 1) {
             nodes.push(new String(""));
         }
         super.parameters = nodes;
@@ -27,6 +32,9 @@ class Split extends Function {
     public value(): any {
         const str = this.getChildren()[0].value();
         const delimiter = this.getChildren()[1].value();
+        if (str === null || str === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof delimiter !== "string") {
             throw new Error("Invalid arguments for split function");
         }

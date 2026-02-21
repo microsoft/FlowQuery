@@ -1,5 +1,7 @@
 """String distance function using Levenshtein distance."""
 
+from typing import Optional
+
 from .function import Function
 from .function_metadata import FunctionDef
 
@@ -80,9 +82,11 @@ class StringDistance(Function):
         super().__init__("string_distance")
         self._expected_parameter_count = 2
 
-    def value(self) -> float:
+    def value(self) -> Optional[float]:
         str1 = self.get_children()[0].value()
         str2 = self.get_children()[1].value()
+        if str1 is None or str2 is None:
+            return None
         if not isinstance(str1, str) or not isinstance(str2, str):
             raise ValueError("Invalid arguments for string_distance function: both arguments must be strings")
         return _levenshtein_distance(str1, str2)

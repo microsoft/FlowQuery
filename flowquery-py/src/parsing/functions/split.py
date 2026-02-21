@@ -47,6 +47,8 @@ class Split(Function):
     def value(self) -> Any:
         text = self.get_children()[0].value()
         delimiter = self.get_children()[1].value()
+        if text is None:
+            return None
         if not isinstance(text, str) or not isinstance(delimiter, str):
             raise ValueError("Invalid arguments for split function")
         return text.split(delimiter)

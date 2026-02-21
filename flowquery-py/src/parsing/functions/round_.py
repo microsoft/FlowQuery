@@ -27,6 +27,8 @@ class Round(Function):
 
     def value(self) -> Any:
         val = self.get_children()[0].value()
+        if val is None:
+            return None
         if not isinstance(val, (int, float)):
             raise ValueError("Invalid argument for round function")
         return round(val)

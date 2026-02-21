@@ -27,6 +27,8 @@ class Size(Function):
 
     def value(self) -> Any:
         val = self.get_children()[0].value()
+        if val is None:
+            return None
         if not isinstance(val, (list, str)):
             raise ValueError("Invalid argument for size function")
         return len(val)

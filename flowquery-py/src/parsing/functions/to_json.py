@@ -28,6 +28,8 @@ class ToJson(Function):
 
     def value(self) -> Any:
         text = self.get_children()[0].value()
+        if text is None:
+            return None
         if not isinstance(text, str):
             raise ValueError("Invalid arguments for tojson function")
         return json.loads(text)

@@ -758,6 +758,120 @@ test("Test substring function with zero length", async () => {
     expect(results[0]).toEqual({ result: "" });
 });
 
+// --- Null propagation tests ---
+
+test("Test toLower with null returns null", async () => {
+    const runner = new Runner("RETURN toLower(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test trim with null returns null", async () => {
+    const runner = new Runner("RETURN trim(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test replace with null returns null", async () => {
+    const runner = new Runner("RETURN replace(null, 'a', 'b') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test substring with null returns null", async () => {
+    const runner = new Runner("RETURN substring(null, 0, 3) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test split with null returns null", async () => {
+    const runner = new Runner("RETURN split(null, ',') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test size with null returns null", async () => {
+    const runner = new Runner("RETURN size(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test round with null returns null", async () => {
+    const runner = new Runner("RETURN round(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test join with null returns null", async () => {
+    const runner = new Runner("RETURN join(null, ',') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test string_distance with null returns null", async () => {
+    const runner = new Runner("RETURN string_distance(null, 'hello') as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test stringify with null returns null", async () => {
+    const runner = new Runner("RETURN stringify(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test toJson with null returns null", async () => {
+    const runner = new Runner("RETURN tojson(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test range with null returns null", async () => {
+    const runner = new Runner("RETURN range(null, 5) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test toString with null returns null", async () => {
+    const runner = new Runner("RETURN toString(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test keys with null returns null", async () => {
+    const runner = new Runner("RETURN keys(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
 test("Test associative array with key which is keyword", async () => {
     const runner = new Runner("RETURN {return: 1} as aa");
     await runner.run();

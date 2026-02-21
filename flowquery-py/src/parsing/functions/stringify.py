@@ -42,6 +42,8 @@ class Stringify(Function):
     def value(self) -> Any:
         val = self.get_children()[0].value()
         indent = int(self.get_children()[1].value())
+        if val is None:
+            return None
         if not isinstance(val, (dict, list)):
             raise ValueError("Invalid argument for stringify function")
         return json.dumps(val, indent=indent, default=str)

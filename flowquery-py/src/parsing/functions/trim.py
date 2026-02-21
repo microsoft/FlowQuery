@@ -30,6 +30,8 @@ class Trim(Function):
 
     def value(self) -> Any:
         val = self.get_children()[0].value()
+        if val is None:
+            return None
         if not isinstance(val, str):
             raise ValueError("Invalid argument for trim function: expected a string")
         return val.strip()

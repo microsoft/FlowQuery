@@ -35,12 +35,12 @@ class RelationshipMatchCollector:
         else:
             actual_type = default_type
         rel_props: Dict[str, Any] = (rel_data.properties() or {}) if rel_data else {}
-        match: RelationshipMatchRecord = {
-            "type": actual_type,
-            "startNode": start_node_value or {},
-            "endNode": None,
-            "properties": rel_props,
-        }
+        match = RelationshipMatchRecord(
+            type=actual_type,
+            startNode=start_node_value or {},
+            endNode=None,
+            properties=rel_props,
+        )
         self._matches.append(match)
         self._node_ids.append(traversal_id)
         return match

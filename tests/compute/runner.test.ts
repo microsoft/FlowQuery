@@ -345,6 +345,72 @@ test("Test predicate with return expression", async () => {
     expect(results[0]).toEqual({ sum: 49 });
 });
 
+test("Test list comprehension with mapping", async () => {
+    const runner = new Runner("RETURN [n IN [1, 2, 3] | n * 2] AS doubled");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ doubled: [2, 4, 6] });
+});
+
+test("Test list comprehension with WHERE filter", async () => {
+    const runner = new Runner("RETURN [n IN [1, 2, 3, 4, 5] WHERE n > 2] AS filtered");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ filtered: [3, 4, 5] });
+});
+
+test("Test list comprehension with WHERE and mapping", async () => {
+    const runner = new Runner("RETURN [n IN [1, 2, 3, 4] WHERE n > 1 | n ^ 2] AS result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [4, 9, 16] });
+});
+
+test("Test list comprehension identity (no WHERE, no mapping)", async () => {
+    const runner = new Runner("RETURN [n IN [10, 20, 30]] AS result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [10, 20, 30] });
+});
+
+test("Test list comprehension with variable reference", async () => {
+    const runner = new Runner("WITH [1, 2, 3] AS nums RETURN [n IN nums | n + 10] AS result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [11, 12, 13] });
+});
+
+test("Test list comprehension with property access", async () => {
+    const runner = new Runner(
+        'WITH [{name: "Alice", age: 30}, {name: "Bob", age: 25}] AS people RETURN [p IN people | p.name] AS names'
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ names: ["Alice", "Bob"] });
+});
+
+test("Test list comprehension with function source", async () => {
+    const runner = new Runner("RETURN [n IN range(1, 5) WHERE n > 3 | n * 10] AS result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [40, 50] });
+});
+
+test("Test list comprehension with size", async () => {
+    const runner = new Runner("RETURN size([n IN [1, 2, 3, 4, 5] WHERE n > 2]) AS count");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ count: 3 });
+});
+
 test("Test range function", async () => {
     const runner = new Runner("RETURN range(1, 3) as range");
     await runner.run();

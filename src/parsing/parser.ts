@@ -19,6 +19,7 @@ import Context from "./context";
 import AssociativeArray from "./data_structures/associative_array";
 import JSONArray from "./data_structures/json_array";
 import KeyValuePair from "./data_structures/key_value_pair";
+import ListComprehension from "./data_structures/list_comprehension";
 import Lookup from "./data_structures/lookup";
 import RangeLookup from "./data_structures/range_lookup";
 import Expression from "./expressions/expression";
@@ -1007,6 +1008,14 @@ class Parser extends BaseParser {
             const lookup = this.parseLookup(sub);
             expression.addNode(lookup);
             return true;
+        } else if (this.token.isOpeningBracket() && this.looksLikeListComprehension()) {
+            const listComp = this.parseListComprehension();
+            if (listComp === null) {
+                throw new Error("Expected list comprehension");
+            }
+            const lookup = this.parseLookup(listComp);
+            expression.addNode(lookup);
+            return true;
         } else if (this.token.isOpeningBrace() || this.token.isOpeningBracket()) {
             const json = this.parseJSON();
             if (json === null) {
@@ -1516,6 +1525,99 @@ class Parser extends BaseParser {
             }
         }
         return f_string;
+    }
+
+    /**
+     * Peeks ahead from an opening bracket `[` to determine whether the
+     * upcoming tokens form a list comprehension (e.g. `[n IN list | n.name]`)
+     * rather than a plain JSON array literal (e.g. `[1, 2, 3]`).
+     *
+     * The heuristic is:
+     *   `[` identifier `IN` → list comprehension
+     */
+    private looksLikeListComprehension(): boolean {
+        const savedIndex = this.tokenIndex;
+        this.setNextToken(); // skip '['
+        this.skipWhitespaceAndComments();
+
+        if (!this.token.isIdentifierOrKeyword()) {
+            this.tokenIndex = savedIndex;
+            return false;
+        }
+
+        this.setNextToken(); // skip identifier
+        this.skipWhitespaceAndComments();
+        const result = this.token.isIn();
+        this.tokenIndex = savedIndex;
+        return result;
+    }
+
+    /**
+     * Parses a list comprehension expression.
+     *
+     * Syntax: `[variable IN list [WHERE condition] [| expression]]`
+     *
+     * @returns A ListComprehension node, or null if the current position
+     *          does not contain a valid list comprehension
+     */
+    private parseListComprehension(): ListComprehension | null {
+        if (!this.token.isOpeningBracket()) return null;
+
+        const listComp = new ListComprehension();
+        this.setNextToken(); // skip '['
+        this.skipWhitespaceAndComments();
+
+        // Parse iteration variable
+        if (!this.token.isIdentifierOrKeyword()) {
+            throw new Error("Expected identifier");
+        }
+        const reference = new Reference(this.token.value || "");
+        this._state.variables.set(reference.identifier, reference);
+        listComp.addChild(reference);
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Parse IN keyword
+        if (!this.token.isIn()) {
+            throw new Error("Expected IN");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Parse source array expression
+        const arrayExpr = this.parseExpression();
+        if (arrayExpr === null) {
+            throw new Error("Expected expression");
+        }
+        listComp.addChild(arrayExpr);
+
+        // Optional WHERE clause
+        this.skipWhitespaceAndComments();
+        const where = this.parseWhere();
+        if (where !== null) {
+            listComp.addChild(where);
+        }
+
+        // Optional | mapping expression
+        this.skipWhitespaceAndComments();
+        if (this.token.isPipe()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            const returnExpr = this.parseExpression();
+            if (returnExpr === null) {
+                throw new Error("Expected expression after |");
+            }
+            listComp.addChild(returnExpr);
+        }
+
+        this.skipWhitespaceAndComments();
+        if (!this.token.isClosingBracket()) {
+            throw new Error("Expected closing bracket");
+        }
+        this.setNextToken();
+
+        this._state.variables.delete(reference.identifier);
+        return listComp;
     }
 
     private parseJSON(): AssociativeArray | JSONArray {

@@ -407,6 +407,83 @@ class TestRunner:
         assert results[0] == {"range": [1, 2, 3]}
 
     @pytest.mark.asyncio
+    async def test_list_comprehension_with_mapping(self):
+        """Test list comprehension with mapping expression."""
+        runner = Runner("RETURN [n IN [1, 2, 3] | n * 2] AS doubled")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"doubled": [2, 4, 6]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_where_filter(self):
+        """Test list comprehension with WHERE filter."""
+        runner = Runner("RETURN [n IN [1, 2, 3, 4, 5] WHERE n > 2] AS filtered")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"filtered": [3, 4, 5]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_where_and_mapping(self):
+        """Test list comprehension with WHERE and mapping."""
+        runner = Runner("RETURN [n IN [1, 2, 3, 4] WHERE n > 1 | n ^ 2] AS result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [4, 9, 16]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_identity(self):
+        """Test list comprehension identity (no WHERE, no mapping)."""
+        runner = Runner("RETURN [n IN [10, 20, 30]] AS result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [10, 20, 30]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_variable_reference(self):
+        """Test list comprehension with variable reference."""
+        runner = Runner("WITH [1, 2, 3] AS nums RETURN [n IN nums | n + 10] AS result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [11, 12, 13]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_property_access(self):
+        """Test list comprehension with property access."""
+        runner = Runner(
+            'WITH [{name: "Alice", age: 30}, {name: "Bob", age: 25}] AS people '
+            'RETURN [p IN people | p.name] AS names'
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"names": ["Alice", "Bob"]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_function_source(self):
+        """Test list comprehension with function as source."""
+        runner = Runner("RETURN [n IN range(1, 5) WHERE n > 3 | n * 10] AS result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [40, 50]}
+
+    @pytest.mark.asyncio
+    async def test_list_comprehension_with_size(self):
+        """Test list comprehension composed with size."""
+        runner = Runner(
+            "RETURN size([n IN [1, 2, 3, 4, 5] WHERE n > 2]) AS count"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"count": 3}
+
+    @pytest.mark.asyncio
     async def test_range_function_with_unwind_and_case(self):
         """Test range function with unwind and case."""
         runner = Runner(

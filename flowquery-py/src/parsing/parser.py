@@ -23,6 +23,7 @@ from .components.post import Post
 from .data_structures.associative_array import AssociativeArray
 from .data_structures.json_array import JSONArray
 from .data_structures.key_value_pair import KeyValuePair
+from .data_structures.list_comprehension import ListComprehension
 from .data_structures.lookup import Lookup
 from .data_structures.range_lookup import RangeLookup
 from .expressions.expression import Expression
@@ -877,6 +878,13 @@ class Parser(BaseParser):
             lookup = self._parse_lookup(sub)
             expression.add_node(lookup)
             return True
+        elif self.token.is_opening_bracket() and self._looks_like_list_comprehension():
+            list_comp = self._parse_list_comprehension()
+            if list_comp is None:
+                raise ValueError("Expected list comprehension")
+            lookup = self._parse_lookup(list_comp)
+            expression.add_node(lookup)
+            return True
         elif self.token.is_opening_brace() or self.token.is_opening_bracket():
             json = self._parse_json()
             if json is None:
@@ -1289,6 +1297,84 @@ class Parser(BaseParser):
             if not self.token.is_comma():
                 break
             self.set_next_token()
+
+    def _looks_like_list_comprehension(self) -> bool:
+        """Peek ahead from an opening bracket to determine whether the
+        upcoming tokens form a list comprehension (e.g. ``[n IN list | n.name]``)
+        rather than a plain JSON array literal (e.g. ``[1, 2, 3]``).
+
+        The heuristic is:  ``[`` identifier ``IN`` -> list comprehension.
+        """
+        saved_index = self._token_index
+        self.set_next_token()  # skip '['
+        self._skip_whitespace_and_comments()
+
+        if not self.token.is_identifier_or_keyword():
+            self._token_index = saved_index
+            return False
+
+        self.set_next_token()  # skip identifier
+        self._skip_whitespace_and_comments()
+        result = self.token.is_in()
+        self._token_index = saved_index
+        return result
+
+    def _parse_list_comprehension(self) -> Optional[ListComprehension]:
+        """Parse a list comprehension expression.
+
+        Syntax: ``[variable IN list [WHERE condition] [| expression]]``
+        """
+        if not self.token.is_opening_bracket():
+            return None
+
+        list_comp = ListComprehension()
+        self.set_next_token()  # skip '['
+        self._skip_whitespace_and_comments()
+
+        # Parse iteration variable
+        if not self.token.is_identifier_or_keyword():
+            raise ValueError("Expected identifier")
+        reference = Reference(self.token.value or "")
+        self._state.variables[reference.identifier] = reference
+        list_comp.add_child(reference)
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Parse IN keyword
+        if not self.token.is_in():
+            raise ValueError("Expected IN")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Parse source array expression
+        array_expr = self._parse_expression()
+        if array_expr is None:
+            raise ValueError("Expected expression")
+        list_comp.add_child(array_expr)
+
+        # Optional WHERE clause
+        self._skip_whitespace_and_comments()
+        where = self._parse_where()
+        if where is not None:
+            list_comp.add_child(where)
+
+        # Optional | mapping expression
+        self._skip_whitespace_and_comments()
+        if self.token.is_pipe():
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            return_expr = self._parse_expression()
+            if return_expr is None:
+                raise ValueError("Expected expression after |")
+            list_comp.add_child(return_expr)
+
+        self._skip_whitespace_and_comments()
+        if not self.token.is_closing_bracket():
+            raise ValueError("Expected closing bracket")
+        self.set_next_token()
+
+        del self._state.variables[reference.identifier]
+        return list_comp
 
     def _parse_json(self) -> Optional[ASTNode]:
         if self.token.is_opening_brace():

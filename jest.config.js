@@ -4,5 +4,11 @@ module.exports = {
     transform: {
         "^.+.tsx?$": ["ts-jest", {}],
     },
-    testPathIgnorePatterns: ["/node_modules/", "/flowquery-vscode/test/", "/misc/apps/"],
+    testPathIgnorePatterns: [
+        "/node_modules/",
+        "/flowquery-py/",
+        "/flowquery-vscode/",
+        "/docs/",
+        "/misc/",
+    ],
 };

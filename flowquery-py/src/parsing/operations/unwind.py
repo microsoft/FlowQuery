@@ -25,6 +25,10 @@ class Unwind(Operation):
 
     async def run(self) -> None:
         expression_value = self.expression.value()
+        if expression_value is None:
+            if self.next:
+                self.next.reset()
+            return
         if not isinstance(expression_value, list):
             raise ValueError("Expected array")
         for item in expression_value:

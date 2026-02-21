@@ -1,5 +1,5 @@
-import Operation from "./operation";
 import Expression from "../expressions/expression";
+import Operation from "./operation";
 
 class Unwind extends Operation {
     private _value: any;
@@ -15,10 +15,14 @@ class Unwind extends Operation {
     }
     public async run(): Promise<void> {
         const expression = this.expression.value();
-        if(!(Array.isArray(expression))) {
-            throw new Error('Expected array');
+        if (expression === null || expression === undefined) {
+            this.next?.reset();
+            return;
         }
-        for(let i = 0; i < expression.length; i++) {
+        if (!Array.isArray(expression)) {
+            throw new Error("Expected array");
+        }
+        for (let i = 0; i < expression.length; i++) {
             this._value = expression[i];
             await this.next?.run();
         }

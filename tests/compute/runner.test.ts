@@ -4050,3 +4050,50 @@ test("Test delete virtual node leaves other nodes intact", async () => {
     expect(match.results.length).toBe(1);
     expect(match.results[0].n.name).toBe("Keep");
 });
+
+test("Test RETURN alias shadowing graph variable in same RETURN clause", async () => {
+    // Create User nodes with displayName, jobTitle, and department
+    await new Runner(`
+        CREATE VIRTUAL (:MentorUser) AS {
+            UNWIND [
+                {id: 1, displayName: 'Alice Smith', jobTitle: 'Senior Engineer', department: 'Engineering'},
+                {id: 2, displayName: 'Bob Jones', jobTitle: 'Staff Engineer', department: 'Engineering'},
+                {id: 3, displayName: 'Chloe Dubois', jobTitle: 'Junior Engineer', department: 'Engineering'}
+            ] AS record
+            RETURN record.id AS id, record.displayName AS displayName, record.jobTitle AS jobTitle, record.department AS department
+        }
+    `).run();
+
+    // Create MENTORS relationships
+    await new Runner(`
+        CREATE VIRTUAL (:MentorUser)-[:MENTORS]-(:MentorUser) AS {
+            UNWIND [
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+
+    // This query aliases mentor.displayName AS mentor, which shadows the graph variable "mentor".
+    // Subsequent expressions mentor.jobTitle and mentor.department should still reference the graph node.
+    const runner = new Runner(`
+        MATCH (mentor:MentorUser)-[:MENTORS]->(mentee:MentorUser)
+        WHERE mentee.displayName = "Chloe Dubois"
+        RETURN mentor.displayName AS mentor, mentor.jobTitle AS mentorJobTitle, mentor.department AS mentorDepartment
+    `);
+    await runner.run();
+    const results = runner.results;
+
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({
+        mentor: "Alice Smith",
+        mentorJobTitle: "Senior Engineer",
+        mentorDepartment: "Engineering",
+    });
+    expect(results[1]).toEqual({
+        mentor: "Bob Jones",
+        mentorJobTitle: "Staff Engineer",
+        mentorDepartment: "Engineering",
+    });
+});

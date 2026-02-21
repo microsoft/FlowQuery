@@ -224,7 +224,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        const expressions = Array.from(this.parseExpressions(AliasOption.REQUIRED));
+        const expressions = this.parseExpressions(AliasOption.REQUIRED);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
@@ -279,7 +279,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        const expressions = Array.from(this.parseExpressions(AliasOption.OPTIONAL));
+        const expressions = this.parseExpressions(AliasOption.OPTIONAL);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
@@ -393,7 +393,7 @@ class Parser extends BaseParser {
             this.expectPreviousTokenToBeWhitespaceOrComment();
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
-            const expressions = Array.from(this.parseExpressions(AliasOption.OPTIONAL));
+            const expressions = this.parseExpressions(AliasOption.OPTIONAL);
             if (expressions.length === 0) {
                 throw new Error("Expected at least one expression");
             }
@@ -903,36 +903,52 @@ class Parser extends BaseParser {
         return new OrderBy(fields);
     }
 
-    private *parseExpressions(
-        alias_option: AliasOption = AliasOption.NOT_ALLOWED
-    ): IterableIterator<Expression> {
+    /**
+     * Parses a comma-separated list of expressions with deferred variable
+     * registration.  Aliases set by earlier expressions in the same clause
+     * won't shadow variables needed by later expressions
+     * (e.g. `RETURN a.x AS a, a.y AS b`).
+     */
+    private parseExpressions(alias_option: AliasOption = AliasOption.NOT_ALLOWED): Expression[] {
+        const parsed = Array.from(this._parseExpressions(alias_option));
+        for (const [expression, variableName] of parsed) {
+            if (variableName !== null) {
+                this._state.variables.set(variableName, expression);
+            }
+        }
+        return parsed.map(([expression]) => expression);
+    }
+
+    private *_parseExpressions(
+        alias_option: AliasOption
+    ): IterableIterator<[Expression, string | null]> {
         while (true) {
             const expression: Expression | null = this.parseExpression();
-            if (expression !== null) {
-                const alias = this.parseAlias();
-                if (expression.firstChild() instanceof Reference && alias === null) {
-                    const reference: Reference = expression.firstChild() as Reference;
-                    expression.setAlias(reference.identifier);
-                    this._state.variables.set(reference.identifier, expression);
-                } else if (
-                    alias_option === AliasOption.REQUIRED &&
-                    alias === null &&
-                    !(expression.firstChild() instanceof Reference)
-                ) {
-                    throw new Error("Alias required");
-                } else if (alias_option === AliasOption.NOT_ALLOWED && alias !== null) {
-                    throw new Error("Alias not allowed");
-                } else if (
-                    [AliasOption.OPTIONAL, AliasOption.REQUIRED].includes(alias_option) &&
-                    alias !== null
-                ) {
-                    expression.setAlias(alias.getAlias());
-                    this._state.variables.set(alias.getAlias(), expression);
-                }
-                yield expression;
-            } else {
+            if (expression === null) {
                 break;
             }
+            let variableName: string | null = null;
+            const alias = this.parseAlias();
+            if (expression.firstChild() instanceof Reference && alias === null) {
+                const reference: Reference = expression.firstChild() as Reference;
+                expression.setAlias(reference.identifier);
+                variableName = reference.identifier;
+            } else if (
+                alias_option === AliasOption.REQUIRED &&
+                alias === null &&
+                !(expression.firstChild() instanceof Reference)
+            ) {
+                throw new Error("Alias required");
+            } else if (alias_option === AliasOption.NOT_ALLOWED && alias !== null) {
+                throw new Error("Alias not allowed");
+            } else if (
+                [AliasOption.OPTIONAL, AliasOption.REQUIRED].includes(alias_option) &&
+                alias !== null
+            ) {
+                expression.setAlias(alias.getAlias());
+                variableName = alias.getAlias();
+            }
+            yield [expression, variableName];
             this.skipWhitespaceAndComments();
             if (!this.token.isComma()) {
                 break;
@@ -1360,7 +1376,7 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
-        func.parameters = Array.from(this.parseExpressions(AliasOption.NOT_ALLOWED));
+        func.parameters = this.parseExpressions(AliasOption.NOT_ALLOWED);
         this.skipWhitespaceAndComments();
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected right parenthesis");
@@ -1394,7 +1410,7 @@ class Parser extends BaseParser {
         this.setNextToken(); // skip function name
         this.setNextToken(); // skip left parenthesis
         this.skipWhitespaceAndComments();
-        asyncFunc.parameters = Array.from(this.parseExpressions(AliasOption.NOT_ALLOWED));
+        asyncFunc.parameters = this.parseExpressions(AliasOption.NOT_ALLOWED);
         this.skipWhitespaceAndComments();
         if (!this.token.isRightParenthesis()) {
             throw new Error("Expected right parenthesis");

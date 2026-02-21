@@ -3,16 +3,17 @@
     /* Visit https://aka.ms/tsconfig to read more about this file */
     "outDir": "./dist",
     "rootDir": "./src", // Optional, but recommended to specify the root directory
-    "target": "es2016",                                  /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */    /* Modules */
-    "experimentalDecorators": true,                      /* Enable experimental support for decorators. */
-    "module": "commonjs",                                /* Specify what module code is generated. */
-    "esModuleInterop": true,                             /* Emit additional JavaScript to ease support for importing CommonJS modules. This enables 'allowSyntheticDefaultImports' for type compatibility. */
-    "forceConsistentCasingInFileNames": true,            /* Ensure that casing is correct in imports. */
+    "target": "es2016" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */ /* Modules */,
+    "experimentalDecorators": true /* Enable experimental support for decorators. */,
+    "module": "commonjs" /* Specify what module code is generated. */,
+    "esModuleInterop": true /* Emit additional JavaScript to ease support for importing CommonJS modules. This enables 'allowSyntheticDefaultImports' for type compatibility. */,
+    "forceConsistentCasingInFileNames": true /* Ensure that casing is correct in imports. */,
     "strict": true,
     "types": ["node", "jest"],
     "sourceMap": true,
-    "declaration": true,                                 /* Generate .d.ts declaration files. */
-    "declarationMap": true                               /* Generate sourcemaps for .d.ts files. */
+    "declaration": true /* Generate .d.ts declaration files. */,
+    "declarationMap": true /* Generate sourcemaps for .d.ts files. */
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["flowquery-py", "flowquery-vscode", "docs", "misc"]
 }

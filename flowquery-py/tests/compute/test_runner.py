@@ -475,6 +475,29 @@ class TestRunner:
         assert results[1] == {"i": 2, "sum": 12}
 
     @pytest.mark.asyncio
+    async def test_unwind_null_produces_zero_rows(self):
+        """Test that UNWIND null produces zero rows (Neo4j-compatible)."""
+        runner = Runner("WITH null AS x UNWIND x AS i RETURN i")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_unwind_null_in_pipeline_preserves_no_rows(self):
+        """Test that UNWIND null stops the pipeline producing no rows."""
+        runner = Runner(
+            """
+            WITH null AS arr
+            UNWIND arr AS i
+            UNWIND [1, 2] AS j
+            RETURN i, j
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
     async def test_aggregated_with_on_empty_result_set(self):
         """Test aggregated with on empty result set does not crash."""
         runner = Runner(

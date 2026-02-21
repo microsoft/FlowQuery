@@ -415,6 +415,27 @@ test("Test aggregated with and return", async () => {
     expect(results[1]).toEqual({ i: 2, sum: 12 });
 });
 
+test("Test unwind null produces zero rows", async () => {
+    const runner = new Runner("WITH null AS x UNWIND x AS i RETURN i");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+});
+
+test("Test unwind null in pipeline preserves no rows", async () => {
+    const runner = new Runner(
+        `
+        WITH null AS arr
+        UNWIND arr AS i
+        UNWIND [1, 2] AS j
+        RETURN i, j
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+});
+
 test("Test aggregated with on empty result set", async () => {
     const runner = new Runner(
         `

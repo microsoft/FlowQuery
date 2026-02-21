@@ -214,7 +214,7 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-        expressions = list(self._parse_expressions(AliasOption.REQUIRED))
+        expressions = self._parse_expressions(AliasOption.REQUIRED)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
         if distinct or any(expr.has_reducers() for expr in expressions):
@@ -254,7 +254,7 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-        expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
+        expressions = self._parse_expressions(AliasOption.OPTIONAL)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
         if distinct or any(expr.has_reducers() for expr in expressions):
@@ -353,7 +353,7 @@ class Parser(BaseParser):
             self._expect_previous_token_to_be_whitespace_or_comment()
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-            expressions = list(self._parse_expressions(AliasOption.OPTIONAL))
+            expressions = self._parse_expressions(AliasOption.OPTIONAL)
             if len(expressions) == 0:
                 raise ValueError("Expected at least one expression")
             call.yielded = expressions  # type: ignore[assignment]
@@ -791,16 +791,30 @@ class Parser(BaseParser):
 
     def _parse_expressions(
         self, alias_option: AliasOption = AliasOption.NOT_ALLOWED
-    ) -> Iterator[Expression]:
+    ) -> List[Expression]:
+        """Parse a comma-separated list of expressions with deferred variable
+        registration.  Aliases set by earlier expressions in the same clause
+        won't shadow variables needed by later expressions
+        (e.g. ``RETURN a.x AS a, a.y AS b``)."""
+        parsed = list(self.__parse_expressions(alias_option))
+        for expression, variable_name in parsed:
+            if variable_name is not None:
+                self._state.variables[variable_name] = expression
+        return [expression for expression, _ in parsed]
+
+    def __parse_expressions(
+        self, alias_option: AliasOption
+    ) -> Iterator[Tuple[Expression, Optional[str]]]:
         while True:
             expression = self._parse_expression()
             if expression is not None:
+                variable_name: Optional[str] = None
                 alias = self._parse_alias()
                 if isinstance(expression.first_child(), Reference) and alias is None:
                     reference = expression.first_child()
                     assert isinstance(reference, Reference)  # For type narrowing
                     expression.set_alias(reference.identifier)
-                    self._state.variables[reference.identifier] = expression
+                    variable_name = reference.identifier
                 elif (alias_option == AliasOption.REQUIRED and
                       alias is None and
                       not isinstance(expression.first_child(), Reference)):
@@ -809,8 +823,8 @@ class Parser(BaseParser):
                     raise ValueError("Alias not allowed")
                 elif alias_option in (AliasOption.OPTIONAL, AliasOption.REQUIRED) and alias is not None:
                     expression.set_alias(alias.get_alias())
-                    self._state.variables[alias.get_alias()] = expression
-                yield expression
+                    variable_name = alias.get_alias()
+                yield expression, variable_name
             else:
                 break
             self._skip_whitespace_and_comments()

@@ -4340,3 +4340,58 @@ class TestRunner:
         await match.run()
         assert len(match.results) == 1
         assert match.results[0]["n"]["name"] == "Keep"
+
+    @pytest.mark.asyncio
+    async def test_return_alias_shadowing_graph_variable(self):
+        """Test that RETURN alias doesn't shadow graph variable in same clause.
+
+        When RETURN mentor.displayName AS mentor is followed by mentor.jobTitle,
+        the alias 'mentor' should not overwrite the graph node variable before
+        subsequent expressions are parsed.
+        """
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyMentorUser) AS {
+                UNWIND [
+                    {id: 1, displayName: 'Alice Smith', jobTitle: 'Senior Engineer', department: 'Engineering'},
+                    {id: 2, displayName: 'Bob Jones', jobTitle: 'Staff Engineer', department: 'Engineering'},
+                    {id: 3, displayName: 'Chloe Dubois', jobTitle: 'Junior Engineer', department: 'Engineering'}
+                ] AS record
+                RETURN record.id AS id, record.displayName AS displayName, record.jobTitle AS jobTitle, record.department AS department
+            }
+            """
+        ).run()
+
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyMentorUser)-[:PY_MENTORS]-(:PyMentorUser) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 3},
+                    {left_id: 2, right_id: 3}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            MATCH (mentor:PyMentorUser)-[:PY_MENTORS]->(mentee:PyMentorUser)
+            WHERE mentee.displayName = "Chloe Dubois"
+            RETURN mentor.displayName AS mentor, mentor.jobTitle AS mentorJobTitle, mentor.department AS mentorDepartment
+            """
+        )
+        await runner.run()
+        results = runner.results
+
+        assert len(results) == 2
+        assert results[0] == {
+            "mentor": "Alice Smith",
+            "mentorJobTitle": "Senior Engineer",
+            "mentorDepartment": "Engineering",
+        }
+        assert results[1] == {
+            "mentor": "Bob Jones",
+            "mentorJobTitle": "Staff Engineer",
+            "mentorDepartment": "Engineering",
+        }

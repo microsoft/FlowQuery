@@ -5,6 +5,7 @@ class ParserState {
     private _variables: Map<string, ASTNode> = new Map();
     private _context: Context = new Context();
     private _returns: number = 0;
+    private _inVirtualDefinition: boolean = false;
 
     public get variables(): Map<string, ASTNode> {
         return this._variables;
@@ -19,6 +20,12 @@ class ParserState {
     }
     public incrementReturns(): void {
         this._returns++;
+    }
+    public get inVirtualDefinition(): boolean {
+        return this._inVirtualDefinition;
+    }
+    public set inVirtualDefinition(value: boolean) {
+        this._inVirtualDefinition = value;
     }
 }
 

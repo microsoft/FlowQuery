@@ -38,6 +38,7 @@ import {
     NotStartsWith,
     StartsWith,
 } from "./expressions/operator";
+import ParameterReference from "./expressions/parameter_reference";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
 import AggregateFunction from "./functions/aggregate_function";
@@ -454,7 +455,9 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        this._state.inVirtualDefinition = true;
         const query: ASTNode | null = this.parseSubQuery();
+        this._state.inVirtualDefinition = false;
         if (query === null) {
             throw new Error("Expected sub-query");
         }
@@ -965,6 +968,20 @@ class Parser extends BaseParser {
         this.skipWhitespaceAndComments();
         if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
+            if (identifier.startsWith("$")) {
+                if (!this._state.inVirtualDefinition) {
+                    throw new Error(
+                        "Parameter references ($" +
+                            identifier.substring(1) +
+                            ") are only allowed inside virtual node or relationship definitions"
+                    );
+                }
+                const paramRef = new ParameterReference(identifier);
+                this.setNextToken();
+                const lookup = this.parseLookup(paramRef);
+                expression.addNode(lookup);
+                return true;
+            }
             const reference = new Reference(identifier, this._state.variables.get(identifier));
             this.setNextToken();
             const lookup = this.parseLookup(reference);

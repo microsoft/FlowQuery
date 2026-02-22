@@ -108,9 +108,11 @@ class Database {
             if (node === null) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const data = await node.data();
+            const args = this.extractArgs(element.properties);
+            const data = await node.data(args);
             return new NodeData(data as NodeRecord[]);
         } else if (element instanceof Relationship) {
+            const args = this.extractArgs(element.properties);
             if (element.types.length > 1) {
                 const physicals = this.getRelationships(element);
                 if (physicals.length === 0) {
@@ -120,7 +122,7 @@ class Database {
                 }
                 const allRecords: RelationshipRecord[] = [];
                 for (let i = 0; i < physicals.length; i++) {
-                    const records = (await physicals[i].data()) as RelationshipRecord[];
+                    const records = (await physicals[i].data(args)) as RelationshipRecord[];
                     const typeName = element.types[i];
                     for (const record of records) {
                         allRecords.push({ ...record, _type: typeName });
@@ -132,11 +134,26 @@ class Database {
             if (relationship === null) {
                 throw new Error(`Physical relationship not found for type ${element.type}`);
             }
-            const data = await relationship.data();
+            const data = await relationship.data(args);
             return new RelationshipData(data as RelationshipRecord[]);
         } else {
             throw new Error("Element is neither Node nor Relationship");
         }
+    }
+
+    /**
+     * Extracts property constraint values from a node/relationship's properties map
+     * to pass as $args to the inner virtual definition query.
+     */
+    private extractArgs(properties: Map<string, any>): Record<string, any> | null {
+        if (properties.size === 0) {
+            return null;
+        }
+        const args: Record<string, any> = {};
+        for (const [key, expression] of properties) {
+            args[key] = expression.value();
+        }
+        return args;
     }
 }
 

@@ -126,6 +126,14 @@ class StringWalker {
         return foundUnderScore;
     }
 
+    public checkForDollar(): boolean {
+        const foundDollar = this.currentChar === "$";
+        if (foundDollar) {
+            this._position++;
+        }
+        return foundDollar;
+    }
+
     public checkForLetter(): boolean {
         const foundLetter = StringUtils.letters.includes(this.currentChar.toLowerCase());
         if (foundLetter) {

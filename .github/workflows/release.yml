@@ -67,8 +67,13 @@ jobs:
           echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
 
+          # Sync VS Code extension version
+          cd flowquery-vscode
+          npm version "${NEW_VERSION}" --no-git-tag-version
+          cd ..
+
           # Commit the version bump
-          git add package.json package-lock.json docs/flowquery.min.js
+          git add package.json package-lock.json docs/flowquery.min.js flowquery-vscode/package.json
           git commit --no-verify -m "chore: bump version to ${NEW_VERSION} [skip ci]"
 
           # Include any changes from formatters/linters in the commit
@@ -83,11 +88,6 @@ jobs:
         working-directory: ./flowquery-vscode
         run: |
           npm install @vscode/vsce
-
-      - name: Bump VS Code extension version
-        working-directory: ./flowquery-vscode
-        run: |
-          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
 
       - name: Package VS Code extension
         working-directory: ./flowquery-vscode

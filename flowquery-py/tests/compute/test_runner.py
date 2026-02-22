@@ -4977,3 +4977,248 @@ class TestRunner:
         assert intern["mgr1"] is None
         assert intern["mgr2"] is None
         assert intern["mgr3"] is None
+
+    # ============================================================
+    # Parameter pass-down / $args tests
+    # ============================================================
+
+    @pytest.mark.asyncio
+    async def test_create_virtual_node_with_filter_pass_down(self):
+        """Test that inline property constraints are passed as $-parameters to virtual node definitions."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:ParamNode) AS {
+                return coalesce($id, 0) AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:ParamNode {id: 42})
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 42}
+
+    @pytest.mark.asyncio
+    async def test_dollar_prefixed_identifiers_not_allowed_outside_virtual_definitions(self):
+        """Test that $-prefixed identifiers throw when used outside a virtual definition."""
+        with pytest.raises(ValueError, match="Parameter references"):
+            Runner("RETURN $id AS id")
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_with_multiple_properties(self):
+        """Test pass-down with multiple inline property constraints."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MultiPropPyNode) AS {
+                return coalesce($id, 0) AS id, coalesce($name, 'default') AS name
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:MultiPropPyNode {id: 7}, {name: 'Alice'})
+            return n.id AS id, n.name AS name
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 7, "name": "Alice"}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_with_no_constraints_uses_defaults(self):
+        """Test that when no constraints are provided, defaults are used."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:DefaultPyNode) AS {
+                unwind [{id: 1, name: 'A'}, {id: 2, name: 'B'}] as record
+                return coalesce($id, record.id) AS id, coalesce($name, record.name) AS name
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:DefaultPyNode)
+            return n.id AS id, n.name AS name
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"id": 1, "name": "A"}
+        assert results[1] == {"id": 2, "name": "B"}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_from_where_clause_equality(self):
+        """Test that simple equality predicates in WHERE are extracted and passed down."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:WherePyNode) AS {
+                return coalesce($id, 0) AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:WherePyNode)
+            where n.id = 99
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 99}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_from_where_clause_with_and(self):
+        """Test that AND-joined equality predicates in WHERE are all extracted."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:WhereAndPyNode) AS {
+                return coalesce($id, 0) AS id, coalesce($name, 'default') AS name
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:WhereAndPyNode)
+            where n.id = 5 and n.name = 'Bob'
+            return n.id AS id, n.name AS name
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 5, "name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_from_where_clause_reversed_equality(self):
+        """Test that reversed equality (value = n.prop) is also extracted."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:WhereRevPyNode) AS {
+                return coalesce($id, 0) AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:WhereRevPyNode)
+            where 77 = n.id
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 77}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_does_not_extract_non_equality(self):
+        """Test that non-equality WHERE predicates are NOT extracted (post-filter only)."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:NonEqPyNode) AS {
+                unwind range(1, 10) as i
+                return i AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:NonEqPyNode)
+            where n.id > 5
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+        assert results[0] == {"id": 6}
+        assert results[4] == {"id": 10}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_with_args_map_access(self):
+        """Test that $args resolves to the full args map for $args.key lookups."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:ArgsMapPyNode) AS {
+                return coalesce($args.id, 0) AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:ArgsMapPyNode {id: 123})
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 123}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_where_or_does_not_extract(self):
+        """Test that OR predicates are NOT extracted (could match either side)."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:OrWherePyNode) AS {
+                unwind [{id: 1}, {id: 2}, {id: 3}] as record
+                return record.id AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:OrWherePyNode)
+            where n.id = 1 or n.id = 3
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"id": 1}
+        assert results[1] == {"id": 3}
+
+    @pytest.mark.asyncio
+    async def test_virtual_node_with_dynamic_api_filtering(self):
+        """Test a virtual node that loads from a real API with $-parameter in the URL."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:PyTodo) AS {
+                load json from f"https://jsonplaceholder.typicode.com/todos/{coalesce($id, 1)}" as todo
+                return todo.id AS id, todo.title AS title, todo.completed AS completed, todo.userId AS userId
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (t:PyTodo {id: 3})
+            return t.id AS id, t.title AS title, t.completed AS completed, t.userId AS userId
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["id"] == 3
+        assert isinstance(results[0]["title"], str)
+        assert isinstance(results[0]["completed"], bool)
+        assert isinstance(results[0]["userId"], int)

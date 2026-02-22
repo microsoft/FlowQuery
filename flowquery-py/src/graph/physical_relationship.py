@@ -25,12 +25,12 @@ class PhysicalRelationship(Relationship):
         """Set the statement for this relationship."""
         self._statement = value
 
-    async def data(self) -> List[Dict[str, Any]]:
+    async def data(self, args: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute the statement and return results."""
         if self._statement is None:
             raise ValueError("Statement is null")
         # Import at runtime to avoid circular dependency
         from ..compute.runner import Runner
-        runner = Runner(None, self._statement)
+        runner = Runner(None, self._statement, args=args)
         await runner.run()
         return runner.results

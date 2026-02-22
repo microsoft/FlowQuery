@@ -96,7 +96,7 @@ class Tokenizer:
 
     def _identifier(self) -> Optional[Token]:
         start_position = self._walker.position
-        if self._walker.check_for_under_score() or self._walker.check_for_letter():
+        if self._walker.check_for_dollar() or self._walker.check_for_under_score() or self._walker.check_for_letter():
             while (not self._walker.is_at_end and
                    (self._walker.check_for_letter() or
                     self._walker.check_for_digit() or

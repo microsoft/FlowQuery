@@ -104,6 +104,12 @@ class StringWalker:
             self._position += 1
         return found_under_score
 
+    def check_for_dollar(self) -> bool:
+        found_dollar = self.current_char == '$'
+        if found_dollar:
+            self._position += 1
+        return found_dollar
+
     def check_for_letter(self) -> bool:
         found_letter = self.current_char.lower() in StringUtils.letters
         if found_letter:

@@ -95,13 +95,6 @@ jobs:
           npx @vscode/vsce package
           ls -la *.vsix
 
-      - name: Publish VS Code extension to Marketplace
-        working-directory: ./flowquery-vscode
-        run: |
-          npx @vscode/vsce publish --pat "$VSCE_PAT"
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:

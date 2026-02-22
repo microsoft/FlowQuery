@@ -10,11 +10,11 @@ class PhysicalNode extends Node {
     public get statement(): ASTNode | null {
         return this._statement;
     }
-    public async data(): Promise<Record<string, any>[]> {
+    public async data(args: Record<string, any> | null = null): Promise<Record<string, any>[]> {
         if (this._statement === null) {
             throw new Error("Statement is null");
         }
-        const runner = new Runner(null, this._statement);
+        const runner = new Runner(null, this._statement, args);
         await runner.run();
         return runner.results;
     }

@@ -42,6 +42,7 @@ from .expressions.operator import (
     NotStartsWith,
     StartsWith,
 )
+from .expressions.parameter_reference import ParameterReference
 from .expressions.reference import Reference
 from .expressions.string import String
 from .functions.aggregate_function import AggregateFunction
@@ -426,7 +427,9 @@ class Parser(BaseParser):
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
 
+        self._state.in_virtual_definition = True
         query = self._parse_sub_query()
+        self._state.in_virtual_definition = False
         if query is None:
             raise ValueError("Expected sub-query")
 
@@ -837,6 +840,17 @@ class Parser(BaseParser):
         self._skip_whitespace_and_comments()
         if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
+            if identifier.startswith("$"):
+                if not self._state.in_virtual_definition:
+                    raise ValueError(
+                        f"Parameter references (${identifier[1:]}) are only allowed "
+                        "inside virtual node or relationship definitions"
+                    )
+                param_ref = ParameterReference(identifier)
+                self.set_next_token()
+                lookup = self._parse_lookup(param_ref)
+                expression.add_node(lookup)
+                return True
             reference = Reference(identifier, self._state.variables.get(identifier))
             self.set_next_token()
             lookup = self._parse_lookup(reference)

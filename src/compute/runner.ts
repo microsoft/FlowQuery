@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import ParameterReference from "../parsing/expressions/parameter_reference";
 import Operation from "../parsing/operations/operation";
 import Parser from "../parsing/parser";
 
@@ -18,20 +19,29 @@ import Parser from "../parsing/parser";
 class Runner {
     private first: Operation;
     private last: Operation;
+    private _args: Record<string, any> | null = null;
+    private _ast: ASTNode;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.
      *
      * @param statement - The FlowQuery statement to execute
+     * @param ast - An optional pre-parsed AST to use instead of parsing the statement
+     * @param args - Optional parameters to inject into $-prefixed parameter references
      * @throws {Error} If the statement is null, empty, or contains syntax errors
      */
-    constructor(statement: string | null = null, ast: ASTNode | null = null) {
+    constructor(
+        statement: string | null = null,
+        ast: ASTNode | null = null,
+        args: Record<string, any> | null = null
+    ) {
         if ((statement === null || statement === "") && ast === null) {
             throw new Error("Either statement or AST must be provided");
         }
-        const _ast = ast !== null ? ast : new Parser().parse(statement!);
-        this.first = _ast.firstChild() as Operation;
-        this.last = _ast.lastChild() as Operation;
+        this._ast = ast !== null ? ast : new Parser().parse(statement!);
+        this._args = args;
+        this.first = this._ast.firstChild() as Operation;
+        this.last = this._ast.lastChild() as Operation;
     }
 
     /**
@@ -43,6 +53,7 @@ class Runner {
     public async run(): Promise<void> {
         return new Promise<void>(async (resolve, reject) => {
             try {
+                this.bindParameters(this._ast);
                 await this.first.initialize();
                 await this.first.run();
                 await this.first.finish();
@@ -51,6 +62,27 @@ class Runner {
                 reject(e);
             }
         });
+    }
+
+    /**
+     * Recursively walks the AST to bind ParameterReference nodes
+     * to the args provided to this Runner.
+     * - $args resolves to the entire args map (for use with $args.key lookups)
+     * - $name resolves to args["name"] (shorthand for individual properties)
+     */
+    private bindParameters(node: ASTNode): void {
+        if (node instanceof ParameterReference) {
+            const args = this._args ?? {};
+            const key = node.name.startsWith("$") ? node.name.substring(1) : node.name;
+            if (key === "args") {
+                node.parameterValue = args;
+            } else {
+                node.parameterValue = key in args ? args[key] : null;
+            }
+        }
+        for (const child of node.getChildren()) {
+            this.bindParameters(child);
+        }
     }
 
     /**

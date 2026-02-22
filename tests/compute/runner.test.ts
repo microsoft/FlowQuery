@@ -4623,3 +4623,278 @@ test("Test chained optional match with mixed null and non-null paths", async () 
     expect(intern.mgr2).toBeNull();
     expect(intern.mgr3).toBeNull();
 });
+
+test("Test create virtual node with filter pass-down and args access within definition", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Node) AS {
+            return coalesce($id, 0) AS id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:Node {id: 42})
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 42 });
+});
+
+test("Test dollar-prefixed identifiers are not allowed outside virtual definitions", () => {
+    expect(() => {
+        new Runner("RETURN $id AS id");
+    }).toThrow(
+        "Parameter references ($id) are only allowed inside virtual node or relationship definitions"
+    );
+});
+
+test("Test filter pass-down with multiple properties", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MultiPropNode) AS {
+            return coalesce($id, 0) AS id, coalesce($name, 'default') AS name
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:MultiPropNode {id: 7}, {name: 'Alice'})
+        return n.id AS id, n.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 7, name: "Alice" });
+});
+
+test("Test filter pass-down with no constraints uses defaults", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:DefaultNode) AS {
+            unwind [{id: 1, name: 'A'}, {id: 2, name: 'B'}] as record
+            return coalesce($id, record.id) AS id, coalesce($name, record.name) AS name
+        }
+    `).run();
+
+    // No constraints: returns all rows with defaults
+    const runner = new Runner(`
+        match (n:DefaultNode)
+        return n.id AS id, n.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ id: 1, name: "A" });
+    expect(results[1]).toEqual({ id: 2, name: "B" });
+});
+
+test("Test filter pass-down from WHERE clause equality predicate", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:WhereNode) AS {
+            return coalesce($id, 0) AS id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:WhereNode)
+        where n.id = 99
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 99 });
+});
+
+test("Test filter pass-down from WHERE clause with AND predicates", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:WhereAndNode) AS {
+            return coalesce($id, 0) AS id, coalesce($name, 'default') AS name
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:WhereAndNode)
+        where n.id = 5 and n.name = 'Bob'
+        return n.id AS id, n.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 5, name: "Bob" });
+});
+
+test("Test filter pass-down from WHERE clause reversed equality", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:WhereRevNode) AS {
+            return coalesce($id, 0) AS id
+        }
+    `).run();
+
+    // value = n.prop (reversed order)
+    const runner = new Runner(`
+        match (n:WhereRevNode)
+        where 77 = n.id
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 77 });
+});
+
+test("Test filter pass-down inline properties take precedence over WHERE", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:PrecedenceNode) AS {
+            return coalesce($id, 0) AS id
+        }
+    `).run();
+
+    // Inline {id: 10} should take precedence; WHERE n.id = 10 is also present
+    const runner = new Runner(`
+        match (n:PrecedenceNode {id: 10})
+        where n.id = 10
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 10 });
+});
+
+test("Test filter pass-down does not extract non-equality WHERE predicates", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:NonEqNode) AS {
+            unwind range(1, 10) as i
+            return i AS id
+        }
+    `).run();
+
+    // Greater-than should NOT be extracted as a pass-down parameter
+    const runner = new Runner(`
+        match (n:NonEqNode)
+        where n.id > 5
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+    expect(results[0]).toEqual({ id: 6 });
+    expect(results[4]).toEqual({ id: 10 });
+});
+
+test("Test filter pass-down with $args map access", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ArgsMapNode) AS {
+            return coalesce($args.id, 0) AS id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:ArgsMapNode {id: 123})
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 123 });
+});
+
+test("Test filter pass-down for virtual relationship", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:RelPerson) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            return record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:RelPerson)-[:REL_KNOWS]-(:RelPerson) AS {
+            unwind [
+                {left_id: 1, right_id: 2, since: coalesce($since, 2020)},
+                {left_id: 2, right_id: 3, since: coalesce($since, 2021)}
+            ] as record
+            return record.left_id AS left_id, record.right_id AS right_id, record.since AS since
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (a:RelPerson)-[r:REL_KNOWS {since: 2020}]->(b:RelPerson)
+        return a.name AS from, b.name AS to, r.since AS since
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    // Both relationships get since=2020 because $since=2020 was passed down
+    expect(results[0]).toEqual({ from: "Alice", to: "Bob", since: 2020 });
+    expect(results[1]).toEqual({ from: "Bob", to: "Charlie", since: 2020 });
+});
+
+test("Test filter pass-down with WHERE and mixed AND/non-equality", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MixedWhereNode) AS {
+            unwind range(1, 20) as i
+            return coalesce($category, 'all') as category, i AS id
+        }
+    `).run();
+
+    // Only category = 'special' is extracted as pass-down; id > 15 is a post-filter
+    const runner = new Runner(`
+        match (n:MixedWhereNode)
+        where n.category = 'special' and n.id > 15
+        return n.category AS category, n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+    for (const r of results) {
+        expect(r.category).toBe("special");
+        expect(r.id).toBeGreaterThan(15);
+    }
+});
+
+test("Test filter pass-down with WHERE OR does not extract predicates", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:OrWhereNode) AS {
+            unwind [{id: 1}, {id: 2}, {id: 3}] as record
+            return record.id AS id
+        }
+    `).run();
+
+    // OR predicates should NOT be extracted (could match either side)
+    const runner = new Runner(`
+        match (n:OrWhereNode)
+        where n.id = 1 or n.id = 3
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ id: 1 });
+    expect(results[1]).toEqual({ id: 3 });
+});
+
+test("Test virtual node with dynamic API filtering via parameter pass-down", async () => {
+    // Create a virtual node that loads a specific todo from jsonplaceholder
+    // based on the $id parameter passed down from the MATCH constraint.
+    await new Runner(`
+        CREATE VIRTUAL (:Todo) AS {
+            load json from f"https://jsonplaceholder.typicode.com/todos/{coalesce($id, 1)}" as todo
+            return todo.id AS id, todo.title AS title, todo.completed AS completed, todo.userId AS userId
+        }
+    `).run();
+
+    // Query a specific todo by ID — the $id parameter is passed to the API URL
+    const runner = new Runner(`
+        match (t:Todo {id: 3})
+        return t.id AS id, t.title AS title, t.completed AS completed, t.userId AS userId
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe(3);
+    expect(typeof results[0].title).toBe("string");
+    expect(typeof results[0].completed).toBe("boolean");
+    expect(typeof results[0].userId).toBe("number");
+});

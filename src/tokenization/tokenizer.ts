@@ -105,7 +105,11 @@ class Tokenizer {
 
     private identifier(): Token | null {
         const startPosition = this.walker.position;
-        if (this.walker.checkForUnderScore() || this.walker.checkForLetter()) {
+        if (
+            this.walker.checkForDollar() ||
+            this.walker.checkForUnderScore() ||
+            this.walker.checkForLetter()
+        ) {
             while (
                 !this.walker.isAtEnd &&
                 (this.walker.checkForLetter() ||

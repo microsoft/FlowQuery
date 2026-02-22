@@ -9,6 +9,15 @@ class ParserState:
         self._variables: Dict[str, ASTNode] = {}
         self._context = Context()
         self._returns = 0
+        self._in_virtual_definition = False
+
+    @property
+    def in_virtual_definition(self) -> bool:
+        return self._in_virtual_definition
+
+    @in_virtual_definition.setter
+    def in_virtual_definition(self, value: bool) -> None:
+        self._in_virtual_definition = value
 
     @property
     def variables(self) -> Dict[str, ASTNode]:

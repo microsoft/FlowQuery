@@ -84,11 +84,23 @@ jobs:
         run: |
           npm install @vscode/vsce
 
+      - name: Bump VS Code extension version
+        working-directory: ./flowquery-vscode
+        run: |
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+
       - name: Package VS Code extension
         working-directory: ./flowquery-vscode
         run: |
           npx @vscode/vsce package
           ls -la *.vsix
+
+      - name: Publish VS Code extension to Marketplace
+        working-directory: ./flowquery-vscode
+        run: |
+          npx @vscode/vsce publish --pat "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

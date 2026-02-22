@@ -4874,3 +4874,27 @@ test("Test filter pass-down with WHERE OR does not extract predicates", async ()
     expect(results[0]).toEqual({ id: 1 });
     expect(results[1]).toEqual({ id: 3 });
 });
+
+test("Test virtual node with dynamic API filtering via parameter pass-down", async () => {
+    // Create a virtual node that loads a specific todo from jsonplaceholder
+    // based on the $id parameter passed down from the MATCH constraint.
+    await new Runner(`
+        CREATE VIRTUAL (:Todo) AS {
+            load json from f"https://jsonplaceholder.typicode.com/todos/{coalesce($id, 1)}" as todo
+            return todo.id AS id, todo.title AS title, todo.completed AS completed, todo.userId AS userId
+        }
+    `).run();
+
+    // Query a specific todo by ID — the $id parameter is passed to the API URL
+    const runner = new Runner(`
+        match (t:Todo {id: 3})
+        return t.id AS id, t.title AS title, t.completed AS completed, t.userId AS userId
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe(3);
+    expect(typeof results[0].title).toBe("string");
+    expect(typeof results[0].completed).toBe("boolean");
+    expect(typeof results[0].userId).toBe("number");
+});

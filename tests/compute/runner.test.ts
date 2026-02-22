@@ -4623,3 +4623,20 @@ test("Test chained optional match with mixed null and non-null paths", async () 
     expect(intern.mgr2).toBeNull();
     expect(intern.mgr3).toBeNull();
 });
+
+test("Test create virtual node with filter pass-down and args access within definition", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Node) AS {
+            return $args.id AS id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        match (n:Node {id: 42})
+        return n.id AS id
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ id: 42 });
+});

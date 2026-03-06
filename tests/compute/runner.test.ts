@@ -4898,3 +4898,269 @@ test("Test virtual node with dynamic API filtering via parameter pass-down", asy
     expect(typeof results[0].completed).toBe("boolean");
     expect(typeof results[0].userId).toBe("number");
 });
+
+// ============================================================
+// Multi-statement support tests
+// ============================================================
+
+test("Test multi-statement with create and match", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MultiStmtPerson) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        };
+        MATCH (n:MultiStmtPerson) RETURN n.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice" });
+    expect(results[1]).toEqual({ name: "Bob" });
+});
+
+test("Test multi-statement with multiple creates and match", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MultiCity) AS {
+            unwind [
+                {id: 1, name: 'NYC'},
+                {id: 2, name: 'LA'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        };
+        CREATE VIRTUAL (:MultiCity)-[:MULTI_ROUTE]-(:MultiCity) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        };
+        MATCH (a:MultiCity)-[:MULTI_ROUTE]->(b:MultiCity)
+        RETURN a.name AS from, b.name AS to
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ from: "NYC", to: "LA" });
+});
+
+test("Test multi-statement with only create statements", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MultiOnlyA) AS {
+            unwind [{id: 1, name: 'A'}] as record
+            RETURN record.id as id, record.name as name
+        };
+        CREATE VIRTUAL (:MultiOnlyB) AS {
+            unwind [{id: 1, name: 'B'}] as record
+            RETURN record.id as id, record.name as name
+        }
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(0);
+
+    // Verify both nodes were created
+    const matchA = new Runner("MATCH (n:MultiOnlyA) RETURN n.name AS name");
+    await matchA.run();
+    expect(matchA.results.length).toBe(1);
+    expect(matchA.results[0]).toEqual({ name: "A" });
+
+    const matchB = new Runner("MATCH (n:MultiOnlyB) RETURN n.name AS name");
+    await matchB.run();
+    expect(matchB.results.length).toBe(1);
+    expect(matchB.results[0]).toEqual({ name: "B" });
+});
+
+test("Test multi-statement rejects retrieval before last", () => {
+    expect(() => {
+        new Runner(`
+            RETURN 1 AS x;
+            CREATE VIRTUAL (:ShouldFail) AS {
+                RETURN 1 AS id
+            }
+        `);
+    }).toThrow(
+        "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+    );
+});
+
+test("Test multi-statement rejects match before last", () => {
+    expect(() => {
+        new Runner(`
+            MATCH (n:Foo) RETURN n;
+            CREATE VIRTUAL (:ShouldFail2) AS {
+                RETURN 1 AS id
+            }
+        `);
+    }).toThrow();
+});
+
+test("Test multi-statement with trailing semicolon", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:TrailingSemiNode) AS {
+            RETURN 1 AS id
+        };
+    `);
+    await runner.run();
+    expect(runner.results.length).toBe(0);
+});
+
+test("Test single statement still works (no semicolons)", async () => {
+    const runner = new Runner("RETURN 1 + 2 AS sum");
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ sum: 3 });
+});
+
+test("Test semicolon inside string is not a delimiter", async () => {
+    const runner = new Runner('RETURN "hello; world" AS msg');
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ msg: "hello; world" });
+});
+
+test("Test semicolon inside sub-query braces is not a delimiter", async () => {
+    // Semicolons inside {} should not split the statement
+    const runner = new Runner(`
+        CREATE VIRTUAL (:BraceTestNode) AS {
+            RETURN 1 AS id
+        };
+        MATCH (n:BraceTestNode) RETURN n.id AS id
+    `);
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ id: 1 });
+});
+
+test("Test multi-statement with delete and create", async () => {
+    // Create a node, then delete it and create a new one in a multi-statement
+    await new Runner(`
+        CREATE VIRTUAL (:DelCreateOld) AS {
+            RETURN 1 AS id, 'old' AS name
+        }
+    `).run();
+
+    const runner = new Runner(`
+        DELETE VIRTUAL (:DelCreateOld);
+        CREATE VIRTUAL (:DelCreateNew) AS {
+            RETURN 1 AS id, 'new' AS name
+        };
+        MATCH (n:DelCreateNew) RETURN n.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "new" });
+});
+
+// ============================================================
+// Metadata tests
+// ============================================================
+
+test("Test metadata for simple return query", async () => {
+    const runner = new Runner("RETURN 1 AS x");
+    await runner.run();
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(0);
+    expect(meta.virtual_relationships_created).toBe(0);
+    expect(meta.virtual_nodes_deleted).toBe(0);
+    expect(meta.virtual_relationships_deleted).toBe(0);
+});
+
+test("Test metadata for single create node", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaTestNode) AS {
+            RETURN 1 AS id
+        }
+    `);
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(1);
+    expect(meta.virtual_relationships_created).toBe(0);
+    expect(meta.virtual_nodes_deleted).toBe(0);
+    expect(meta.virtual_relationships_deleted).toBe(0);
+});
+
+test("Test metadata for create node and relationship", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaNodeA) AS {
+            unwind [{id: 1}, {id: 2}] as record
+            RETURN record.id AS id
+        };
+        CREATE VIRTUAL (:MetaNodeA)-[:META_REL]-(:MetaNodeA) AS {
+            unwind [{left_id: 1, right_id: 2}] as record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `);
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(1);
+    expect(meta.virtual_relationships_created).toBe(1);
+    expect(meta.virtual_nodes_deleted).toBe(0);
+    expect(meta.virtual_relationships_deleted).toBe(0);
+});
+
+test("Test metadata for delete operations", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDelNode) AS {
+            RETURN 1 AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDelNode)-[:META_DEL_REL]-(:MetaDelNode) AS {
+            unwind [{left_id: 1, right_id: 1}] as record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        DELETE VIRTUAL (:MetaDelNode)-[:META_DEL_REL]-(:MetaDelNode);
+        DELETE VIRTUAL (:MetaDelNode)
+    `);
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(0);
+    expect(meta.virtual_relationships_created).toBe(0);
+    expect(meta.virtual_nodes_deleted).toBe(1);
+    expect(meta.virtual_relationships_deleted).toBe(1);
+});
+
+test("Test metadata for mixed create, delete, and query", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaMixedNode) AS {
+            unwind [{id: 1, name: 'X'}, {id: 2, name: 'Y'}] as record
+            RETURN record.id AS id, record.name AS name
+        };
+        CREATE VIRTUAL (:MetaMixedNode)-[:META_MIXED_REL]-(:MetaMixedNode) AS {
+            unwind [{left_id: 1, right_id: 2}] as record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        };
+        MATCH (a:MetaMixedNode)-[:META_MIXED_REL]->(b:MetaMixedNode)
+        RETURN a.name AS from, b.name AS to
+    `);
+    await runner.run();
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(1);
+    expect(meta.virtual_relationships_created).toBe(1);
+    expect(meta.virtual_nodes_deleted).toBe(0);
+    expect(meta.virtual_relationships_deleted).toBe(0);
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ from: "X", to: "Y" });
+});
+
+test("Test metadata is a copy and not mutable", () => {
+    const runner = new Runner("RETURN 1 AS x");
+    const meta1 = runner.metadata;
+    meta1.virtual_nodes_created = 999;
+    const meta2 = runner.metadata;
+    expect(meta2.virtual_nodes_created).toBe(0);
+});
+
+test("Test metadata available before run", () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaBeforeRun) AS {
+            RETURN 1 AS id
+        }
+    `);
+    // Metadata is available before run() is called
+    const meta = runner.metadata;
+    expect(meta.virtual_nodes_created).toBe(1);
+});

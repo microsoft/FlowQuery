@@ -1,7 +1,7 @@
 """Main parser for FlowQuery statements."""
 
 import sys
-from typing import Dict, Iterator, List, Optional, Tuple, cast
+from typing import Dict, Generator, Iterator, List, Optional, Tuple, cast
 
 from ..graph.hops import Hops
 from ..graph.node import Node
@@ -103,8 +103,68 @@ class Parser(BaseParser):
         Raises:
             ValueError: If the statement is malformed or contains syntax errors
         """
+        combined: Optional[ASTNode] = None
+        for root in self.parse_statements(statement):
+            if combined is None:
+                combined = root
+            else:
+                for child in root.get_children():
+                    combined.add_child(child)
+        if combined is None:
+            raise ValueError("Expected at least one statement")
+        return combined
+
+    def parse_statements(self, statement: str) -> Generator[ASTNode, None, None]:
+        """Parses a multi-statement FlowQuery input separated by semicolons.
+
+        Only CREATE and DELETE statements may appear before the last statement.
+        Yields one AST per statement, validating ordering as it goes.
+
+        Args:
+            statement: The FlowQuery input (may contain semicolon separators)
+
+        Yields:
+            AST roots, one per statement
+
+        Raises:
+            ValueError: If statement ordering rules are violated
+        """
         self.tokenize(statement)
-        return self._parse_tokenized()
+        previous: Optional[ASTNode] = None
+
+        while True:
+            self._skip_whitespace_and_comments()
+            if self.token.is_eof():
+                break
+
+            self._state = ParserState()
+            root = self._parse_tokenized()
+
+            self._skip_whitespace_and_comments()
+            has_more = self.token.is_semicolon()
+
+            if previous is not None:
+                self._validate_is_create_or_delete(previous)
+                yield previous
+            previous = root
+
+            if has_more:
+                self.set_next_token()
+                continue
+            break
+
+        if previous is not None:
+            yield previous
+
+    def _validate_is_create_or_delete(self, root: ASTNode) -> None:
+        """Validates that all operations in a statement are CREATE or DELETE."""
+        op = root.first_child()
+        while op is not None:
+            if not isinstance(op, (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
+                raise ValueError(
+                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                )
+            op = op.next  # type: ignore[assignment]
 
     def _parse_tokenized(self, is_sub_query: bool = False) -> ASTNode:
         root = ASTNode()
@@ -113,12 +173,17 @@ class Parser(BaseParser):
 
         while not self.token.is_eof():
             if root.child_count() > 0:
+                if self.token.is_semicolon():
+                    break
                 self._expect_and_skip_whitespace_and_comments()
             else:
                 self._skip_whitespace_and_comments()
 
             # UNION separates two query pipelines — break and handle after the loop
             if self.token.is_union():
+                break
+
+            if self.token.is_semicolon():
                 break
 
             if self.token.is_eof():

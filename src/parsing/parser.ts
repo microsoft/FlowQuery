@@ -99,8 +99,82 @@ class Parser extends BaseParser {
      * ```
      */
     public parse(statement: string): ASTNode {
+        let combined: ASTNode | null = null;
+        for (const root of this.parseStatements(statement)) {
+            if (combined === null) {
+                combined = root;
+            } else {
+                for (const child of root.getChildren()) {
+                    combined.addChild(child);
+                }
+            }
+        }
+        if (combined === null) {
+            throw new Error("Expected at least one statement");
+        }
+        return combined;
+    }
+
+    /**
+     * Parses a multi-statement FlowQuery input separated by semicolons.
+     *
+     * Only CREATE and DELETE statements may appear before the last statement.
+     * Yields one AST per statement, validating ordering as it goes.
+     *
+     * @param statement - The FlowQuery input (may contain semicolon separators)
+     * @yields AST roots, one per statement
+     * @throws {Error} If statement ordering rules are violated
+     */
+    public *parseStatements(statement: string): Generator<ASTNode> {
         this.tokenize(statement);
-        return this._parseTokenized();
+        let previous: ASTNode | null = null;
+
+        while (true) {
+            this.skipWhitespaceAndComments();
+            if (this.token.isEOF()) break;
+
+            this._state = new ParserState();
+            const root = this._parseTokenized();
+
+            this.skipWhitespaceAndComments();
+            const hasMore = this.token.isSemicolon();
+
+            if (previous !== null) {
+                this.validateIsCreateOrDelete(previous);
+                yield previous;
+            }
+            previous = root;
+
+            if (hasMore) {
+                this.setNextToken();
+                continue;
+            }
+            break;
+        }
+
+        if (previous !== null) {
+            yield previous;
+        }
+    }
+
+    /**
+     * Validates that all operations in a statement are CREATE or DELETE.
+     */
+    private validateIsCreateOrDelete(root: ASTNode): void {
+        let op: Operation | null = root.firstChild() as Operation;
+        while (op !== null) {
+            if (
+                !(op instanceof CreateNode) &&
+                !(op instanceof CreateRelationship) &&
+                !(op instanceof DeleteNode) &&
+                !(op instanceof DeleteRelationship)
+            ) {
+                throw new Error(
+                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                );
+            }
+            op = op.next;
+        }
     }
 
     private _parseTokenized(isSubQuery: boolean = false): ASTNode {
@@ -109,12 +183,18 @@ class Parser extends BaseParser {
         let operation: Operation | null = null;
         while (!this.token.isEOF()) {
             if (root.childCount() > 0) {
+                if (this.token.isSemicolon()) {
+                    break;
+                }
                 this.expectAndSkipWhitespaceAndComments();
             } else {
                 this.skipWhitespaceAndComments();
             }
             // UNION separates two query pipelines — break and handle after the loop
             if (this.token.isUnion()) {
+                break;
+            }
+            if (this.token.isSemicolon()) {
                 break;
             }
             if (this.token.isEOF()) {

@@ -202,6 +202,33 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 // [{ x: 1 }, { x: 1 }]
 ```
 
+#### Multi-Statement Queries
+
+Multiple statements can be separated by semicolons. Only `CREATE VIRTUAL` and `DELETE VIRTUAL` statements may appear before the last statement. The last statement can be any valid query.
+
+```cypher
+CREATE VIRTUAL (:Person) AS {
+    UNWIND [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}] AS r
+    RETURN r.id AS id, r.name AS name
+};
+CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+    UNWIND [{left_id: 1, right_id: 2}] AS r
+    RETURN r.left_id AS left_id, r.right_id AS right_id
+};
+MATCH (a:Person)-[:KNOWS]->(b:Person)
+RETURN a.name AS from, b.name AS to
+```
+
+The `Runner` also exposes a `metadata` property with counts of virtual nodes/relationships created and deleted:
+
+```javascript
+const runner = new FlowQuery("CREATE VIRTUAL (:X) AS { RETURN 1 AS id }; MATCH (n:X) RETURN n");
+await runner.run();
+console.log(runner.metadata);
+// { virtual_nodes_created: 1, virtual_relationships_created: 0,
+//   virtual_nodes_deleted: 0, virtual_relationships_deleted: 0 }
+```
+
 ### WHERE Clause
 
 Filters rows based on conditions. Supports the following operators:
@@ -621,6 +648,7 @@ RETURN f.name, f.description, f.category
 │  LOAD JSON FROM url [HEADERS {...}] [POST {...}] AS alias   │
 │  CALL func() [YIELD field, ...]                             │
 │  query1 UNION [ALL] query2                                  │
+│  stmt1; stmt2; ... stmtN             -- multi-statement     │
 │  LIMIT n                                                    │
 ├─────────────────────────────────────────────────────────────┤
 │  GRAPH OPERATIONS                                           │

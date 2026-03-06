@@ -5222,3 +5222,254 @@ class TestRunner:
         assert isinstance(results[0]["title"], str)
         assert isinstance(results[0]["completed"], bool)
         assert isinstance(results[0]["userId"], int)
+
+
+class TestMultiStatement:
+    """Test cases for multi-statement support."""
+
+    @pytest.mark.asyncio
+    async def test_multi_statement_with_create_and_match(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMultiStmtPerson) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            };
+            MATCH (n:PyMultiStmtPerson) RETURN n.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice"}
+        assert results[1] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_multi_statement_with_multiple_creates_and_match(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMultiCity) AS {
+                unwind [
+                    {id: 1, name: 'NYC'},
+                    {id: 2, name: 'LA'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            };
+            CREATE VIRTUAL (:PyMultiCity)-[:PY_MULTI_ROUTE]-(:PyMultiCity) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            };
+            MATCH (a:PyMultiCity)-[:PY_MULTI_ROUTE]->(b:PyMultiCity)
+            RETURN a.name AS origin, b.name AS destination
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"origin": "NYC", "destination": "LA"}
+
+    @pytest.mark.asyncio
+    async def test_multi_statement_with_only_creates(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMultiOnlyA) AS {
+                unwind [{id: 1, name: 'A'}] as record
+                RETURN record.id as id, record.name as name
+            };
+            CREATE VIRTUAL (:PyMultiOnlyB) AS {
+                unwind [{id: 1, name: 'B'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """)
+        await runner.run()
+        assert len(runner.results) == 0
+
+        match_a = Runner("MATCH (n:PyMultiOnlyA) RETURN n.name AS name")
+        await match_a.run()
+        assert len(match_a.results) == 1
+        assert match_a.results[0] == {"name": "A"}
+
+        match_b = Runner("MATCH (n:PyMultiOnlyB) RETURN n.name AS name")
+        await match_b.run()
+        assert len(match_b.results) == 1
+        assert match_b.results[0] == {"name": "B"}
+
+    def test_multi_statement_rejects_retrieval_before_last(self):
+        with pytest.raises(ValueError, match="Only CREATE and DELETE"):
+            Runner("""
+                RETURN 1 AS x;
+                CREATE VIRTUAL (:PyShouldFail) AS {
+                    RETURN 1 AS id
+                }
+            """)
+
+    def test_multi_statement_rejects_match_before_last(self):
+        with pytest.raises(ValueError):
+            Runner("""
+                MATCH (n:Foo) RETURN n;
+                CREATE VIRTUAL (:PyShouldFail2) AS {
+                    RETURN 1 AS id
+                }
+            """)
+
+    @pytest.mark.asyncio
+    async def test_multi_statement_with_trailing_semicolon(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyTrailingSemiNode) AS {
+                RETURN 1 AS id
+            };
+        """)
+        await runner.run()
+        assert len(runner.results) == 0
+
+    @pytest.mark.asyncio
+    async def test_single_statement_still_works(self):
+        runner = Runner("RETURN 1 + 2 AS sum")
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"sum": 3}
+
+    @pytest.mark.asyncio
+    async def test_semicolon_inside_string_is_not_delimiter(self):
+        runner = Runner('RETURN "hello; world" AS msg')
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"msg": "hello; world"}
+
+    @pytest.mark.asyncio
+    async def test_semicolon_inside_braces_is_not_delimiter(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyBraceTestNode) AS {
+                RETURN 1 AS id
+            };
+            MATCH (n:PyBraceTestNode) RETURN n.id AS id
+        """)
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"id": 1}
+
+    @pytest.mark.asyncio
+    async def test_multi_statement_with_delete_and_create(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyDelCreateOld) AS {
+                RETURN 1 AS id, 'old' AS name
+            }
+        """).run()
+
+        runner = Runner("""
+            DELETE VIRTUAL (:PyDelCreateOld);
+            CREATE VIRTUAL (:PyDelCreateNew) AS {
+                RETURN 1 AS id, 'new' AS name
+            };
+            MATCH (n:PyDelCreateNew) RETURN n.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "new"}
+
+
+class TestMetadata:
+    """Test cases for Runner metadata."""
+
+    @pytest.mark.asyncio
+    async def test_metadata_for_simple_return(self):
+        runner = Runner("RETURN 1 AS x")
+        await runner.run()
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 0
+        assert meta.virtual_relationships_created == 0
+        assert meta.virtual_nodes_deleted == 0
+        assert meta.virtual_relationships_deleted == 0
+
+    def test_metadata_for_single_create_node(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMetaTestNode) AS {
+                RETURN 1 AS id
+            }
+        """)
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 1
+        assert meta.virtual_relationships_created == 0
+        assert meta.virtual_nodes_deleted == 0
+        assert meta.virtual_relationships_deleted == 0
+
+    def test_metadata_for_create_node_and_relationship(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMetaNodeA) AS {
+                unwind [{id: 1}, {id: 2}] as record
+                RETURN record.id AS id
+            };
+            CREATE VIRTUAL (:PyMetaNodeA)-[:PY_META_REL]-(:PyMetaNodeA) AS {
+                unwind [{left_id: 1, right_id: 2}] as record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """)
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 1
+        assert meta.virtual_relationships_created == 1
+        assert meta.virtual_nodes_deleted == 0
+        assert meta.virtual_relationships_deleted == 0
+
+    @pytest.mark.asyncio
+    async def test_metadata_for_delete_operations(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyMetaDelNode) AS {
+                RETURN 1 AS id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyMetaDelNode)-[:PY_META_DEL_REL]-(:PyMetaDelNode) AS {
+                unwind [{left_id: 1, right_id: 1}] as record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """).run()
+
+        runner = Runner("""
+            DELETE VIRTUAL (:PyMetaDelNode)-[:PY_META_DEL_REL]-(:PyMetaDelNode);
+            DELETE VIRTUAL (:PyMetaDelNode)
+        """)
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 0
+        assert meta.virtual_relationships_created == 0
+        assert meta.virtual_nodes_deleted == 1
+        assert meta.virtual_relationships_deleted == 1
+
+    @pytest.mark.asyncio
+    async def test_metadata_for_mixed_create_delete_and_query(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMetaMixedNode) AS {
+                unwind [{id: 1, name: 'X'}, {id: 2, name: 'Y'}] as record
+                RETURN record.id AS id, record.name AS name
+            };
+            CREATE VIRTUAL (:PyMetaMixedNode)-[:PY_META_MIXED_REL]-(:PyMetaMixedNode) AS {
+                unwind [{left_id: 1, right_id: 2}] as record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            };
+            MATCH (a:PyMetaMixedNode)-[:PY_META_MIXED_REL]->(b:PyMetaMixedNode)
+            RETURN a.name AS origin, b.name AS destination
+        """)
+        await runner.run()
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 1
+        assert meta.virtual_relationships_created == 1
+        assert meta.virtual_nodes_deleted == 0
+        assert meta.virtual_relationships_deleted == 0
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"origin": "X", "destination": "Y"}
+
+    def test_metadata_is_a_copy(self):
+        runner = Runner("RETURN 1 AS x")
+        meta1 = runner.metadata
+        meta1.virtual_nodes_created = 999
+        meta2 = runner.metadata
+        assert meta2.virtual_nodes_created == 0
+
+    def test_metadata_available_before_run(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyMetaBeforeRun) AS {
+                RETURN 1 AS id
+            }
+        """)
+        meta = runner.metadata
+        assert meta.virtual_nodes_created == 1

@@ -29,6 +29,16 @@ asyncio.run(runner.run())
 print(runner.results)  # [{'result': 2}]
 ```
 
+In Jupyter notebooks, you can use `await` directly:
+
+```python
+from flowquery import Runner
+
+runner = Runner("WITH 1 as x RETURN x + 1 as result")
+await runner.run()
+print(runner.results)  # [{'result': 2}]
+```
+
 ## Documentation
 
 - [Language Reference](https://github.com/microsoft/FlowQuery#language-reference) (clauses, expressions, functions, graph operations, and more)

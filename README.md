@@ -1,12 +1,36 @@
-![FlowQuery](./FlowQueryLogoIcon.png)
+# FlowQuery
 
 A declarative OpenCypher-based query language for virtual graphs and data processing pipelines.
 
 FlowQuery is a declarative query language aiming to fully support OpenCypher, extended with capabilities such as **virtual graphs**, HTTP data loading, and inline data processing. Virtual nodes and relationships are backed by sub-queries that can fetch data dynamically (e.g., from REST APIs), and FlowQuery's graph engine supports pattern matching, variable-length traversals, optional matches, relationship direction, and filter pass-down, enabling you to model and explore complex data relationships without a traditional graph database.
 
-Beyond graphs, FlowQuery provides a full data processing pipeline language with features like `LOAD JSON FROM` for HTTP calls (GET/POST with headers), f-strings, list comprehensions, inline predicate aggregation, temporal functions, and a rich library of scalar and aggregate functions. The combination of graph querying and pipeline processing makes FlowQuery ideal for graph-based Retrieval Augmented Generation (RAG) with LLMs: structuring knowledge as virtual graphs, traversing relationships to retrieve grounding data, and feeding it through successive LLM calls, all in a concise, readable query.
+Beyond graphs, FlowQuery provides a full data processing pipeline language with features like `LOAD JSON FROM` for HTTP calls (GET/POST with headers), f-strings, list comprehensions, inline predicate aggregation, temporal functions, and a rich library of scalar and aggregate functions.
 
-FlowQuery is written in TypeScript and runs both in the browser and in Node.js as a self-contained single-file JavaScript library. A pure Python implementation with full functional fidelity is also available in the [flowquery-py](./flowquery-py) sub-folder (`pip install flowquery`). See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation.
+### Graph RAG with FlowQuery
+
+The combination of graph querying and pipeline processing makes FlowQuery ideal for the retrieval stage of Retrieval Augmented Generation (RAG). A typical graph RAG flow works as follows:
+
+1. **User query** — The user asks a question in natural language.
+2. **Query generation** — The LLM, with knowledge of the virtual graph schema, generates a precise OpenCypher query to retrieve the grounding data needed to answer the question.
+3. **Query execution** — The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
+4. **Response formulation** — The LLM formulates a final response informed by the grounding data.
+
+```
+┌──────────┐     ┌───────────────┐     ┌─────────────────┐     ┌───────────────┐
+│   User   │────>│      LLM      │────>│    FlowQuery    │────>│      LLM      │
+│ Question │     │ Generate Query│     │ Execute Query   │     │  Formulate    │
+│          │     │ (OpenCypher)  │     │ (Virtual Graph) │     │  Response     │
+└──────────┘     └───────────────┘     └─────────────────┘     └───────┬───────┘
+                                                                       │
+                                                                       v
+                                                                 ┌──────────┐
+                                                                 │  Answer  │
+                                                                 └──────────┘
+```
+
+See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation.
+
+FlowQuery is written in TypeScript and runs both in the browser and in Node.js as a self-contained single-file JavaScript library. A pure Python implementation of FlowQuery with full functional fidelity is also available in the [flowquery-py](./flowquery-py) sub-folder (`pip install flowquery`).
 
 - Test live at <a href="https://microsoft.github.io/FlowQuery/" target="_blank">https://microsoft.github.io/FlowQuery/</a>.
 - Try as a VSCode plugin from https://marketplace.visualstudio.com/items?itemName=FlowQuery.flowquery-vscode.

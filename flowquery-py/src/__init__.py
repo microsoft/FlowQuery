@@ -7,7 +7,7 @@ This module provides the core components for defining, parsing, and executing Fl
 """
 
 from .compute.flowquery import FlowQuery
-from .compute.runner import Runner
+from .compute.runner import Runner, RunnerMetadata
 from .io.command_line import CommandLine
 from .parsing.functions.aggregate_function import AggregateFunction
 from .parsing.functions.async_function import AsyncFunction
@@ -24,6 +24,7 @@ from .parsing.parser import Parser
 __all__ = [
     "FlowQuery",
     "Runner",
+    "RunnerMetadata",
     "CommandLine",
     "Parser",
     "Function",

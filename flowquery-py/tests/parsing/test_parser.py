@@ -535,8 +535,7 @@ class TestParser:
         parser = Parser()
         with pytest.raises(Exception, match="Only one RETURN statement is allowed"):
             parser.parse("return 1 return 1")
-        # Note: Python implementation throws "Only one RETURN" for this case too
-        with pytest.raises(Exception, match="Only one RETURN statement is allowed"):
+        with pytest.raises(Exception, match="Last statement must be a RETURN"):
             parser.parse("return 1 with 1 as n")
 
     def test_associative_array_with_backtick_string(self):

@@ -233,6 +233,14 @@ class Token {
         return this._type === TokenType.SYMBOL && this._value === Symbol.CLOSING_BRACKET;
     }
 
+    public static get SEMICOLON(): Token {
+        return new Token(TokenType.SYMBOL, Symbol.SEMICOLON);
+    }
+
+    public isSemicolon(): boolean {
+        return this._type === TokenType.SYMBOL && this._value === Symbol.SEMICOLON;
+    }
+
     // Whitespace token
 
     public static get WHITESPACE(): Token {

@@ -6,6 +6,7 @@
  * @packageDocumentation
  */
 import { default as FlowQuery } from "./compute/flowquery";
+import { RunnerMetadata } from "./compute/runner";
 import Function from "./parsing/functions/function";
 import FunctionFactory from "./parsing/functions/function_factory";
 import {
@@ -44,3 +45,4 @@ FlowQuery.getFunctionMetadata = function (name: string): FunctionMetadata | unde
 FlowQuery.Function = Function;
 
 export default FlowQuery;
+export { RunnerMetadata };

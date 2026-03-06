@@ -234,6 +234,13 @@ class Token:
     def is_closing_bracket(self) -> bool:
         return self._type == TokenType.SYMBOL and self._value == Symbol.CLOSING_BRACKET.value
 
+    @staticmethod
+    def SEMICOLON() -> Token:
+        return Token(TokenType.SYMBOL, Symbol.SEMICOLON.value)
+
+    def is_semicolon(self) -> bool:
+        return self._type == TokenType.SYMBOL and self._value == Symbol.SEMICOLON.value
+
     # Whitespace token
 
     @staticmethod

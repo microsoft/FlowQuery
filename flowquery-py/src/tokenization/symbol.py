@@ -11,6 +11,7 @@ class Symbol(Enum):
     COMMA = ","
     DOT = "."
     COLON = ":"
+    SEMICOLON = ";"
     WHITESPACE = ""
     OPENING_BRACE = "{"
     CLOSING_BRACE = "}"

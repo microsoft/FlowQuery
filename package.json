@@ -43,7 +43,7 @@
     "*.{json,md}": "prettier --write"
   },
   "keywords": [],
-  "author": "",
+  "author": "Niclas Kjäll-Ohlsson",
   "license": "ISC",
   "devDependencies": {
     "@trivago/prettier-plugin-sort-imports": "^5.2.2",

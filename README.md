@@ -1,5 +1,7 @@
 # FlowQuery
 
+**Author:** Niclas Kjäll-Ohlsson
+
 A declarative OpenCypher-based query language for virtual graphs and data processing pipelines.
 
 FlowQuery is a declarative query language aiming to fully support OpenCypher, extended with capabilities such as **virtual graphs**, HTTP data loading, f-strings, and **custom function extensibility**. Virtual nodes and relationships are backed by sub-queries that can fetch data dynamically (e.g., from REST APIs), and FlowQuery's graph engine supports pattern matching, variable-length traversals, optional matches, relationship direction, and filter pass-down, enabling you to model and explore complex data relationships without a traditional graph database.

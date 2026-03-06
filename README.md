@@ -1,12 +1,12 @@
 ![FlowQuery](./FlowQueryLogoIcon.png)
 
-A declarative query language for data processing pipelines.
+A declarative OpenCypher-based query language for virtual graphs and data processing pipelines.
 
-FlowQuery is a declarative query language for defining and executing data processing pipelines involving (but not limited to) API calls over http. The language is very well suited for prototyping of for example LLM chain-of-thought pipelines involving fetching grounding data from APIs, and processing that grounding data in multiple successive LLM calls where the next call builds on previous results. FlowQuery is based on many of the core language constructs in the OpenCypher query language except (currently) concepts related to graphs. Additionally, FlowQuery implements its own language constructs, such as Python-style f-strings, and special predicate functions operating over lists. FlowQuery is not limited to its current capabilities and may evolve beyond this in the future to include language constructs such as variables and/or other language concepts from OpenCypher.
+FlowQuery is a declarative query language aiming to fully support OpenCypher, extended with capabilities such as **virtual graphs**, HTTP data loading, and inline data processing. Virtual nodes and relationships are backed by sub-queries that can fetch data dynamically (e.g., from REST APIs), and FlowQuery's graph engine supports pattern matching, variable-length traversals, optional matches, relationship direction, and filter pass-down, enabling you to model and explore complex data relationships without a traditional graph database.
 
-The main motivation of FlowQuery is rapid prototyping of fixed step data processing pipelines involving LLMs (for example chain-of-thought) and as such drastically shorten the work needed to create such data processing pipelines. A core business outcome of this is faster product value experimentation loops, which leads to shorter time-to-market for product ideas involving LLMs.
+Beyond graphs, FlowQuery provides a full data processing pipeline language with features like `LOAD JSON FROM` for HTTP calls (GET/POST with headers), f-strings, list comprehensions, inline predicate aggregation, temporal functions, and a rich library of scalar and aggregate functions. The combination of graph querying and pipeline processing makes FlowQuery ideal for graph-based Retrieval Augmented Generation (RAG) with LLMs: structuring knowledge as virtual graphs, traversing relationships to retrieve grounding data, and feeding it through successive LLM calls, all in a concise, readable query.
 
-FlowQuery is written in TypeScript (https://www.typescriptlang.org/) and built/compiled runs both in browser or in Node as a self-contained one-file Javascript library.
+FlowQuery is written in TypeScript and runs both in the browser and in Node.js as a self-contained single-file JavaScript library. A pure Python implementation with full functional fidelity is also available in the [flowquery-py](./flowquery-py) sub-folder (`pip install flowquery`). See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation.
 
 - Test live at <a href="https://microsoft.github.io/FlowQuery/" target="_blank">https://microsoft.github.io/FlowQuery/</a>.
 - Try as a VSCode plugin from https://marketplace.visualstudio.com/items?itemName=FlowQuery.flowquery-vscode.
@@ -71,6 +71,33 @@ const query = new FlowQuery('WITH "Hello" AS greeting RETURN greeting');
 await query.run();
 console.log(query.results);
 ```
+
+### Python
+
+Install FlowQuery from PyPI:
+
+```bash
+pip install flowquery
+```
+
+Then use it in your code:
+
+```python
+import asyncio
+from flowquery import Runner
+
+runner = Runner("WITH 1 AS x RETURN x + 1 AS result")
+asyncio.run(runner.run())
+print(runner.results)  # [{'result': 2}]
+```
+
+Or start the interactive REPL:
+
+```bash
+flowquery
+```
+
+See [flowquery-py](./flowquery-py) for more details, including custom function extensibility in Python.
 
 ## Examples
 
@@ -148,23 +175,583 @@ post {
 return data
 ```
 
+## Language Reference
+
+### Clauses
+
+#### RETURN
+
+Returns results. Expressions can be aliased with `AS`.
+
+```cypher
+RETURN 1 + 2 AS sum, 3 + 4 AS sum2
+// [{ sum: 3, sum2: 7 }]
+```
+
+#### WITH
+
+Introduces variables into scope. Works like `RETURN` but continues the pipeline.
+
+```cypher
+WITH 1 AS a RETURN a
+// [{ a: 1 }]
+```
+
+#### UNWIND
+
+Expands a list into individual rows.
+
+```cypher
+UNWIND [1, 2, 3] AS num RETURN num
+// [{ num: 1 }, { num: 2 }, { num: 3 }]
+```
+
+Unwinding `null` produces zero rows.
+
+#### LOAD JSON FROM
+
+Fetches JSON data from a URL. Supports GET (default) and POST with headers.
+
+```cypher
+LOAD JSON FROM "https://api.example.com/data" AS data RETURN data
+
+// With POST body and custom headers
+LOAD JSON FROM 'https://api.example.com/endpoint'
+HEADERS { `Content-Type`: 'application/json', Authorization: f'Bearer {token}' }
+POST { key: 'value' } AS response
+RETURN response
+```
+
+#### LIMIT
+
+Restricts the number of rows. Can appear mid-pipeline or after `RETURN`.
+
+```cypher
+UNWIND range(1, 100) AS i RETURN i LIMIT 5
+```
+
+#### CALL ... YIELD
+
+Invokes an async function and yields named fields into scope.
+
+```cypher
+CALL myAsyncFunction() YIELD result RETURN result
+// If last operation, YIELD is optional
+CALL myAsyncFunction()
+```
+
+#### UNION / UNION ALL
+
+Combines results from multiple queries. `UNION` removes duplicates; `UNION ALL` keeps them. Column names must match.
+
+```cypher
+WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x
+// [{ x: 1 }, { x: 2 }]
+
+WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
+// [{ x: 1 }, { x: 1 }]
+```
+
+### WHERE Clause
+
+Filters rows based on conditions. Supports the following operators:
+
+| Operator             | Example                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| Comparison           | `=`, `<>`, `>`, `>=`, `<`, `<=`                                |
+| Logical              | `AND`, `OR`, `NOT`                                             |
+| Null checks          | `IS NULL`, `IS NOT NULL`                                       |
+| List membership      | `IN [...]`, `NOT IN [...]`                                     |
+| String matching      | `CONTAINS`, `NOT CONTAINS`                                     |
+| String prefix/suffix | `STARTS WITH`, `NOT STARTS WITH`, `ENDS WITH`, `NOT ENDS WITH` |
+
+```cypher
+UNWIND range(1,100) AS n WITH n WHERE n >= 20 AND n <= 30 RETURN n
+
+UNWIND ['apple', 'banana', 'grape'] AS fruit
+WITH fruit WHERE fruit CONTAINS 'ap' RETURN fruit
+// [{ fruit: 'apple' }, { fruit: 'grape' }]
+
+UNWIND ['apple', 'apricot', 'banana'] AS fruit
+WITH fruit WHERE fruit STARTS WITH 'ap' RETURN fruit
+
+WITH fruit WHERE fruit IN ['banana', 'date'] RETURN fruit
+
+WHERE age IS NOT NULL
+```
+
+### ORDER BY
+
+Sorts results. Supports `ASC` (default) and `DESC`. Can use aliases, property access, function expressions, or arithmetic.
+
+```cypher
+UNWIND [3, 1, 2] AS x RETURN x ORDER BY x DESC
+// [{ x: 3 }, { x: 2 }, { x: 1 }]
+
+// Multiple sort keys
+RETURN person.name AS name, person.age AS age ORDER BY name ASC, age DESC
+
+// Sort by expression (expression values are not leaked into results)
+UNWIND ['BANANA', 'apple', 'Cherry'] AS fruit
+RETURN fruit ORDER BY toLower(fruit)
+
+// Sort by arithmetic expression
+RETURN item.a AS a, item.b AS b ORDER BY item.a + item.b ASC
+```
+
+#### DISTINCT
+
+Removes duplicate rows from `RETURN` or `WITH`.
+
+```cypher
+UNWIND [1, 1, 2, 2] AS i RETURN DISTINCT i
+// [{ i: 1 }, { i: 2 }]
+```
+
+### Expressions
+
+#### Arithmetic
+
+`+`, `-`, `*`, `/`, `^` (power), `%` (modulo). Standard precedence applies; use parentheses to override.
+
+```cypher
+RETURN 2 + 3 * 4 AS result   // 14
+RETURN (2 + 3) * 4 AS result // 20
+```
+
+#### String Concatenation
+
+The `+` operator concatenates strings.
+
+```cypher
+RETURN "hello" + " world" AS result  // "hello world"
+```
+
+#### List Concatenation
+
+The `+` operator concatenates lists.
+
+```cypher
+RETURN [1, 2] + [3, 4] AS result  // [1, 2, 3, 4]
+```
+
+#### Negative Numbers
+
+```cypher
+RETURN -1 AS num  // -1
+```
+
+#### Associative Arrays (Maps)
+
+Create inline maps. Keys can be reserved keywords.
+
+```cypher
+RETURN {name: "Alice", age: 30} AS person
+RETURN {return: 1}.return AS aa  // 1
+```
+
+#### Property Access
+
+Dot notation or bracket notation for nested lookups. Bracket notation supports range slicing.
+
+```cypher
+person.name
+person["name"]
+numbers[0:3]     // first 3 elements
+numbers[:-2]     // all but last 2
+numbers[2:-2]    // slice from index 2, excluding last 2
+numbers[:]       // full copy
+```
+
+#### F-Strings
+
+Python-style formatted strings with embedded expressions.
+
+```cypher
+WITH "world" AS w RETURN f"hello {w}" AS greeting
+// Escape braces with double braces: {{ and }}
+RETURN f"literal {{braces}}" AS result  // "literal {braces}"
+```
+
+#### CASE Expression
+
+```cypher
+RETURN CASE WHEN num > 1 THEN num ELSE null END AS ret
+```
+
+#### Equality as Expression
+
+`=` and `<>` return `1` (true) or `0` (false) when used in RETURN.
+
+```cypher
+RETURN i=5 AS isEqual, i<>5 AS isNotEqual
+```
+
+### List Comprehensions
+
+Filter and/or transform lists inline.
+
+```cypher
+// Map: [variable IN list | expression]
+RETURN [n IN [1, 2, 3] | n * 2] AS doubled   // [2, 4, 6]
+
+// Filter: [variable IN list WHERE condition]
+RETURN [n IN [1, 2, 3, 4, 5] WHERE n > 2] AS filtered  // [3, 4, 5]
+
+// Filter + Map: [variable IN list WHERE condition | expression]
+RETURN [n IN [1, 2, 3, 4] WHERE n > 1 | n ^ 2] AS result  // [4, 9, 16]
+
+// Identity (copy): [variable IN list]
+RETURN [n IN [10, 20, 30]] AS result  // [10, 20, 30]
+```
+
+### Predicate Functions (Inline Aggregation)
+
+Aggregate over a list expression with optional filtering.
+
+```cypher
+// sum(variable IN list | expression WHERE condition)
+RETURN sum(n IN [1, 2, 3] | n WHERE n > 1) AS sum   // 5
+RETURN sum(n IN [1, 2, 3] | n) AS sum                // 6
+RETURN sum(n IN [1+2+3, 2, 3] | n^2) AS sum          // 49
+```
+
+### Aggregate Functions
+
+Used in `RETURN` or `WITH` to group and reduce rows. Non-aggregated expressions define grouping keys. Aggregate functions cannot be nested.
+
+| Function                 | Description                                                         |
+| ------------------------ | ------------------------------------------------------------------- |
+| `sum(expr)`              | Sum of values. Returns `0` for empty input, `null` for null input.  |
+| `avg(expr)`              | Average. Returns `null` for null input.                             |
+| `count(expr)`            | Count of rows.                                                      |
+| `count(DISTINCT expr)`   | Count of unique values.                                             |
+| `min(expr)`              | Minimum value (numbers or strings).                                 |
+| `max(expr)`              | Maximum value (numbers or strings).                                 |
+| `collect(expr)`          | Collects values into a list.                                        |
+| `collect(DISTINCT expr)` | Collects unique values. Works with primitives, arrays, and objects. |
+
+```cypher
+UNWIND [1, 1, 2, 2] AS i UNWIND [1, 2, 3, 4] AS j
+RETURN i, sum(j) AS sum, avg(j) AS avg
+// [{ i: 1, sum: 20, avg: 2.5 }, { i: 2, sum: 20, avg: 2.5 }]
+
+UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
+```
+
+### Scalar Functions
+
+| Function                       | Description                            | Example                                |
+| ------------------------------ | -------------------------------------- | -------------------------------------- |
+| `size(list)`                   | Length of list or string               | `size([1,2,3])` → `3`                  |
+| `range(start, end)`            | Inclusive integer range                | `range(1,3)` → `[1,2,3]`               |
+| `round(n)`                     | Round to nearest integer               | `round(3.7)` → `4`                     |
+| `rand()`                       | Random float 0–1                       | `round(rand()*10)`                     |
+| `split(str, delim)`            | Split string into list                 | `split("a,b",",")` → `["a","b"]`       |
+| `join(list, delim)`            | Join list into string                  | `join(["a","b"],",")` → `"a,b"`        |
+| `replace(str, from, to)`       | Replace all occurrences                | `replace("hello","l","x")` → `"hexxo"` |
+| `toLower(str)`                 | Lowercase                              | `toLower("Hello")` → `"hello"`         |
+| `trim(str)`                    | Strip whitespace                       | `trim("  hi  ")` → `"hi"`              |
+| `substring(str, start[, len])` | Extract substring                      | `substring("hello",1,3)` → `"ell"`     |
+| `toString(val)`                | Convert to string                      | `toString(42)` → `"42"`                |
+| `toInteger(val)`               | Convert to integer                     | `toInteger("42")` → `42`               |
+| `toFloat(val)`                 | Convert to float                       | `toFloat("3.14")` → `3.14`             |
+| `tojson(str)`                  | Parse JSON string to object            | `tojson('{"a":1}')` → `{a: 1}`         |
+| `stringify(obj)`               | Pretty-print object as JSON            | `stringify({a:1})`                     |
+| `string_distance(a, b)`        | Normalized Levenshtein distance (0–1)  | `string_distance("kitten","sitting")`  |
+| `keys(obj)`                    | Keys of a map                          | `keys({a:1,b:2})` → `["a","b"]`        |
+| `properties(node_or_map)`      | Properties of a node or map            | `properties(n)`                        |
+| `type(val)`                    | Type name string                       | `type(123)` → `"number"`               |
+| `coalesce(val, ...)`           | First non-null argument                | `coalesce(null, 42)` → `42`            |
+| `head(list)`                   | First element                          | `head([1,2,3])` → `1`                  |
+| `tail(list)`                   | All but first element                  | `tail([1,2,3])` → `[2,3]`              |
+| `last(list)`                   | Last element                           | `last([1,2,3])` → `3`                  |
+| `id(node_or_rel)`              | ID of a node or type of a relationship | `id(n)`                                |
+| `elementId(node)`              | String ID of a node                    | `elementId(n)` → `"1"`                 |
+
+All scalar functions propagate `null`: if the primary input is `null`, the result is `null`.
+
+### Temporal Functions
+
+| Function                                          | Description                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `datetime()`                                      | Current UTC datetime object                                        |
+| `datetime(str)`                                   | Parse ISO 8601 string (e.g. `'2025-06-15T12:30:45.123Z'`)          |
+| `datetime({year, month, day, hour, minute, ...})` | Construct from map                                                 |
+| `date()` / `date(str)` / `date({...})`            | Date only (no time fields)                                         |
+| `time()`                                          | Current UTC time                                                   |
+| `localtime()`                                     | Current local time                                                 |
+| `localdatetime()` / `localdatetime(str)`          | Current or parsed local datetime                                   |
+| `timestamp()`                                     | Current epoch milliseconds (number)                                |
+| `duration(str)`                                   | Parse ISO 8601 duration (`'P1Y2M3DT4H5M6S'`, `'P2W'`, `'PT2H30M'`) |
+| `duration({days, hours, ...})`                    | Construct duration from map                                        |
+
+**Datetime properties:** `year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `epochMillis`, `epochSeconds`, `dayOfWeek` (1=Mon, 7=Sun), `dayOfYear`, `quarter`, `formatted`.
+
+**Date properties:** `year`, `month`, `day`, `epochMillis`, `dayOfWeek`, `dayOfYear`, `quarter`, `formatted`.
+
+**Duration properties:** `years`, `months`, `weeks`, `days`, `hours`, `minutes`, `seconds`, `totalMonths`, `totalDays`, `totalSeconds`, `formatted`.
+
+```cypher
+WITH datetime() AS now RETURN now.year AS year, now.quarter AS q
+RETURN date('2025-06-15').dayOfWeek AS dow  // 7 (Sunday)
+RETURN duration('P2W').days AS d            // 14
+```
+
+### Graph Operations
+
+#### CREATE VIRTUAL (Nodes)
+
+Defines a virtual node label backed by a sub-query.
+
+```cypher
+CREATE VIRTUAL (:Person) AS {
+    UNWIND [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}] AS record
+    RETURN record.id AS id, record.name AS name
+}
+```
+
+#### CREATE VIRTUAL (Relationships)
+
+Defines a virtual relationship type between two node labels. Must return `left_id` and `right_id`.
+
+```cypher
+CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+    UNWIND [{left_id: 1, right_id: 2}] AS record
+    RETURN record.left_id AS left_id, record.right_id AS right_id
+}
+```
+
+#### DELETE VIRTUAL
+
+Removes a virtual node or relationship definition.
+
+```cypher
+DELETE VIRTUAL (:Person)
+DELETE VIRTUAL (:Person)-[:KNOWS]-(:Person)
+```
+
+#### MATCH
+
+Queries virtual graph data. Supports property constraints, `WHERE` clauses, and relationship traversal.
+
+```cypher
+MATCH (n:Person) RETURN n.name AS name
+MATCH (n:Person {name: 'Alice'}) RETURN n
+MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name
+```
+
+**Leftward direction:** `<-[:TYPE]-` reverses traversal direction.
+
+```cypher
+MATCH (m:Person)<-[:REPORTS_TO]-(e:Person)
+RETURN m.name AS manager, e.name AS employee
+```
+
+**Variable-length relationships:** `*`, `*0..3`, `*1..`, `*2..`
+
+```cypher
+MATCH (a:Person)-[:KNOWS*]->(b:Person) RETURN a.name, b.name     // 0+ hops
+MATCH (a:Person)-[:KNOWS*1..]->(b:Person) RETURN a.name, b.name  // 1+ hops
+MATCH (a:Person)-[:KNOWS*0..3]->(b:Person) RETURN a.name, b.name // 0–3 hops
+```
+
+**ORed relationship types:**
+
+```cypher
+MATCH (a)-[:KNOWS|FOLLOWS]->(b) RETURN a.name, b.name
+```
+
+**Pattern variable:** Capture the full path as a variable.
+
+```cypher
+MATCH p=(:Person)-[:KNOWS]-(:Person) RETURN p AS pattern
+```
+
+**Pattern in WHERE:** Check existence of a relationship in a WHERE clause.
+
+```cypher
+MATCH (a:Person), (b:Person) WHERE (a)-[:KNOWS]->(b) RETURN a.name, b.name
+MATCH (a:Person) WHERE NOT (a)-[:KNOWS]->(:Person) RETURN a.name
+```
+
+**Node reference reuse across MATCH clauses:**
+
+```cypher
+MATCH (a:Person)-[:KNOWS]-(b:Person)
+MATCH (b)-[:KNOWS]-(c:Person)
+RETURN a.name, b.name, c.name
+```
+
+#### OPTIONAL MATCH
+
+Like `MATCH` but returns `null` for unmatched nodes instead of dropping the row. Property access on `null` nodes returns `null`.
+
+```cypher
+MATCH (a:Person)
+OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+RETURN a.name AS name, b.name AS friend
+// Persons without KNOWS relationships get friend=null
+```
+
+Chained optional matches propagate `null`:
+
+```cypher
+OPTIONAL MATCH (u)-[:REPORTS_TO]->(m1:Employee)
+OPTIONAL MATCH (m1)-[:REPORTS_TO]->(m2:Employee)
+// If m1 is null, m2 is also null
+```
+
+#### Graph Utility Functions
+
+| Function                  | Description                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `nodes(path)`             | List of nodes in a path                                                          |
+| `relationships(path)`     | List of relationships in a path                                                  |
+| `properties(node_or_rel)` | Properties map (excludes `id` for nodes, `left_id`/`right_id` for relationships) |
+| `schema()`                | Introspect registered virtual node labels and relationship types                 |
+
+```cypher
+MATCH p=(:City)-[:CONNECTED_TO]-(:City)
+RETURN nodes(p) AS cities, relationships(p) AS rels
+
+CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
+RETURN kind, label, properties
+```
+
+#### Filter Pass-Down (Parameter References)
+
+Virtual node/relationship definitions can reference `$paramName` or `$args.paramName` to receive filter values from `MATCH` constraints and `WHERE` equality predicates. This enables dynamic data loading (e.g., API calls parameterized by match constraints).
+
+```cypher
+CREATE VIRTUAL (:Todo) AS {
+    LOAD JSON FROM f"https://api.example.com/todos/{coalesce($id, 1)}" AS todo
+    RETURN todo.id AS id, todo.title AS title
+}
+
+// $id receives the value 3 from the constraint
+MATCH (t:Todo {id: 3}) RETURN t.title
+
+// Also extracted from WHERE equality
+MATCH (t:Todo) WHERE t.id = 3 RETURN t.title
+```
+
+`$`-prefixed identifiers are **only** allowed inside virtual definitions. Non-equality operators in `WHERE` (`>`, `<`, `CONTAINS`, etc.) are **not** extracted as pass-down parameters. `OR` predicates are also not extracted.
+
+### Reserved Keywords as Identifiers
+
+Reserved words (`return`, `with`, `from`, `to`, etc.) can be used as:
+
+- Variable aliases: `WITH 1 AS return RETURN return`
+- Property keys: `data.from`, `data.to`
+- Map keys: `{return: 1}`
+- Node labels and relationship types: `(:Return)-[:With]->()`
+
+### Introspection
+
+Discover all registered functions (built-in and custom):
+
+```cypher
+WITH functions() AS funcs UNWIND funcs AS f
+RETURN f.name, f.description, f.category
+```
+
+---
+
+## Quick Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CLAUSE SYNTAX                                              │
+├─────────────────────────────────────────────────────────────┤
+│  RETURN expr [AS alias], ...  [WHERE cond]                  │
+│  │     [ORDER BY expr [ASC|DESC], ...]  [LIMIT n]           │
+│  WITH expr [AS alias], ...    [WHERE cond]                  │
+│  UNWIND list AS var                                         │
+│  LOAD JSON FROM url [HEADERS {...}] [POST {...}] AS alias   │
+│  CALL func() [YIELD field, ...]                             │
+│  query1 UNION [ALL] query2                                  │
+│  LIMIT n                                                    │
+├─────────────────────────────────────────────────────────────┤
+│  GRAPH OPERATIONS                                           │
+├─────────────────────────────────────────────────────────────┤
+│  CREATE VIRTUAL (:Label) AS { subquery }                    │
+│  CREATE VIRTUAL (:L1)-[:TYPE]-(:L2) AS { subquery }         │
+│  DELETE VIRTUAL (:Label)                                    │
+│  DELETE VIRTUAL (:L1)-[:TYPE]-(:L2)                         │
+│  MATCH (n:Label {prop: val}), ...  [WHERE cond]             │
+│  MATCH (a)-[:TYPE]->(b)              -- rightward           │
+│  MATCH (a)<-[:TYPE]-(b)              -- leftward            │
+│  MATCH (a)-[:TYPE*0..3]->(b)         -- variable length     │
+│  MATCH (a)-[:T1|T2]->(b)             -- ORed types          │
+│  MATCH p=(a)-[:TYPE]->(b)            -- pattern variable    │
+│  OPTIONAL MATCH (a)-[:TYPE]->(b)     -- null if no match    │
+├─────────────────────────────────────────────────────────────┤
+│  WHERE OPERATORS                                            │
+├─────────────────────────────────────────────────────────────┤
+│  =  <>  >  >=  <  <=                                        │
+│  AND  OR  NOT                                               │
+│  IS NULL  ·  IS NOT NULL                                    │
+│  IN [...]  ·  NOT IN [...]                                  │
+│  CONTAINS  ·  NOT CONTAINS                                  │
+│  STARTS WITH  ·  NOT STARTS WITH                            │
+│  ENDS WITH  ·  NOT ENDS WITH                                │
+├─────────────────────────────────────────────────────────────┤
+│  EXPRESSIONS                                                │
+├─────────────────────────────────────────────────────────────┤
+│  +  -  *  /  ^  %                    -- arithmetic          │
+│  "str" + "str"                       -- string concat       │
+│  [1,2] + [3,4]                       -- list concat         │
+│  f"hello {expr}"                     -- f-string            │
+│  {key: val, ...}                     -- map literal         │
+│  obj.key  ·  obj["key"]              -- property access     │
+│  list[0:3]  ·  list[:-2]             -- slicing             │
+│  CASE WHEN cond THEN v ELSE v END    -- conditional         │
+│  DISTINCT                            -- deduplicate         │
+├─────────────────────────────────────────────────────────────┤
+│  LIST COMPREHENSIONS                                        │
+├─────────────────────────────────────────────────────────────┤
+│  [x IN list | expr]                  -- map                 │
+│  [x IN list WHERE cond]              -- filter              │
+│  [x IN list WHERE cond | expr]       -- filter + map        │
+├─────────────────────────────────────────────────────────────┤
+│  AGGREGATE FUNCTIONS                                        │
+├─────────────────────────────────────────────────────────────┤
+│  sum(x)  avg(x)  count(x)  min(x)  max(x)  collect(x)       │
+│  count(DISTINCT x)  ·  collect(DISTINCT x)                  │
+│  sum(v IN list | expr [WHERE cond])  -- inline predicate    │
+├─────────────────────────────────────────────────────────────┤
+│  SCALAR FUNCTIONS                                           │
+├─────────────────────────────────────────────────────────────┤
+│  size  range  round  rand  split  join  replace             │
+│  toLower  trim  substring  toString  toInteger  toFloat     │
+│  tojson  stringify  string_distance  keys  properties       │
+│  type  coalesce  head  tail  last  id  elementId            │
+├─────────────────────────────────────────────────────────────┤
+│  TEMPORAL FUNCTIONS                                         │
+├─────────────────────────────────────────────────────────────┤
+│  datetime()  date()  time()  localtime()  localdatetime()   │
+│  timestamp()  duration()                                    │
+│  Properties: .year .month .day .hour .minute .second        │
+│    .millisecond .epochMillis .dayOfWeek .quarter .formatted │
+├─────────────────────────────────────────────────────────────┤
+│  GRAPH FUNCTIONS                                            │
+├─────────────────────────────────────────────────────────────┤
+│  nodes(path)  relationships(path)  properties(node)         │
+│  schema()  functions()                                      │
+├─────────────────────────────────────────────────────────────┤
+│  PARAMETER PASS-DOWN (inside virtual definitions only)      │
+├─────────────────────────────────────────────────────────────┤
+│  $paramName  ·  $args.paramName                             │
+│  coalesce($id, defaultValue)         -- with fallback       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Extending FlowQuery with Custom Functions
 
 FlowQuery supports extending its functionality with custom functions using the `@FunctionDef` decorator. You can create scalar functions, aggregate functions, predicate functions, and async data providers.
-
-### Installing the Extensibility API
-
-Import the necessary classes and decorators from the extensibility module:
-
-```typescript
-import {
-    AggregateFunction,
-    Function,
-    FunctionDef,
-    PredicateFunction,
-    ReducerElement,
-} from "flowquery/extensibility";
-```
 
 ### Creating a Custom Scalar Function
 

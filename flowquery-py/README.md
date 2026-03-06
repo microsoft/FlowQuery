@@ -1,6 +1,6 @@
-# FlowQuery
+# FlowQuery (Python)
 
-A declarative query language for data processing pipelines.
+A pure Python implementation of [FlowQuery](../README.md), a declarative OpenCypher-based query language for virtual graphs and data processing pipelines. This package has full functional fidelity with the TypeScript version.
 
 ## Installation
 
@@ -29,32 +29,172 @@ asyncio.run(runner.run())
 print(runner.results)  # [{'result': 2}]
 ```
 
-## Creating Custom Functions
+## Documentation
+
+- [Language Reference](https://github.com/microsoft/FlowQuery#language-reference) (clauses, expressions, functions, graph operations, and more)
+- [Quick Cheat Sheet](https://github.com/microsoft/FlowQuery#quick-cheat-sheet)
+- [Full Documentation](https://github.com/microsoft/FlowQuery)
+- [Contributing Guide](https://github.com/microsoft/FlowQuery/blob/main/flowquery-py/CONTRIBUTING.md)
+- [Virtual Graph Demo Notebook](notebooks/TestFlowQuery.ipynb) — a demo of virtual graph capabilities and custom function extensibility
+
+## Extending FlowQuery with Custom Functions
+
+The query language itself is identical between the TypeScript and Python versions. The only difference is that custom functions are written in Python here instead of TypeScript.
+
+### Creating a Custom Scalar Function
+
+Scalar functions operate on individual values and return a result:
 
 ```python
 from flowquery.extensibility import Function, FunctionDef
 
 @FunctionDef({
-    "description": "Converts a string to uppercase",
-    "category": "string",
-    "parameters": [
-        {"name": "text", "description": "String to convert", "type": "string"}
-    ],
-    "output": {"description": "Uppercase string", "type": "string"}
+    "description": "Doubles a number",
+    "category": "scalar",
+    "parameters": [{"name": "value", "description": "Number to double", "type": "number"}],
+    "output": {"description": "Doubled value", "type": "number"},
 })
-class UpperCase(Function):
+class Double(Function):
     def __init__(self):
-        super().__init__("uppercase")
+        super().__init__("double")
+        self._expected_parameter_count = 1
+
+    def value(self):
+        return self.get_children()[0].value() * 2
+```
+
+Once defined, use it in your queries:
+
+```cypher
+WITH 5 AS num RETURN double(num) AS result
+// Returns: [{"result": 10}]
+```
+
+### Creating a Custom String Function
+
+```python
+from flowquery.extensibility import Function, FunctionDef
+
+@FunctionDef({
+    "description": "Reverses a string",
+    "category": "scalar",
+    "parameters": [{"name": "text", "description": "String to reverse", "type": "string"}],
+    "output": {"description": "Reversed string", "type": "string"},
+})
+class StrReverse(Function):
+    def __init__(self):
+        super().__init__("strreverse")
         self._expected_parameter_count = 1
 
     def value(self) -> str:
-        return str(self.get_children()[0].value()).upper()
+        return str(self.get_children()[0].value())[::-1]
 ```
 
-## Documentation
+Usage:
 
-- [Full Documentation](https://github.com/microsoft/FlowQuery)
-- [Contributing Guide](https://github.com/microsoft/FlowQuery/blob/main/flowquery-py/CONTRIBUTING.md)
+```cypher
+WITH 'hello' AS s RETURN strreverse(s) AS reversed
+// Returns: [{"reversed": "olleh"}]
+```
+
+### Creating a Custom Aggregate Function
+
+Aggregate functions process multiple values and return a single result. They require a `ReducerElement` to track state:
+
+```python
+from flowquery.extensibility import AggregateFunction, FunctionDef, ReducerElement
+
+class MinReducerElement(ReducerElement):
+    def __init__(self):
+        self._value = None
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, val):
+        self._value = val
+
+@FunctionDef({
+    "description": "Collects the minimum value",
+    "category": "aggregate",
+    "parameters": [{"name": "value", "description": "Value to compare", "type": "number"}],
+    "output": {"description": "Minimum value", "type": "number"},
+})
+class MinValue(AggregateFunction):
+    def __init__(self):
+        super().__init__("minvalue")
+        self._expected_parameter_count = 1
+
+    def reduce(self, element):
+        current = self.first_child().value()
+        if element.value is None or current < element.value:
+            element.value = current
+
+    def element(self):
+        return MinReducerElement()
+```
+
+Usage:
+
+```cypher
+UNWIND [5, 2, 8, 1, 9] AS num RETURN minvalue(num) AS min
+// Returns: [{"min": 1}]
+```
+
+### Creating a Custom Async Data Provider
+
+Async providers allow you to create custom data sources that can be used with `LOAD JSON FROM`:
+
+```python
+from flowquery.extensibility import AsyncFunction, FunctionDef
+
+@FunctionDef({
+    "description": "Provides example data for testing",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Example data object", "type": "object"},
+})
+class GetExampleData(AsyncFunction):
+    def __init__(self):
+        super().__init__("getexampledata")
+        self._expected_parameter_count = 0
+
+    async def generate(self):
+        yield {"id": 1, "name": "Alice"}
+        yield {"id": 2, "name": "Bob"}
+```
+
+Usage:
+
+```cypher
+LOAD JSON FROM getexampledata() AS data RETURN data.id AS id, data.name AS name
+// Returns: [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+```
+
+### Using Custom Functions with Expressions
+
+Custom functions integrate seamlessly with FlowQuery expressions and can be combined with other functions:
+
+```cypher
+// Using custom function with expressions
+WITH 5 * 3 AS num RETURN addhundred(num) + 1 AS result
+
+// Using multiple custom functions together
+WITH 2 AS num RETURN triple(num) AS tripled, square(num) AS squared
+```
+
+### Introspecting Registered Functions
+
+You can use the built-in `functions()` function to discover registered functions including your custom ones:
+
+```cypher
+WITH functions() AS funcs
+UNWIND funcs AS f
+WITH f WHERE f.name = 'double'
+RETURN f.name AS name, f.description AS description, f.category AS category
+```
 
 ## License
 

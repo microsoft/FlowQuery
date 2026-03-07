@@ -8,8 +8,15 @@ import {
     webLightTheme,
 } from "@fluentui/react-components";
 import React from "react";
-import { compressString, decompressString } from "./compression";
+import { Compression } from "./compression";
 import { ResultsTable } from "./ResultsTable";
+
+function formatMetadataKey(key: string): string {
+    return key
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+}
 
 interface AppState {
     input: string;
@@ -32,7 +39,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
         const query = window.location.search;
         if (query && query.length > 1) {
             const compressed = query.substring(1);
-            decompressString(compressed)
+            Compression.decompress(compressed)
                 .then((statement) => {
                     this.setState({ input: statement });
                     const fq = new FlowQuery(statement);
@@ -63,7 +70,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
 
     share = async () => {
         if (!this.state.input.trim()) return;
-        const compressed = await compressString(this.state.input);
+        const compressed = await Compression.compress(this.state.input);
         const url = window.location.origin + window.location.pathname + "?" + compressed;
         this.setState({ shareLink: url });
         navigator.clipboard.writeText(url).catch(() => {});
@@ -124,12 +131,14 @@ export class App extends React.Component<Record<string, never>, AppState> {
                     )}
                 </Toolbar>
                 {metadata && (
-                    <div style={{ display: "flex", gap: 12, padding: "4px 0" }}>
-                        {Object.entries(metadata).map(([k, v]) => (
-                            <Text key={k} size={200} font="monospace">
-                                {k}: {String(v)}
-                            </Text>
-                        ))}
+                    <div style={{ display: "flex", gap: 12, padding: "4px 0", flexWrap: "wrap" }}>
+                        {Object.entries(metadata)
+                            .filter(([, v]) => v !== 0)
+                            .map(([k, v]) => (
+                                <Text key={k} size={200} font="monospace">
+                                    {formatMetadataKey(k)}: {String(v)}
+                                </Text>
+                            ))}
                     </div>
                 )}
                 {error && (

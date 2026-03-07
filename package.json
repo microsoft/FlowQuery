@@ -7,18 +7,18 @@
   "sideEffects": true,
   "exports": {
     ".": {
+      "types": "./dist/index.node.d.ts",
       "import": "./dist/index.node.js",
-      "require": "./dist/index.node.js",
-      "types": "./dist/index.node.d.ts"
+      "require": "./dist/index.node.js"
     },
     "./browser": {
       "import": "./dist/flowquery.min.js",
       "require": "./dist/flowquery.min.js"
     },
     "./extensibility": {
+      "types": "./dist/extensibility.d.ts",
       "import": "./dist/extensibility.js",
-      "require": "./dist/extensibility.js",
-      "types": "./dist/extensibility.d.ts"
+      "require": "./dist/extensibility.js"
     }
   },
   "files": [

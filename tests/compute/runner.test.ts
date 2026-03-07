@@ -4734,7 +4734,7 @@ test("Test filter pass-down with multiple properties", async () => {
     `).run();
 
     const runner = new Runner(`
-        match (n:MultiPropNode {id: 7}, {name: 'Alice'})
+        match (n:MultiPropNode {id: 7, name: 'Alice'})
         return n.id AS id, n.name AS name
     `);
     await runner.run();

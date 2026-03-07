@@ -5023,7 +5023,7 @@ class TestRunner:
 
         runner = Runner(
             """
-            match (n:MultiPropPyNode {id: 7}, {name: 'Alice'})
+            match (n:MultiPropPyNode {id: 7, name: 'Alice'})
             return n.id AS id, n.name AS name
             """
         )

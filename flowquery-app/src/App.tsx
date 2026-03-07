@@ -2,13 +2,13 @@ import {
     FluentProvider,
     Input,
     Text,
-    Textarea,
     Toolbar,
     ToolbarButton,
     webLightTheme,
 } from "@fluentui/react-components";
 import React from "react";
 import { Compression } from "./compression";
+import { CypherEditor } from "./CypherEditor";
 import { ResultsTable } from "./ResultsTable";
 
 function formatMetadataKey(key: string): string {
@@ -81,13 +81,6 @@ export class App extends React.Component<Record<string, never>, AppState> {
         this.setState({ input: "", results: [], metadata: null, error: null, shareLink: "" });
     };
 
-    handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && e.shiftKey) {
-            e.preventDefault();
-            this.run();
-        }
-    };
-
     render() {
         const { input, results, metadata, error, shareLink } = this.state;
 
@@ -102,14 +95,11 @@ export class App extends React.Component<Record<string, never>, AppState> {
                     boxSizing: "border-box",
                 }}
             >
-                <Textarea
+                <CypherEditor
                     value={input}
-                    onChange={(_, d) => this.setState({ input: d.value })}
-                    onKeyDown={this.handleKeyDown}
+                    onChange={(v) => this.setState({ input: v })}
+                    onShiftEnter={this.run}
                     placeholder="Type your FlowQuery statement here and press Shift+Enter to run it."
-                    resize="vertical"
-                    textarea={{ style: { fontFamily: "monospace", minHeight: 200 } }}
-                    style={{ width: "100%" }}
                 />
                 <Toolbar style={{ padding: "8px 0", gap: 4 }}>
                     <ToolbarButton appearance="primary" onClick={this.run}>

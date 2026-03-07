@@ -30,7 +30,7 @@ The combination of graph querying and pipeline processing makes FlowQuery ideal 
                                                                  └──────────┘
 ```
 
-See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation.
+See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation. For a complete worked example, see [Virtual Org Chart](#virtual-org-chart).
 
 FlowQuery is written in TypeScript and runs both in the browser and in Node.js as a self-contained single-file JavaScript library. A pure Python implementation of FlowQuery with full functional fidelity is also available in the [flowquery-py](./flowquery-py) sub-folder (`pip install flowquery`).
 

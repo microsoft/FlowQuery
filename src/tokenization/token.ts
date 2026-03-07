@@ -739,6 +739,16 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.ALL;
     }
 
+    // Subquery expression tokens
+
+    public static get EXISTS(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.EXISTS);
+    }
+
+    public isExists(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.EXISTS;
+    }
+
     // End of file token
 
     public static get EOF(): Token {

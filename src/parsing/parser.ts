@@ -41,6 +41,7 @@ import {
 import ParameterReference from "./expressions/parameter_reference";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
+import SubqueryExpression, { SubqueryMode } from "./expressions/subquery_expression";
 import AggregateFunction from "./functions/aggregate_function";
 import AsyncFunction from "./functions/async_function";
 import Function from "./functions/function";
@@ -1046,6 +1047,15 @@ class Parser extends BaseParser {
      */
     private parseOperand(expression: Expression): boolean {
         this.skipWhitespaceAndComments();
+        // Subquery expressions: EXISTS { ... }, COUNT { ... }, COLLECT { ... }
+        if (this.looksLikeSubqueryExpression()) {
+            const subquery = this.parseSubqueryExpression();
+            if (subquery !== null) {
+                const lookup = this.parseLookup(subquery);
+                expression.addNode(lookup);
+                return true;
+            }
+        }
         if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
             if (identifier.startsWith("$")) {
@@ -1834,6 +1844,56 @@ class Parser extends BaseParser {
         if (!this.previousToken.isWhitespaceOrComment()) {
             throw new Error("Expected whitespace or comment");
         }
+    }
+
+    private looksLikeSubqueryExpression(): boolean {
+        const val = (this.token.value || "").toUpperCase();
+        if (val !== "EXISTS" && val !== "COUNT" && val !== "COLLECT") {
+            return false;
+        }
+        if (!this.token.isKeyword() && !this.token.isIdentifier()) {
+            return false;
+        }
+        // Check if { follows (skipping whitespace)
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        const isBrace = this.token.isOpeningBrace();
+        this.tokenIndex = savedIndex;
+        return isBrace;
+    }
+
+    private parseSubqueryExpression(): SubqueryExpression | null {
+        const keyword = (this.token.value || "").toUpperCase();
+        let mode: SubqueryMode;
+        switch (keyword) {
+            case "EXISTS":
+                mode = SubqueryMode.EXISTS;
+                break;
+            case "COUNT":
+                mode = SubqueryMode.COUNT;
+                break;
+            case "COLLECT":
+                mode = SubqueryMode.COLLECT;
+                break;
+            default:
+                return null;
+        }
+        this.setNextToken(); // consume EXISTS/COUNT/COLLECT keyword
+        this.skipWhitespaceAndComments();
+        // Save and restore parser state for the subquery scope
+        const outerState = this._state;
+        this._state = new ParserState();
+        // Inherit outer variables so inner query can reference them
+        for (const [k, v] of outerState.variables) {
+            this._state.variables.set(k, v);
+        }
+        const subqueryAST = this.parseSubQuery();
+        this._state = outerState;
+        if (subqueryAST === null) {
+            throw new Error(`Expected opening brace after ${keyword}`);
+        }
+        return new SubqueryExpression(mode, subqueryAST);
     }
 }
 

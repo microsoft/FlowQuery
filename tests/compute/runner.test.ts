@@ -5164,3 +5164,97 @@ test("Test metadata available before run", () => {
     const meta = runner.metadata;
     expect(meta.virtual_nodes_created).toBe(1);
 });
+
+test("Test virtual org chart example", async () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:OrgEmployee) AS {
+            UNWIND [
+                {id: 1, name: 'Sara Chen',       jobTitle: 'CEO',                 department: 'Executive',   phone: '+1-555-0100', skills: ['Strategy', 'Leadership', 'Finance']},
+                {id: 2, name: 'Marcus Rivera',   jobTitle: 'VP of Engineering',   department: 'Engineering', phone: '+1-555-0201', skills: ['Architecture', 'Cloud', 'Mentoring']},
+                {id: 3, name: 'Priya Patel',     jobTitle: 'VP of Product',       department: 'Product',     phone: '+1-555-0301', skills: ['Roadmapping', 'Analytics', 'UX']},
+                {id: 4, name: 'James Brooks',     jobTitle: 'Senior Engineer',     department: 'Engineering', phone: '+1-555-0202', skills: ['TypeScript', 'Python', 'GraphQL']},
+                {id: 5, name: 'Lin Zhang',       jobTitle: 'Senior Engineer',     department: 'Engineering', phone: '+1-555-0203', skills: ['Rust', 'Systems', 'DevOps']},
+                {id: 6, name: 'Amara Johnson',   jobTitle: 'Product Manager',     department: 'Product',     phone: '+1-555-0302', skills: ['Scrum', 'Data Analysis', 'Stakeholder Mgmt']},
+                {id: 7, name: 'Tomás García',    jobTitle: 'Software Engineer',   department: 'Engineering', phone: '+1-555-0204', skills: ['React', 'TypeScript', 'Testing']},
+                {id: 8, name: 'Fatima Al-Sayed', jobTitle: 'Software Engineer',   department: 'Engineering', phone: '+1-555-0205', skills: ['Python', 'ML', 'Data Pipelines']}
+            ] AS record
+            RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle,
+                   record.department AS department, record.phone AS phone, record.skills AS skills
+        };
+        CREATE VIRTUAL (:OrgEmployee)-[:ORG_REPORTS_TO]-(:OrgEmployee) AS {
+            UNWIND [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 1},
+                {left_id: 4, right_id: 2},
+                {left_id: 5, right_id: 2},
+                {left_id: 6, right_id: 3},
+                {left_id: 7, right_id: 4},
+                {left_id: 8, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        };
+        MATCH (e:OrgEmployee)
+        OPTIONAL MATCH (e)-[:ORG_REPORTS_TO]->(mgr:OrgEmployee)
+        RETURN
+            e.name           AS employee,
+            e.jobTitle       AS title,
+            e.department     AS department,
+            e.phone          AS phone,
+            e.skills         AS skills,
+            mgr.name         AS reportsTo
+        ORDER BY e.department, e.name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(8);
+
+    // CEO has no manager
+    const ceo = results.find((r: any) => r.employee === "Sara Chen");
+    expect(ceo).toBeDefined();
+    expect(ceo.title).toBe("CEO");
+    expect(ceo.department).toBe("Executive");
+    expect(ceo.reportsTo).toBeNull();
+    expect(ceo.skills).toEqual(["Strategy", "Leadership", "Finance"]);
+
+    // VP of Engineering reports to CEO
+    const vpe = results.find((r: any) => r.employee === "Marcus Rivera");
+    expect(vpe.reportsTo).toBe("Sara Chen");
+
+    // Leaf employee
+    const tomas = results.find((r: any) => r.employee === "Tomás García");
+    expect(tomas.reportsTo).toBe("James Brooks");
+    expect(tomas.phone).toBe("+1-555-0204");
+});
+
+test("Test virtual org chart direct reports query", async () => {
+    // Uses the OrgEmployee/ORG_REPORTS_TO graph created above
+    const runner = new Runner(`
+        MATCH (dr:OrgEmployee)-[:ORG_REPORTS_TO]->(mgr:OrgEmployee)
+        RETURN mgr.name AS manager, collect(dr.name) AS directReports
+        ORDER BY manager
+    `);
+    await runner.run();
+    const results = runner.results;
+    // Only managers with direct reports appear (Sara, Marcus, James, Priya)
+    expect(results.length).toBe(4);
+    const sara = results.find((r: any) => r.manager === "Sara Chen");
+    expect(sara.directReports).toContain("Marcus Rivera");
+    expect(sara.directReports).toContain("Priya Patel");
+    const marcus = results.find((r: any) => r.manager === "Marcus Rivera");
+    expect(marcus.directReports).toContain("James Brooks");
+    expect(marcus.directReports).toContain("Lin Zhang");
+});
+
+test("Test virtual org chart management chain query", async () => {
+    // Uses the OrgEmployee/ORG_REPORTS_TO graph created above
+    const runner = new Runner(`
+        MATCH (e:OrgEmployee)-[:ORG_REPORTS_TO*1..]->(mgr:OrgEmployee)
+        WHERE e.name = 'Tomás García'
+        RETURN e.name AS employee, collect(mgr.name) AS managementChain
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].employee).toBe("Tomás García");
+    expect(results[0].managementChain).toEqual(["James Brooks", "Marcus Rivera", "Sara Chen"]);
+});

@@ -891,6 +891,92 @@ WITH f WHERE f.name = 'double'
 RETURN f.name AS name, f.description AS description, f.category AS category
 ```
 
+## Examples
+
+### Virtual Org Chart
+
+This single multi-statement query creates a virtual graph for a fictitious company — complete with employees, skills, phone numbers, and a management chain — then queries it to produce an org chart:
+
+```cypher
+CREATE VIRTUAL (:Employee) AS {
+    UNWIND [
+        {id: 1, name: 'Sara Chen',     jobTitle: 'CEO',                 department: 'Executive',   phone: '+1-555-0100', skills: ['Strategy', 'Leadership', 'Finance']},
+        {id: 2, name: 'Marcus Rivera', jobTitle: 'VP of Engineering',   department: 'Engineering', phone: '+1-555-0201', skills: ['Architecture', 'Cloud', 'Mentoring']},
+        {id: 3, name: 'Priya Patel',   jobTitle: 'VP of Product',       department: 'Product',     phone: '+1-555-0301', skills: ['Roadmapping', 'Analytics', 'UX']},
+        {id: 4, name: 'James Brooks',  jobTitle: 'Senior Engineer',     department: 'Engineering', phone: '+1-555-0202', skills: ['TypeScript', 'Python', 'GraphQL']},
+        {id: 5, name: 'Lin Zhang',     jobTitle: 'Senior Engineer',     department: 'Engineering', phone: '+1-555-0203', skills: ['Rust', 'Systems', 'DevOps']},
+        {id: 6, name: 'Amara Johnson', jobTitle: 'Product Manager',     department: 'Product',     phone: '+1-555-0302', skills: ['Scrum', 'Data Analysis', 'Stakeholder Mgmt']},
+        {id: 7, name: 'Tomás García',  jobTitle: 'Software Engineer',   department: 'Engineering', phone: '+1-555-0204', skills: ['React', 'TypeScript', 'Testing']},
+        {id: 8, name: 'Fatima Al-Sayed', jobTitle: 'Software Engineer', department: 'Engineering', phone: '+1-555-0205', skills: ['Python', 'ML', 'Data Pipelines']}
+    ] AS record
+    RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle,
+           record.department AS department, record.phone AS phone, record.skills AS skills
+};
+CREATE VIRTUAL (:Employee)-[:REPORTS_TO]-(:Employee) AS {
+    UNWIND [
+        {left_id: 2, right_id: 1},
+        {left_id: 3, right_id: 1},
+        {left_id: 4, right_id: 2},
+        {left_id: 5, right_id: 2},
+        {left_id: 6, right_id: 3},
+        {left_id: 7, right_id: 4},
+        {left_id: 8, right_id: 4}
+    ] AS record
+    RETURN record.left_id AS left_id, record.right_id AS right_id
+};
+MATCH (e:Employee)
+OPTIONAL MATCH (e)-[:REPORTS_TO]->(mgr:Employee)
+RETURN
+    e.name           AS employee,
+    e.jobTitle       AS title,
+    e.department     AS department,
+    e.phone          AS phone,
+    e.skills         AS skills,
+    mgr.name         AS reportsTo
+ORDER BY e.department, e.name
+```
+
+Output:
+
+| employee        | title             | department  | phone       | skills                                   | reportsTo     |
+| --------------- | ----------------- | ----------- | ----------- | ---------------------------------------- | ------------- |
+| Fatima Al-Sayed | Software Engineer | Engineering | +1-555-0205 | [Python, ML, Data Pipelines]             | James Brooks  |
+| James Brooks    | Senior Engineer   | Engineering | +1-555-0202 | [TypeScript, Python, GraphQL]            | Marcus Rivera |
+| Lin Zhang       | Senior Engineer   | Engineering | +1-555-0203 | [Rust, Systems, DevOps]                  | Marcus Rivera |
+| Marcus Rivera   | VP of Engineering | Engineering | +1-555-0201 | [Architecture, Cloud, Mentoring]         | Sara Chen     |
+| Tomás García    | Software Engineer | Engineering | +1-555-0204 | [React, TypeScript, Testing]             | James Brooks  |
+| Sara Chen       | CEO               | Executive   | +1-555-0100 | [Strategy, Leadership, Finance]          | null          |
+| Amara Johnson   | Product Manager   | Product     | +1-555-0302 | [Scrum, Data Analysis, Stakeholder Mgmt] | Priya Patel   |
+| Priya Patel     | VP of Product     | Product     | +1-555-0301 | [Roadmapping, Analytics, UX]             | Sara Chen     |
+
+You can further explore the graph — for example, find the full management chain from any employee up to the CEO:
+
+```cypher
+MATCH (e:Employee)-[:REPORTS_TO*1..]->(mgr:Employee)
+WHERE e.name = 'Tomás García'
+RETURN e.name AS employee, collect(mgr.name) AS managementChain
+// [{ employee: "Tomás García", managementChain: ["James Brooks", "Marcus Rivera", "Sara Chen"] }]
+```
+
+Or find each manager's direct reports:
+
+```cypher
+MATCH (dr:Employee)-[:REPORTS_TO]->(mgr:Employee)
+RETURN mgr.name AS manager, collect(dr.name) AS directReports
+ORDER BY manager
+```
+
+Or find all employees who share a skill:
+
+```cypher
+MATCH (a:Employee), (b:Employee)
+WHERE a.id < b.id
+WITH a, b, [s IN a.skills WHERE s IN b.skills] AS shared
+WHERE size(shared) > 0
+RETURN a.name AS employee1, b.name AS employee2, shared AS sharedSkills
+ORDER BY size(shared) DESC
+```
+
 ## Contributing
 
 This project welcomes contributions and suggestions. Most contributions require you to agree to a

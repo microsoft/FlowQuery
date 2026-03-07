@@ -5473,3 +5473,101 @@ class TestMetadata:
         """)
         meta = runner.metadata
         assert meta.virtual_nodes_created == 1
+
+
+class TestVirtualOrgChart:
+    """Tests for the virtual org chart example from the README."""
+
+    @pytest.mark.asyncio
+    async def test_virtual_org_chart_example(self):
+        """Test creating a virtual org chart and querying it in a single multi-statement query."""
+        runner = Runner("""
+            CREATE VIRTUAL (:PyOrgEmployee) AS {
+                UNWIND [
+                    {id: 1, name: 'Sara Chen',       jobTitle: 'CEO',               department: 'Executive',   phone: '+1-555-0100', skills: ['Strategy', 'Leadership', 'Finance']},
+                    {id: 2, name: 'Marcus Rivera',   jobTitle: 'VP of Engineering', department: 'Engineering', phone: '+1-555-0201', skills: ['Architecture', 'Cloud', 'Mentoring']},
+                    {id: 3, name: 'Priya Patel',     jobTitle: 'VP of Product',     department: 'Product',     phone: '+1-555-0301', skills: ['Roadmapping', 'Analytics', 'UX']},
+                    {id: 4, name: 'James Brooks',    jobTitle: 'Senior Engineer',   department: 'Engineering', phone: '+1-555-0202', skills: ['TypeScript', 'Python', 'GraphQL']},
+                    {id: 5, name: 'Lin Zhang',       jobTitle: 'Senior Engineer',   department: 'Engineering', phone: '+1-555-0203', skills: ['Rust', 'Systems', 'DevOps']},
+                    {id: 6, name: 'Amara Johnson',   jobTitle: 'Product Manager',   department: 'Product',     phone: '+1-555-0302', skills: ['Scrum', 'Data Analysis', 'Stakeholder Mgmt']},
+                    {id: 7, name: 'Tomás García',    jobTitle: 'Software Engineer', department: 'Engineering', phone: '+1-555-0204', skills: ['React', 'TypeScript', 'Testing']},
+                    {id: 8, name: 'Fatima Al-Sayed', jobTitle: 'Software Engineer', department: 'Engineering', phone: '+1-555-0205', skills: ['Python', 'ML', 'Data Pipelines']}
+                ] AS record
+                RETURN record.id AS id, record.name AS name, record.jobTitle AS jobTitle,
+                       record.department AS department, record.phone AS phone, record.skills AS skills
+            };
+            CREATE VIRTUAL (:PyOrgEmployee)-[:PY_ORG_REPORTS_TO]-(:PyOrgEmployee) AS {
+                UNWIND [
+                    {left_id: 2, right_id: 1},
+                    {left_id: 3, right_id: 1},
+                    {left_id: 4, right_id: 2},
+                    {left_id: 5, right_id: 2},
+                    {left_id: 6, right_id: 3},
+                    {left_id: 7, right_id: 4},
+                    {left_id: 8, right_id: 4}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            };
+            MATCH (e:PyOrgEmployee)
+            OPTIONAL MATCH (e)-[:PY_ORG_REPORTS_TO]->(mgr:PyOrgEmployee)
+            RETURN
+                e.name           AS employee,
+                e.jobTitle       AS title,
+                e.department     AS department,
+                e.phone          AS phone,
+                e.skills         AS skills,
+                mgr.name         AS reportsTo
+            ORDER BY e.department, e.name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 8
+
+        # CEO has no manager
+        ceo = next(r for r in results if r["employee"] == "Sara Chen")
+        assert ceo["title"] == "CEO"
+        assert ceo["department"] == "Executive"
+        assert ceo["reportsTo"] is None
+        assert ceo["skills"] == ["Strategy", "Leadership", "Finance"]
+
+        # VP of Engineering reports to CEO
+        vpe = next(r for r in results if r["employee"] == "Marcus Rivera")
+        assert vpe["reportsTo"] == "Sara Chen"
+
+        # Leaf employee
+        tomas = next(r for r in results if r["employee"] == "Tomás García")
+        assert tomas["reportsTo"] == "James Brooks"
+        assert tomas["phone"] == "+1-555-0204"
+
+    @pytest.mark.asyncio
+    async def test_virtual_org_chart_direct_reports(self):
+        """Test querying direct reports from the virtual org chart."""
+        runner = Runner("""
+            MATCH (dr:PyOrgEmployee)-[:PY_ORG_REPORTS_TO]->(mgr:PyOrgEmployee)
+            RETURN mgr.name AS manager, collect(dr.name) AS directReports
+            ORDER BY manager
+        """)
+        await runner.run()
+        results = runner.results
+        # Only managers with direct reports appear (Sara, Marcus, James, Priya)
+        assert len(results) == 4
+        sara = next(r for r in results if r["manager"] == "Sara Chen")
+        assert "Marcus Rivera" in sara["directReports"]
+        assert "Priya Patel" in sara["directReports"]
+        marcus = next(r for r in results if r["manager"] == "Marcus Rivera")
+        assert "James Brooks" in marcus["directReports"]
+        assert "Lin Zhang" in marcus["directReports"]
+
+    @pytest.mark.asyncio
+    async def test_virtual_org_chart_management_chain(self):
+        """Test querying the full management chain from a leaf employee to the CEO."""
+        runner = Runner("""
+            MATCH (e:PyOrgEmployee)-[:PY_ORG_REPORTS_TO*1..]->(mgr:PyOrgEmployee)
+            WHERE e.name = 'Tomás García'
+            RETURN e.name AS employee, collect(mgr.name) AS managementChain
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["employee"] == "Tomás García"
+        assert results[0]["managementChain"] == ["James Brooks", "Marcus Rivera", "Sara Chen"]

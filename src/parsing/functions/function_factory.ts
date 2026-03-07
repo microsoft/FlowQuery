@@ -26,7 +26,11 @@ import "./localtime";
 import "./max";
 import "./min";
 import "./nodes";
+import "./predicate_all";
+import "./predicate_any";
 import PredicateFunction from "./predicate_function";
+import "./predicate_none";
+import "./predicate_single";
 import "./predicate_sum";
 import "./properties";
 import "./rand";
@@ -88,6 +92,16 @@ class FunctionFactory {
      */
     public static isAsyncProvider(name: string): boolean {
         return getRegisteredFunctionFactory(name.toLowerCase(), "async") !== undefined;
+    }
+
+    /**
+     * Checks if a function name is registered as a predicate function.
+     *
+     * @param name - The function name (case-insensitive)
+     * @returns True if the function is a predicate function
+     */
+    public static hasPredicate(name: string): boolean {
+        return getRegisteredFunctionFactory(name.toLowerCase(), "predicate") !== undefined;
     }
 
     /**

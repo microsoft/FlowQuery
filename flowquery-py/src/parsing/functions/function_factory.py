@@ -47,6 +47,11 @@ class FunctionFactory:
         return get_registered_function_factory(name.lower(), "async") is not None
 
     @staticmethod
+    def has_predicate(name: str) -> bool:
+        """Checks if a function name is registered as a predicate function."""
+        return get_registered_function_factory(name.lower(), "predicate") is not None
+
+    @staticmethod
     def get_metadata(name: str) -> Optional[FunctionMetadata]:
         """Gets metadata for a specific function.
 

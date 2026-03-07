@@ -45,6 +45,7 @@ enum Keyword {
     ENDS = "ENDS",
     UNION = "UNION",
     ALL = "ALL",
+    EXISTS = "EXISTS",
 }
 
 export default Keyword;

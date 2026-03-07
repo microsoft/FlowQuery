@@ -2,6 +2,7 @@ import PatternExpression from "../../graph/pattern_expression";
 import ASTNode from "../ast_node";
 import AggregateFunction from "../functions/aggregate_function";
 import Reference from "./reference";
+import SubqueryExpression from "./subquery_expression";
 
 /**
  * Represents an expression in the FlowQuery AST.
@@ -127,6 +128,13 @@ class Expression extends ASTNode {
             this._patterns = [...this._extract(this, PatternExpression)];
         }
         return this._patterns;
+    }
+    private _subqueries: SubqueryExpression[] | null = null;
+    public subqueries(): SubqueryExpression[] {
+        if (this._subqueries === null) {
+            this._subqueries = [...this._extract(this, SubqueryExpression)];
+        }
+        return this._subqueries;
     }
     private *_extract(node: ASTNode = this, of_type: any): Generator<any> {
         if (node instanceof of_type) {

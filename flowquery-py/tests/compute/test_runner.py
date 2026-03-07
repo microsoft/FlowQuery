@@ -553,7 +553,7 @@ class TestRunner:
 
     @pytest.mark.asyncio
     async def test_unwind_null_produces_zero_rows(self):
-        """Test that UNWIND null produces zero rows (Neo4j-compatible)."""
+        """Test that UNWIND null produces zero rows."""
         runner = Runner("WITH null AS x UNWIND x AS i RETURN i")
         await runner.run()
         results = runner.results
@@ -5636,3 +5636,346 @@ class TestLocalFileLoading:
         runner = Runner('load json from "file:///nonexistent/path/data.json" as data return data')
         with pytest.raises(RuntimeError, match="Failed to load data from file:///nonexistent/path/data.json"):
             await runner.run()
+
+
+class TestSubqueryExpressions:
+    """Test cases for EXISTS, COUNT, and COLLECT subquery expressions."""
+
+    @pytest.mark.asyncio
+    async def test_exists_subquery_with_matching_pattern(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE EXISTS {
+                MATCH (p)-[:KNOWS]->(:Person)
+            }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice"}
+        assert results[1] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_not_exists_subquery(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE NOT EXISTS {
+                MATCH (p)-[:KNOWS]->(:Person)
+            }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Charlie"}
+
+    @pytest.mark.asyncio
+    async def test_exists_subquery_with_inner_where(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice', age: 30}, {id: 2, name: 'Bob', age: 25}, {id: 3, name: 'Charlie', age: 35}] as record
+                RETURN record.id as id, record.name as name, record.age as age
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE EXISTS {
+                MATCH (p)-[:KNOWS]->(friend:Person)
+                WHERE friend.age > 30
+            }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice"}
+        assert results[1] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_exists_subquery_combined_with_and(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice', age: 30}, {id: 2, name: 'Bob', age: 25}, {id: 3, name: 'Charlie', age: 35}] as record
+                RETURN record.id as id, record.name as name, record.age as age
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE p.age >= 30 AND EXISTS {
+                MATCH (p)-[:KNOWS]->(:Person)
+            }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Alice"}
+
+    @pytest.mark.asyncio
+    async def test_exists_subquery_without_graph(self):
+        runner = Runner("""
+            UNWIND [1, 2, 3, 4, 5] AS n
+            WITH n
+            WHERE EXISTS {
+                UNWIND range(1, n) AS x
+                WITH x WHERE x > 3
+                RETURN x
+            }
+            RETURN n
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"n": 4}
+        assert results[1] == {"n": 5}
+
+    @pytest.mark.asyncio
+    async def test_count_subquery_basic(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE COUNT {
+                MATCH (p)-[:KNOWS]->(:Person)
+            } > 1
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"name": "Alice"}
+
+    @pytest.mark.asyncio
+    async def test_count_subquery_in_return(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            RETURN p.name AS name, COUNT {
+                MATCH (p)-[:KNOWS]->(:Person)
+            } AS friendCount
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "friendCount": 2}
+        assert results[1] == {"name": "Bob", "friendCount": 1}
+        assert results[2] == {"name": "Charlie", "friendCount": 0}
+
+    @pytest.mark.asyncio
+    async def test_count_subquery_returns_0_for_empty_result(self):
+        runner = Runner("""
+            RETURN COUNT {
+                UNWIND [] AS x
+                RETURN x
+            } AS cnt
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"cnt": 0}
+
+    @pytest.mark.asyncio
+    async def test_collect_subquery_basic(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE p.name = 'Alice'
+            RETURN COLLECT {
+                MATCH (p)-[:KNOWS]->(friend:Person)
+                RETURN friend.name
+            } AS friends
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["friends"] == ["Bob", "Charlie"]
+
+    @pytest.mark.asyncio
+    async def test_collect_subquery_returns_empty_list(self):
+        runner = Runner("""
+            RETURN COLLECT {
+                UNWIND [] AS x
+                RETURN x
+            } AS items
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"items": []}
+
+    @pytest.mark.asyncio
+    async def test_exists_as_return_expression(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            RETURN p.name AS name, EXISTS {
+                MATCH (p)-[:KNOWS]->(:Person)
+            } AS hasFriends
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "hasFriends": True}
+        assert results[1] == {"name": "Bob", "hasFriends": False}
+        assert results[2] == {"name": "Charlie", "hasFriends": False}
+
+
+class TestPredicateFunctions:
+    """Test cases for any, all, none, single predicate functions."""
+
+    @pytest.mark.asyncio
+    async def test_any_predicate(self):
+        runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_false(self):
+        runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_empty_list(self):
+        runner = Runner("RETURN any(n IN [] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate(self):
+        runner = Runner("RETURN all(n IN [2, 4, 6] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate_false(self):
+        runner = Runner("RETURN all(n IN [1, 2, 3] WHERE n > 1) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate_empty_list(self):
+        runner = Runner("RETURN all(n IN [] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_none_predicate(self):
+        runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_none_predicate_false(self):
+        runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate_false_multiple(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 1) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate_false_none(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_in_where(self):
+        runner = Runner("""
+            UNWIND [[1, 2, 3], [4, 5, 6], [7, 8, 9]] AS nums
+            WITH nums WHERE any(n IN nums WHERE n > 7)
+            RETURN nums
+        """)
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"nums": [7, 8, 9]}

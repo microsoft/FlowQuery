@@ -120,6 +120,10 @@ class Expression(ASTNode):
             self._patterns = list(self._extract(self, PatternExpression))
         return self._patterns
 
+    def subqueries(self) -> List[Any]:
+        from .subquery_expression import SubqueryExpression
+        return list(self._extract(self, SubqueryExpression))
+
     def _extract(self, node: ASTNode, of_type: type) -> Generator[Any, None, None]:
         if isinstance(node, of_type):
             yield node

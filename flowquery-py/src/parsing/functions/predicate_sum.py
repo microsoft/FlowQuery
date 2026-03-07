@@ -45,5 +45,5 @@ class PredicateSum(PredicateFunction):
         for item in array:
             self._value_holder.holder = item
             if self.where is None or self.where.value():
-                _sum += self._return.value()
+                _sum += self._return.value()  # type: ignore[union-attr]
         return _sum

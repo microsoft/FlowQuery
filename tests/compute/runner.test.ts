@@ -345,6 +345,83 @@ test("Test predicate with return expression", async () => {
     expect(results[0]).toEqual({ sum: 49 });
 });
 
+test("Test any predicate function", async () => {
+    const runner = new Runner("RETURN any(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test any predicate function false", async () => {
+    const runner = new Runner("RETURN any(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test any predicate function with empty list", async () => {
+    const runner = new Runner("RETURN any(n IN [] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test all predicate function", async () => {
+    const runner = new Runner("RETURN all(n IN [2, 4, 6] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test all predicate function false", async () => {
+    const runner = new Runner("RETURN all(n IN [1, 2, 3] WHERE n > 1) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test all predicate function with empty list", async () => {
+    const runner = new Runner("RETURN all(n IN [] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test none predicate function", async () => {
+    const runner = new Runner("RETURN none(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test none predicate function false", async () => {
+    const runner = new Runner("RETURN none(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test single predicate function", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test single predicate function false when multiple match", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 1) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test single predicate function false when none match", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test any predicate in WHERE clause", async () => {
+    const runner = new Runner(`
+        UNWIND [[1, 2, 3], [4, 5, 6], [7, 8, 9]] AS nums
+        WITH nums WHERE any(n IN nums WHERE n > 7)
+        RETURN nums
+    `);
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ nums: [7, 8, 9] });
+});
+
 test("Test list comprehension with mapping", async () => {
     const runner = new Runner("RETURN [n IN [1, 2, 3] | n * 2] AS doubled");
     await runner.run();
@@ -5361,4 +5438,369 @@ test("Test load json from local file with f-string path", async () => {
         fs.unlinkSync(filePath);
         fs.rmdirSync(tmpDir);
     }
+});
+
+// ============================================================
+// Subquery expression tests (EXISTS, COUNT, COLLECT)
+// ============================================================
+
+test("Test EXISTS subquery with matching pattern", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE EXISTS {
+            MATCH (p)-[:KNOWS]->(:Person)
+        }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice" });
+    expect(results[1]).toEqual({ name: "Bob" });
+});
+
+test("Test NOT EXISTS subquery", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE NOT EXISTS {
+            MATCH (p)-[:KNOWS]->(:Person)
+        }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Charlie" });
+});
+
+test("Test EXISTS subquery with inner WHERE", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice', age: 30},
+                {id: 2, name: 'Bob', age: 25},
+                {id: 3, name: 'Charlie', age: 35}
+            ] as record
+            RETURN record.id as id, record.name as name, record.age as age
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE EXISTS {
+            MATCH (p)-[:KNOWS]->(friend:Person)
+            WHERE friend.age > 30
+        }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice" });
+    expect(results[1]).toEqual({ name: "Bob" });
+});
+
+test("Test EXISTS subquery combined with AND", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice', age: 30},
+                {id: 2, name: 'Bob', age: 25},
+                {id: 3, name: 'Charlie', age: 35}
+            ] as record
+            RETURN record.id as id, record.name as name, record.age as age
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE p.age >= 30 AND EXISTS {
+            MATCH (p)-[:KNOWS]->(:Person)
+        }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Alice" });
+});
+
+test("Test EXISTS subquery without graph (pure data)", async () => {
+    const runner = new Runner(`
+        UNWIND [1, 2, 3, 4, 5] AS n
+        WITH n
+        WHERE EXISTS {
+            UNWIND range(1, n) AS x
+            WITH x WHERE x > 3
+            RETURN x
+        }
+        RETURN n
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ n: 4 });
+    expect(results[1]).toEqual({ n: 5 });
+});
+
+test("Test COUNT subquery basic", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE COUNT {
+            MATCH (p)-[:KNOWS]->(:Person)
+        } > 1
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ name: "Alice" });
+});
+
+test("Test COUNT subquery in RETURN", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        RETURN p.name AS name, COUNT {
+            MATCH (p)-[:KNOWS]->(:Person)
+        } AS friendCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", friendCount: 2 });
+    expect(results[1]).toEqual({ name: "Bob", friendCount: 1 });
+    expect(results[2]).toEqual({ name: "Charlie", friendCount: 0 });
+});
+
+test("Test COUNT subquery returns 0 for empty result", async () => {
+    const runner = new Runner(`
+        RETURN COUNT {
+            UNWIND [] AS x
+            RETURN x
+        } AS cnt
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ cnt: 0 });
+});
+
+test("Test COLLECT subquery basic", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE p.name = 'Alice'
+        RETURN COLLECT {
+            MATCH (p)-[:KNOWS]->(friend:Person)
+            RETURN friend.name
+        } AS friends
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].friends).toEqual(["Bob", "Charlie"]);
+});
+
+test("Test COLLECT subquery with IN operator", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE 'Charlie' IN COLLECT {
+            MATCH (p)-[:KNOWS]->(friend:Person)
+            RETURN friend.name
+        }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice" });
+    expect(results[1]).toEqual({ name: "Bob" });
+});
+
+test("Test COLLECT subquery returns empty list for no results", async () => {
+    const runner = new Runner(`
+        RETURN COLLECT {
+            UNWIND [] AS x
+            RETURN x
+        } AS items
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ items: [] });
+});
+
+test("Test EXISTS as return expression", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        RETURN p.name AS name, EXISTS {
+            MATCH (p)-[:KNOWS]->(:Person)
+        } AS hasFriends
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", hasFriends: true });
+    expect(results[1]).toEqual({ name: "Bob", hasFriends: false });
+    expect(results[2]).toEqual({ name: "Charlie", hasFriends: false });
 });

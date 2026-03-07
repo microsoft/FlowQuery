@@ -30,6 +30,9 @@ class Where extends Operation {
             await pattern.fetchData();
             await pattern.evaluate();
         }
+        for (const subquery of this.expression.subqueries()) {
+            await subquery.evaluate();
+        }
         if (this.expression.value()) {
             await this.next?.run();
         }

@@ -52,3 +52,4 @@ class Keyword(Enum):
     ENDS = "ENDS"
     UNION = "UNION"
     ALL = "ALL"
+    EXISTS = "EXISTS"

@@ -45,6 +45,9 @@ class Return extends Projection {
         }
         const record: Map<string, any> = new Map();
         for (const [expression, alias] of this.expressions()) {
+            for (const sq of expression.subqueries()) {
+                await sq.evaluate();
+            }
             const raw = expression.value();
             const value: any = typeof raw === "object" && raw !== null ? structuredClone(raw) : raw;
             record.set(alias, value);

@@ -45,6 +45,7 @@ from .expressions.operator import (
 from .expressions.parameter_reference import ParameterReference
 from .expressions.reference import Reference
 from .expressions.string import String
+from .expressions.subquery_expression import SubqueryExpression, SubqueryMode
 from .functions.aggregate_function import AggregateFunction
 from .functions.async_function import AsyncFunction
 from .functions.function import Function
@@ -903,6 +904,13 @@ class Parser(BaseParser):
     def _parse_operand(self, expression: Expression) -> bool:
         """Parse a single operand (without operators). Returns True if an operand was parsed."""
         self._skip_whitespace_and_comments()
+        # Subquery expressions: EXISTS { ... }, COUNT { ... }, COLLECT { ... }
+        if self._looks_like_subquery_expression():
+            subquery = self._parse_subquery_expression()
+            if subquery is not None:
+                lookup = self._parse_lookup(subquery)
+                expression.add_node(lookup)
+                return True
         if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
             if identifier.startswith("$"):
@@ -1547,3 +1555,42 @@ class Parser(BaseParser):
     def _expect_previous_token_to_be_whitespace_or_comment(self) -> None:
         if not self.previous_token.is_whitespace_or_comment():
             raise ValueError("Expected previous token to be whitespace or comment")
+
+    def _looks_like_subquery_expression(self) -> bool:
+        """Check if current token is EXISTS/COUNT/COLLECT followed by {."""
+        val = (self.token.value or "").upper()
+        if val not in ("EXISTS", "COUNT", "COLLECT"):
+            return False
+        if not self.token.is_keyword() and not self.token.is_identifier():
+            return False
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        is_brace = self.token.is_opening_brace()
+        self._token_index = saved_index
+        return is_brace
+
+    def _parse_subquery_expression(self) -> Optional[SubqueryExpression]:
+        """Parse EXISTS { ... }, COUNT { ... }, or COLLECT { ... }."""
+        keyword = (self.token.value or "").upper()
+        mode_map = {
+            "EXISTS": SubqueryMode.EXISTS,
+            "COUNT": SubqueryMode.COUNT,
+            "COLLECT": SubqueryMode.COLLECT,
+        }
+        mode = mode_map.get(keyword)
+        if mode is None:
+            return None
+        self.set_next_token()  # consume EXISTS/COUNT/COLLECT keyword
+        self._skip_whitespace_and_comments()
+        # Save and restore parser state for the subquery scope
+        outer_state = self._state
+        self._state = ParserState()
+        # Inherit outer variables so inner query can reference them
+        for k, v in outer_state.variables.items():
+            self._state.variables[k] = v
+        subquery_ast = self._parse_sub_query()
+        self._state = outer_state
+        if subquery_ast is None:
+            raise ValueError(f"Expected opening brace after {keyword}")
+        return SubqueryExpression(mode, subquery_ast)

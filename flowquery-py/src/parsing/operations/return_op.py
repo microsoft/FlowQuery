@@ -64,6 +64,9 @@ class Return(Projection):
             return
         record: Dict[str, Any] = {}
         for expression, alias in self.expressions():
+            if hasattr(expression, 'subqueries'):
+                for sq in expression.subqueries():
+                    await sq.evaluate()
             raw = expression.value()
             # Deep copy objects to preserve their state
             value = copy.deepcopy(raw) if isinstance(raw, (dict, list)) else raw

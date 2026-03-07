@@ -674,6 +674,15 @@ class Token:
     def is_eof(self) -> bool:
         return self._type == TokenType.EOF
 
+    # Subquery expression tokens
+
+    @staticmethod
+    def EXISTS() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.EXISTS.value)
+
+    def is_exists(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.EXISTS.value
+
     # Other utility methods
 
     def is_operand(self) -> bool:

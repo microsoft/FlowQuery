@@ -35,6 +35,9 @@ class Where(Operation):
             for pattern in self.expression.patterns():
                 await pattern.fetch_data()
                 await pattern.evaluate()
+        if hasattr(self.expression, 'subqueries'):
+            for subquery in self.expression.subqueries():
+                await subquery.evaluate()
         if self.expression.value():
             if self.next:
                 await self.next.run()

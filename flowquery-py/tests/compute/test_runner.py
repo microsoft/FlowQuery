@@ -553,7 +553,7 @@ class TestRunner:
 
     @pytest.mark.asyncio
     async def test_unwind_null_produces_zero_rows(self):
-        """Test that UNWIND null produces zero rows (Neo4j-compatible)."""
+        """Test that UNWIND null produces zero rows."""
         runner = Runner("WITH null AS x UNWIND x AS i RETURN i")
         await runner.run()
         results = runner.results

@@ -5571,3 +5571,68 @@ class TestVirtualOrgChart:
         assert len(results) == 1
         assert results[0]["employee"] == "Tomás García"
         assert results[0]["managementChain"] == ["James Brooks", "Marcus Rivera", "Sara Chen"]
+
+
+class TestLocalFileLoading:
+    """Tests for loading data from local files via file:// protocol."""
+
+    @pytest.mark.asyncio
+    async def test_load_json_array_from_local_file(self):
+        """Test loading a JSON array from a local file."""
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "data.json")
+            with open(file_path, "w") as f:
+                json.dump([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}], f)
+            file_uri = "file://" + file_path.replace("\\", "/")
+            runner = Runner(f'load json from "{file_uri}" as item return item')
+            await runner.run()
+            results = runner.results
+            assert len(results) == 2
+            assert results[0] == {"item": {"id": 1, "name": "Alice"}}
+            assert results[1] == {"item": {"id": 2, "name": "Bob"}}
+
+    @pytest.mark.asyncio
+    async def test_load_json_object_from_local_file(self):
+        """Test loading a JSON object from a local file."""
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "data.json")
+            with open(file_path, "w") as f:
+                json.dump({"name": "Alice", "age": 30}, f)
+            file_uri = "file://" + file_path.replace("\\", "/")
+            runner = Runner(f'load json from "{file_uri}" as data return data.name as name, data.age as age')
+            await runner.run()
+            results = runner.results
+            assert len(results) == 1
+            assert results[0] == {"name": "Alice", "age": 30}
+
+    @pytest.mark.asyncio
+    async def test_load_text_from_local_file(self):
+        """Test loading text content from a local file."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "data.txt")
+            with open(file_path, "w") as f:
+                f.write("hello world")
+            file_uri = "file://" + file_path.replace("\\", "/")
+            runner = Runner(f'load text from "{file_uri}" as content return content')
+            await runner.run()
+            results = runner.results
+            assert len(results) == 1
+            assert results[0] == {"content": "hello world"}
+
+    @pytest.mark.asyncio
+    async def test_load_json_from_nonexistent_file_throws(self):
+        """Test that loading from a nonexistent file raises an error."""
+        runner = Runner('load json from "file:///nonexistent/path/data.json" as data return data')
+        with pytest.raises(RuntimeError, match="Failed to load data from file:///nonexistent/path/data.json"):
+            await runner.run()

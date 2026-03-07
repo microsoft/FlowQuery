@@ -3,7 +3,7 @@
   "displayName": "FlowQuery-VSCode",
   "icon": "images/FlowQueryLogoIcon.png",
   "description": "FlowQuery - A declarative query language for data processing pipelines.",
-  "version": "1.0.54",
+  "version": "1.0.55",
   "publisher": "FlowQuery",
   "license": "MIT",
   "repository": {

@@ -755,15 +755,14 @@ class Parser(BaseParser):
         return relationship
 
     def _parse_properties(self) -> Iterator[Tuple[str, Expression]]:
-        parts: int = 0
+        self._skip_whitespace_and_comments()
+        if not self.token.is_opening_brace():
+            return
+        self.set_next_token()
         while True:
             self._skip_whitespace_and_comments()
-            if not self.token.is_opening_brace() and parts == 0:
-                return
-            elif not self.token.is_opening_brace() and parts > 0:
-                raise ValueError("Expected opening brace")
-            self.set_next_token()
-            self._skip_whitespace_and_comments()
+            if self.token.is_closing_brace():
+                break
             if not self.token.is_identifier():
                 raise ValueError("Expected identifier")
             key: str = self.token.value or ""
@@ -776,16 +775,15 @@ class Parser(BaseParser):
             expression = self._parse_expression()
             if expression is None:
                 raise ValueError("Expected expression")
-            self._skip_whitespace_and_comments()
-            if not self.token.is_closing_brace():
-                raise ValueError("Expected closing brace")
-            self.set_next_token()
             yield (key, expression)
             self._skip_whitespace_and_comments()
             if not self.token.is_comma():
                 break
             self.set_next_token()
-            parts += 1
+        self._skip_whitespace_and_comments()
+        if not self.token.is_closing_brace():
+            raise ValueError("Expected closing brace")
+        self.set_next_token()
 
     def _parse_relationship_hops(self) -> Optional[Hops]:
         if not self.token.is_multiply():

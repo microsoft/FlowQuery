@@ -678,16 +678,16 @@ class Parser extends BaseParser {
     }
 
     private *parseProperties(): Iterable<[string, Expression]> {
-        let parts: number = 0;
+        this.skipWhitespaceAndComments();
+        if (!this.token.isOpeningBrace()) {
+            return;
+        }
+        this.setNextToken();
         while (true) {
             this.skipWhitespaceAndComments();
-            if (!this.token.isOpeningBrace() && parts == 0) {
-                return;
-            } else if (!this.token.isOpeningBrace() && parts > 0) {
-                throw new Error("Expected opening brace");
+            if (this.token.isClosingBrace()) {
+                break;
             }
-            this.setNextToken();
-            this.skipWhitespaceAndComments();
             if (!this.token.isIdentifier()) {
                 throw new Error("Expected identifier");
             }
@@ -703,19 +703,18 @@ class Parser extends BaseParser {
             if (expression === null) {
                 throw new Error("Expected expression");
             }
-            this.skipWhitespaceAndComments();
-            if (!this.token.isClosingBrace()) {
-                throw new Error("Expected closing brace");
-            }
-            this.setNextToken();
             yield [key, expression];
             this.skipWhitespaceAndComments();
             if (!this.token.isComma()) {
                 break;
             }
             this.setNextToken();
-            parts++;
         }
+        this.skipWhitespaceAndComments();
+        if (!this.token.isClosingBrace()) {
+            throw new Error("Expected closing brace");
+        }
+        this.setNextToken();
     }
 
     private *parsePatterns(): IterableIterator<Pattern> {

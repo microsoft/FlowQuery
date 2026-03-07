@@ -1,0 +1,22 @@
+{
+  "name": "flowquery-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"const fs=require('fs');if(!fs.existsSync('public'))fs.mkdirSync('public');fs.copyFileSync('../dist/flowquery.min.js','public/flowquery.min.js')\" && vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@fluentui/react-components": "^9.56.0",
+    "@fluentui/react-icons": "^2.0.320",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

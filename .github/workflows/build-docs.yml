@@ -1,0 +1,42 @@
+name: Build Docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Build FlowQuery
+        run: npm run build
+
+      - name: Install flowquery-app dependencies
+        working-directory: flowquery-app
+        run: npm ci
+
+      - name: Clean Vite output
+        run: rm -rf docs/assets docs/index.html
+
+      - name: Build docs app
+        working-directory: flowquery-app
+        run: npm run build
+
+      - name: Commit docs changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --staged --quiet || git commit -m "chore: rebuild docs [skip ci]"
+          git push

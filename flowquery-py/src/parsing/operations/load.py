@@ -1,6 +1,7 @@
 """Represents a LOAD operation that fetches data from external sources."""
 
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -78,6 +79,37 @@ class Load(Operation):
             options["body"] = json.dumps(payload.value())
         return options
 
+    @property
+    def is_file_uri(self) -> bool:
+        """Checks if the source is a local file URI (file:// protocol)."""
+        if self.is_async_function:
+            return False
+        return isinstance(self.from_, str) and self.from_.startswith("file://")
+
+    async def _load_from_file(self) -> None:
+        """Loads data from a local file (file:// protocol)."""
+        file_path = self.from_.removeprefix("file://")
+        content = Path(file_path).read_text(encoding="utf-8")
+        data: Any = None
+        if isinstance(self.type, JSONComponent):
+            data = json.loads(content)
+        else:
+            data = content
+
+        if isinstance(data, list):
+            for item in data:
+                self._value = item
+                if self.next:
+                    await self.next.run()
+        elif isinstance(data, dict):
+            self._value = data
+            if self.next:
+                await self.next.run()
+        elif isinstance(data, str):
+            self._value = data
+            if self.next:
+                await self.next.run()
+
     async def _load_from_function(self) -> None:
         """Loads data from an async function source."""
         async_func = self.async_function
@@ -133,6 +165,8 @@ class Load(Operation):
     async def load(self) -> None:
         if self.is_async_function:
             await self._load_from_function()
+        elif self.is_file_uri:
+            await self._load_from_file()
         else:
             await self._load_from_url()
 

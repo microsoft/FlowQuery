@@ -5258,3 +5258,107 @@ test("Test virtual org chart management chain query", async () => {
     expect(results[0].employee).toBe("Tomás García");
     expect(results[0].managementChain).toEqual(["James Brooks", "Marcus Rivera", "Sara Chen"]);
 });
+
+// ============================================================
+// Local file loading tests (file:// protocol)
+// ============================================================
+
+test("Test load json from local file", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-test-"));
+    const filePath = path.join(tmpDir, "data.json");
+    fs.writeFileSync(
+        filePath,
+        JSON.stringify([
+            { id: 1, name: "Alice" },
+            { id: 2, name: "Bob" },
+        ])
+    );
+    try {
+        const fileUri = "file://" + filePath.replace(/\\/g, "/");
+        const runner = new Runner(`load json from "${fileUri}" as item return item`);
+        await runner.run();
+        const results = runner.results;
+        expect(results.length).toBe(2);
+        expect(results[0]).toEqual({ item: { id: 1, name: "Alice" } });
+        expect(results[1]).toEqual({ item: { id: 2, name: "Bob" } });
+    } finally {
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});
+
+test("Test load json object from local file", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-test-"));
+    const filePath = path.join(tmpDir, "data.json");
+    fs.writeFileSync(filePath, JSON.stringify({ name: "Alice", age: 30 }));
+    try {
+        const fileUri = "file://" + filePath.replace(/\\/g, "/");
+        const runner = new Runner(
+            `load json from "${fileUri}" as data return data.name as name, data.age as age`
+        );
+        await runner.run();
+        const results = runner.results;
+        expect(results.length).toBe(1);
+        expect(results[0]).toEqual({ name: "Alice", age: 30 });
+    } finally {
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});
+
+test("Test load text from local file", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-test-"));
+    const filePath = path.join(tmpDir, "data.txt");
+    fs.writeFileSync(filePath, "hello world");
+    try {
+        const fileUri = "file://" + filePath.replace(/\\/g, "/");
+        const runner = new Runner(`load text from "${fileUri}" as content return content`);
+        await runner.run();
+        const results = runner.results;
+        expect(results.length).toBe(1);
+        expect(results[0]).toEqual({ content: "hello world" });
+    } finally {
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});
+
+test("Test load json from nonexistent local file throws error", async () => {
+    const runner = new Runner(
+        'load json from "file:///nonexistent/path/data.json" as data return data'
+    );
+    await expect(runner.run()).rejects.toThrow(
+        "Failed to load data from file:///nonexistent/path/data.json"
+    );
+});
+
+test("Test load json from local file with f-string path", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-test-"));
+    const filePath = path.join(tmpDir, "data.json");
+    fs.writeFileSync(filePath, JSON.stringify([{ value: 42 }]));
+    try {
+        const dirUri = "file://" + tmpDir.replace(/\\/g, "/");
+        const runner = new Runner(
+            `with "${dirUri}" as dir load json from f"{dir}/data.json" as item return item.value as value`
+        );
+        await runner.run();
+        const results = runner.results;
+        expect(results.length).toBe(1);
+        expect(results[0]).toEqual({ value: 42 });
+    } finally {
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});

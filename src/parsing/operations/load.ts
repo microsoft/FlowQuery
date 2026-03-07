@@ -86,6 +86,46 @@ class Load extends Operation {
     }
 
     /**
+     * Checks if the source is a local file URI (file:// protocol).
+     */
+    public get isFileUri(): boolean {
+        if (this.isAsyncFunction) return false;
+        return typeof this.from === "string" && this.from.startsWith("file://");
+    }
+
+    /**
+     * Loads data from a local file (file:// protocol).
+     * Only available in Node.js environments.
+     */
+    private async loadFromFile(): Promise<void> {
+        if (typeof process === "undefined" || !process.versions?.node) {
+            throw new Error("Local file loading is not supported in the browser");
+        }
+        // Dynamic require to prevent webpack from bundling fs
+        const fs = eval("require")("fs");
+        const filePath = this.from.replace(/^file:\/\//, "");
+        const content = fs.readFileSync(filePath, "utf-8");
+        let data: any = null;
+        if (this.type instanceof _JSON) {
+            data = JSON.parse(content);
+        } else {
+            data = content;
+        }
+        if (Array.isArray(data)) {
+            for (const item of data) {
+                this._value = item;
+                await this.next?.run();
+            }
+        } else if (typeof data === "object" && data !== null) {
+            this._value = data;
+            await this.next?.run();
+        } else if (typeof data === "string") {
+            this._value = data;
+            await this.next?.run();
+        }
+    }
+
+    /**
      * Loads data from an async function source.
      * Arguments from the query (e.g., myFunc(arg1, arg2)) are passed to generate().
      */
@@ -126,6 +166,8 @@ class Load extends Operation {
     public async load(): Promise<any> {
         if (this.isAsyncFunction) {
             await this.loadFromFunction();
+        } else if (this.isFileUri) {
+            await this.loadFromFile();
         } else {
             await this.loadFromUrl();
         }

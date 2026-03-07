@@ -1535,14 +1535,20 @@ class Parser extends BaseParser {
     }
 
     private parsePredicateFunction(): PredicateFunction | null {
-        if (
-            !this.ahead([
-                Token.IDENTIFIER(""),
-                Token.LEFT_PARENTHESIS,
-                Token.IDENTIFIER(""),
-                Token.IN,
-            ])
-        ) {
+        // Check for identifier(variable IN ...) or keyword(variable IN ...)
+        // The keyword variant handles functions like all() where ALL is a keyword
+        const identifierPattern = this.ahead([
+            Token.IDENTIFIER(""),
+            Token.LEFT_PARENTHESIS,
+            Token.IDENTIFIER(""),
+            Token.IN,
+        ]);
+        const keywordPattern =
+            !identifierPattern &&
+            this.token.isKeyword() &&
+            this.peek()?.isLeftParenthesis() &&
+            FunctionFactory.hasPredicate(this.token.value || "");
+        if (!identifierPattern && !keywordPattern) {
             return null;
         }
         if (this.token.value === null) {
@@ -1584,15 +1590,16 @@ class Parser extends BaseParser {
         }
         func.addChild(expression);
         this.skipWhitespaceAndComments();
-        if (!this.token.isPipe()) {
-            throw new Error("Expected pipe");
+        if (this.token.isPipe()) {
+            this.setNextToken();
+            const _return = this.parseExpression();
+            if (_return === null) {
+                throw new Error("Expected expression");
+            }
+            func.addChild(_return);
+        } else {
+            func.hasReturnExpression = false;
         }
-        this.setNextToken();
-        const _return = this.parseExpression();
-        if (_return === null) {
-            throw new Error("Expected expression");
-        }
-        func.addChild(_return);
         const where = this.parseWhere();
         if (where !== null) {
             func.addChild(where);

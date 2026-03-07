@@ -1261,12 +1261,16 @@ class Parser(BaseParser):
     def _parse_predicate_function(self) -> Optional[PredicateFunction]:
         """Parse a predicate function like sum(n in [...] | n where condition)."""
         # Lookahead: identifier ( identifier in
-        if not self.ahead([
+        identifier_pattern = self.ahead([
             Token.IDENTIFIER(""),
             Token.LEFT_PARENTHESIS(),
             Token.IDENTIFIER(""),
             Token.IN(),
-        ]):
+        ])
+        keyword_pattern = (not identifier_pattern and self.token.is_keyword()
+            and self.peek() is not None and self.peek().is_left_parenthesis()
+            and FunctionFactory.has_predicate(self.token.value or ""))
+        if not identifier_pattern and not keyword_pattern:
             return None
         if self.token.value is None:
             raise ValueError("Expected identifier")
@@ -1299,13 +1303,14 @@ class Parser(BaseParser):
             raise ValueError("Expected array or reference")
         func.add_child(expression)
         self._skip_whitespace_and_comments()
-        if not self.token.is_pipe():
-            raise ValueError("Expected pipe")
-        self.set_next_token()
-        return_expr = self._parse_expression()
-        if return_expr is None:
-            raise ValueError("Expected expression")
-        func.add_child(return_expr)
+        if self.token.is_pipe():
+            self.set_next_token()
+            return_expr = self._parse_expression()
+            if return_expr is None:
+                raise ValueError("Expected expression")
+            func.add_child(return_expr)
+        else:
+            func.has_return_expression = False
         where = self._parse_where()
         if where is not None:
             func.add_child(where)

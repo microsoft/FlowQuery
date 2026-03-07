@@ -5898,3 +5898,84 @@ class TestSubqueryExpressions:
         assert results[0] == {"name": "Alice", "hasFriends": True}
         assert results[1] == {"name": "Bob", "hasFriends": False}
         assert results[2] == {"name": "Charlie", "hasFriends": False}
+
+
+class TestPredicateFunctions:
+    """Test cases for any, all, none, single predicate functions."""
+
+    @pytest.mark.asyncio
+    async def test_any_predicate(self):
+        runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_false(self):
+        runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_empty_list(self):
+        runner = Runner("RETURN any(n IN [] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate(self):
+        runner = Runner("RETURN all(n IN [2, 4, 6] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate_false(self):
+        runner = Runner("RETURN all(n IN [1, 2, 3] WHERE n > 1) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_all_predicate_empty_list(self):
+        runner = Runner("RETURN all(n IN [] WHERE n > 0) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_none_predicate(self):
+        runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_none_predicate_false(self):
+        runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 2) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": True}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate_false_multiple(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 1) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_single_predicate_false_none(self):
+        runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 5) AS result")
+        await runner.run()
+        assert runner.results[0] == {"result": False}
+
+    @pytest.mark.asyncio
+    async def test_any_predicate_in_where(self):
+        runner = Runner("""
+            UNWIND [[1, 2, 3], [4, 5, 6], [7, 8, 9]] AS nums
+            WITH nums WHERE any(n IN nums WHERE n > 7)
+            RETURN nums
+        """)
+        await runner.run()
+        assert len(runner.results) == 1
+        assert runner.results[0] == {"nums": [7, 8, 9]}

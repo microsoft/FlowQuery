@@ -34,7 +34,11 @@ from .localtime import LocalTime
 from .max_ import Max
 from .min_ import Min
 from .nodes import Nodes
+from .predicate_all import PredicateAll
+from .predicate_any import PredicateAny
 from .predicate_function import PredicateFunction
+from .predicate_none import PredicateNone
+from .predicate_single import PredicateSingle
 from .predicate_sum import PredicateSum
 from .properties import Properties
 from .rand import Rand
@@ -124,4 +128,8 @@ __all__ = [
     "Functions",
     "Schema",
     "PredicateSum",
+    "PredicateAll",
+    "PredicateAny",
+    "PredicateNone",
+    "PredicateSingle",
 ]

@@ -37,7 +37,7 @@ class PredicateSum extends PredicateFunction {
         for (let i = 0; i < array.length; i++) {
             this._valueHolder.holder = array[i];
             if (this.where === null || this.where.value()) {
-                _sum += this._return.value();
+                _sum += this._return!.value();
             }
         }
         return _sum;

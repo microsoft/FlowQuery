@@ -345,6 +345,83 @@ test("Test predicate with return expression", async () => {
     expect(results[0]).toEqual({ sum: 49 });
 });
 
+test("Test any predicate function", async () => {
+    const runner = new Runner("RETURN any(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test any predicate function false", async () => {
+    const runner = new Runner("RETURN any(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test any predicate function with empty list", async () => {
+    const runner = new Runner("RETURN any(n IN [] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test all predicate function", async () => {
+    const runner = new Runner("RETURN all(n IN [2, 4, 6] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test all predicate function false", async () => {
+    const runner = new Runner("RETURN all(n IN [1, 2, 3] WHERE n > 1) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test all predicate function with empty list", async () => {
+    const runner = new Runner("RETURN all(n IN [] WHERE n > 0) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test none predicate function", async () => {
+    const runner = new Runner("RETURN none(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test none predicate function false", async () => {
+    const runner = new Runner("RETURN none(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test single predicate function", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 2) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: true });
+});
+
+test("Test single predicate function false when multiple match", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 1) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test single predicate function false when none match", async () => {
+    const runner = new Runner("RETURN single(n IN [1, 2, 3] WHERE n > 5) AS result");
+    await runner.run();
+    expect(runner.results[0]).toEqual({ result: false });
+});
+
+test("Test any predicate in WHERE clause", async () => {
+    const runner = new Runner(`
+        UNWIND [[1, 2, 3], [4, 5, 6], [7, 8, 9]] AS nums
+        WITH nums WHERE any(n IN nums WHERE n > 7)
+        RETURN nums
+    `);
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.results[0]).toEqual({ nums: [7, 8, 9] });
+});
+
 test("Test list comprehension with mapping", async () => {
     const runner = new Runner("RETURN [n IN [1, 2, 3] | n * 2] AS doubled");
     await runner.run();

@@ -393,6 +393,29 @@ RETURN sum(n IN [1, 2, 3] | n) AS sum                // 6
 RETURN sum(n IN [1+2+3, 2, 3] | n^2) AS sum          // 49
 ```
 
+### Boolean Predicate Functions
+
+Test list elements against a condition. Follow standard Cypher syntax.
+
+```cypher
+// any — true if at least one element matches
+RETURN any(n IN [1, 2, 3] WHERE n > 2)               // true
+
+// all — true if every element matches
+RETURN all(n IN [2, 4, 6] WHERE n > 0)               // true
+
+// none — true if no element matches
+RETURN none(n IN [1, 2, 3] WHERE n > 5)              // true
+
+// single — true if exactly one element matches
+RETURN single(n IN [1, 2, 3] WHERE n > 2)            // true
+
+// In a WHERE clause
+UNWIND [[1,2,3], [4,5,6]] AS nums
+WITH nums WHERE any(n IN nums WHERE n > 4)
+RETURN nums                                          // [4, 5, 6]
+```
+
 ### Aggregate Functions
 
 Used in `RETURN` or `WITH` to group and reduce rows. Non-aggregated expressions define grouping keys. Aggregate functions cannot be nested.
@@ -738,6 +761,10 @@ RETURN f.name, f.description, f.category
 │  sum(x)  avg(x)  count(x)  min(x)  max(x)  collect(x)       │
 │  count(DISTINCT x)  ·  collect(DISTINCT x)                  │
 │  sum(v IN list | expr [WHERE cond])  -- inline predicate    │
+│  any(v IN list WHERE cond)            -- true if any match  │
+│  all(v IN list WHERE cond)            -- true if all match  │
+│  none(v IN list WHERE cond)           -- true if none match │
+│  single(v IN list WHERE cond)         -- true if one match  │
 ├─────────────────────────────────────────────────────────────┤
 │  SCALAR FUNCTIONS                                           │
 ├─────────────────────────────────────────────────────────────┤

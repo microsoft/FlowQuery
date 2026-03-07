@@ -7,6 +7,7 @@ import ValueHolder from "./value_holder";
 class PredicateFunction extends ASTNode {
     private _name: string;
     protected _valueHolder: ValueHolder = new ValueHolder();
+    private _hasReturnExpression: boolean = true;
 
     constructor(name?: string) {
         super();
@@ -17,6 +18,14 @@ class PredicateFunction extends ASTNode {
         return this._name;
     }
 
+    public get hasReturnExpression(): boolean {
+        return this._hasReturnExpression;
+    }
+
+    public set hasReturnExpression(value: boolean) {
+        this._hasReturnExpression = value;
+    }
+
     protected get reference(): Reference {
         return this.firstChild() as Reference;
     }
@@ -25,13 +34,20 @@ class PredicateFunction extends ASTNode {
         return this.getChildren()[1].firstChild();
     }
 
-    protected get _return(): Expression {
+    protected get _return(): Expression | null {
+        if (!this._hasReturnExpression) return null;
         return this.getChildren()[2] as Expression;
     }
 
     protected get where(): Where | null {
-        if (this.getChildren().length === 4) {
-            return this.getChildren()[3] as Where;
+        if (this._hasReturnExpression) {
+            if (this.getChildren().length === 4) {
+                return this.getChildren()[3] as Where;
+            }
+        } else {
+            if (this.getChildren().length === 3) {
+                return this.getChildren()[2] as Where;
+            }
         }
         return null;
     }

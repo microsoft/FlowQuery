@@ -552,6 +552,44 @@ MATCH (a:Person), (b:Person) WHERE (a)-[:KNOWS]->(b) RETURN a.name, b.name
 MATCH (a:Person) WHERE NOT (a)-[:KNOWS]->(:Person) RETURN a.name
 ```
 
+**Subquery Expressions:** `EXISTS`, `COUNT`, and `COLLECT` evaluate a full subquery as an expression. The subquery can reference outer-scope variables and supports the complete FlowQuery pipeline (MATCH, WITH, WHERE, UNWIND, LOAD, etc.).
+
+```cypher
+// EXISTS — returns true if the subquery produces any rows
+MATCH (p:Person)
+WHERE EXISTS {
+    MATCH (p)-[:KNOWS]->(friend:Person)
+    WHERE friend.age > 30
+}
+RETURN p.name
+
+// NOT EXISTS — negate with NOT
+MATCH (p:Person)
+WHERE NOT EXISTS { MATCH (p)-[:KNOWS]->(:Person) }
+RETURN p.name
+
+// COUNT — returns the number of rows the subquery produces
+MATCH (p:Person)
+WHERE COUNT { MATCH (p)-[:KNOWS]->(:Person) } > 2
+RETURN p.name
+
+// COUNT in RETURN
+MATCH (p:Person)
+RETURN p.name, COUNT { MATCH (p)-[:KNOWS]->(:Person) } AS friendCount
+
+// COLLECT — returns a list of single-column values from the subquery
+MATCH (p:Person)
+RETURN COLLECT {
+    MATCH (p)-[:KNOWS]->(friend:Person)
+    RETURN friend.name
+} AS friends
+
+// COLLECT with IN
+MATCH (p:Person)
+WHERE 'Alice' IN COLLECT { MATCH (p)-[:KNOWS]->(f:Person) RETURN f.name }
+RETURN p.name
+```
+
 **Node reference reuse across MATCH clauses:**
 
 ```cypher
@@ -674,6 +712,8 @@ RETURN f.name, f.description, f.category
 │  CONTAINS  ·  NOT CONTAINS                                  │
 │  STARTS WITH  ·  NOT STARTS WITH                            │
 │  ENDS WITH  ·  NOT ENDS WITH                                │
+│  EXISTS { subquery }  ·  NOT EXISTS { subquery }            │
+│  COUNT { subquery }  ·  COLLECT { subquery }                │
 ├─────────────────────────────────────────────────────────────┤
 │  EXPRESSIONS                                                │
 ├─────────────────────────────────────────────────────────────┤

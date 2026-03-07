@@ -47,5 +47,9 @@
     "eslint": "^9.34.0",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.3",
+    "diff": "^8.0.3"
   }
 }

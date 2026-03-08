@@ -90,8 +90,11 @@ const builtins = new Set([
 ]);
 
 const cypherStreamParser = {
-    startState: () => ({ blockComment: false }),
-    token(stream: StringStream, state: { blockComment: boolean }): string | null {
+    startState: () => ({ blockComment: false, forceIdentifier: false }),
+    token(
+        stream: StringStream,
+        state: { blockComment: boolean; forceIdentifier: boolean }
+    ): string | null {
         // Handle block comment continuation
         if (state.blockComment) {
             while (!stream.eol()) {
@@ -179,8 +182,16 @@ const cypherStreamParser = {
         // Words
         if (stream.match(/^[A-Za-z_]\w*/)) {
             const word = stream.current().toLowerCase();
+            if (state.forceIdentifier) {
+                state.forceIdentifier = false;
+                return "variableName";
+            }
             if (word === "true" || word === "false") return "bool";
             if (word === "null") return "null";
+            if (word === "as") {
+                state.forceIdentifier = true;
+                return "keyword";
+            }
             if (keywords.has(word)) return "keyword";
             if (operators.has(word)) return "operatorKeyword";
             if (builtins.has(word)) return "variableName.standard";
@@ -190,6 +201,10 @@ const cypherStreamParser = {
         // Single-char operators/symbols
         const ch = stream.next();
         if (ch && "+-*/%^=<>|".includes(ch)) return "operator";
+        if (ch === ".") {
+            state.forceIdentifier = true;
+            return "punctuation";
+        }
         if (ch && "()[]{},.;".includes(ch)) return "punctuation";
 
         return null;

@@ -93,6 +93,28 @@ class BaseParser {
         }
         return this.tokens[this.tokenIndex - 1];
     }
+
+    protected nextSignificantToken(offset: number = 1): Token {
+        let index = this.tokenIndex + offset;
+        while (index < this.tokens.length && this.tokens[index].isWhitespaceOrComment()) {
+            index++;
+        }
+        if (index >= this.tokens.length) {
+            return Token.EOF;
+        }
+        return this.tokens[index];
+    }
+
+    protected previousSignificantToken(offset: number = 1): Token {
+        let index = this.tokenIndex - offset;
+        while (index >= 0 && this.tokens[index].isWhitespaceOrComment()) {
+            index--;
+        }
+        if (index < 0) {
+            return Token.EOF;
+        }
+        return this.tokens[index];
+    }
 }
 
 export default BaseParser;

@@ -63,6 +63,43 @@ class Database {
         }
         return result;
     }
+    private isRelationshipCompatible(
+        relationship: Relationship,
+        physical: PhysicalRelationship
+    ): boolean {
+        const patternSourceLabel = relationship.source?.label ?? null;
+        const patternTargetLabel = relationship.target?.label ?? null;
+        const physicalSourceLabel = physical.source?.label ?? null;
+        const physicalTargetLabel = physical.target?.label ?? null;
+
+        if (relationship.direction === "left") {
+            return (
+                (patternSourceLabel === null || patternSourceLabel === physicalTargetLabel) &&
+                (patternTargetLabel === null || patternTargetLabel === physicalSourceLabel)
+            );
+        }
+
+        return (
+            (patternSourceLabel === null || patternSourceLabel === physicalSourceLabel) &&
+            (patternTargetLabel === null || patternTargetLabel === physicalTargetLabel)
+        );
+    }
+    private getRelationshipEntries(relationship: Relationship): [string, PhysicalRelationship][] {
+        if (relationship.types.length === 0) {
+            return Array.from(Database.relationships.entries()).filter(([, physical]) =>
+                this.isRelationshipCompatible(relationship, physical)
+            );
+        }
+
+        const result: [string, PhysicalRelationship][] = [];
+        for (const type of relationship.types) {
+            const physical = Database.relationships.get(type);
+            if (physical && this.isRelationshipCompatible(relationship, physical)) {
+                result.push([type, physical]);
+            }
+        }
+        return result;
+    }
     public async schema(): Promise<Record<string, any>[]> {
         const result: Record<string, any>[] = [];
 
@@ -113,17 +150,19 @@ class Database {
             return new NodeData(data as NodeRecord[]);
         } else if (element instanceof Relationship) {
             const args = this.extractArgs(element.properties);
-            if (element.types.length > 1) {
-                const physicals = this.getRelationships(element);
-                if (physicals.length === 0) {
+            if (element.types.length !== 1) {
+                const physicalEntries = this.getRelationshipEntries(element);
+                if (physicalEntries.length === 0) {
+                    if (element.types.length === 0) {
+                        return new RelationshipData([]);
+                    }
                     throw new Error(
                         `No physical relationships found for types ${element.types.join(", ")}`
                     );
                 }
                 const allRecords: RelationshipRecord[] = [];
-                for (let i = 0; i < physicals.length; i++) {
-                    const records = (await physicals[i].data(args)) as RelationshipRecord[];
-                    const typeName = element.types[i];
+                for (const [typeName, physical] of physicalEntries) {
+                    const records = (await physical.data(args)) as RelationshipRecord[];
                     for (const record of records) {
                         allRecords.push({ ...record, _type: typeName });
                     }

@@ -793,6 +793,26 @@ test("Match with ORed relationship types and hops", () => {
     expect(relationship.hops!.max).toBe(3);
 });
 
+test("Match with untyped relationship", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[]->(b:Person) RETURN a, b");
+    const match = ast.firstChild() as Match;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.types).toEqual([]);
+    expect(relationship.identifier).toBeNull();
+});
+
+test("Match with untyped relationship variable and hops", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:Person)-[r*1..3]->(b:Person) RETURN a, r, b");
+    const match = ast.firstChild() as Match;
+    const relationship = match.patterns[0].chain[1] as Relationship;
+    expect(relationship.identifier).toBe("r");
+    expect(relationship.types).toEqual([]);
+    expect(relationship.hops!.min).toBe(1);
+    expect(relationship.hops!.max).toBe(3);
+});
+
 test("Test not equal operator", () => {
     const parser = new Parser();
     const ast = parser.parse("RETURN 1 <> 2");

@@ -27,6 +27,9 @@ jobs:
     name: Bump version
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    concurrency:
+      group: flowquery-main-writers-${{ github.ref_name }}
+      cancel-in-progress: false
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
 
@@ -57,7 +60,23 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml
           git commit -m "chore(py): bump version to $NEW_VERSION [skip ci]"
-          git push
+
+          for attempt in 1 2 3; do
+            git fetch origin main:refs/remotes/origin/main
+
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+            elif git push origin HEAD:main; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to push Python version bump after 3 attempts."
+              exit 1
+            fi
+
+            sleep 5
+          done
 
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 

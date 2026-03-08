@@ -3806,6 +3806,100 @@ class TestRunner:
         assert results[0] == {"from": "NYC", "to": "LA", "airline": "Delta", "duration": 5}
 
     @pytest.mark.asyncio
+    async def test_match_with_untyped_relationship_unions_all_types(self):
+        """Test match with untyped relationship unions all relationship types."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedCity) AS {
+                unwind [
+                    {id: 1, name: 'NYC'},
+                    {id: 2, name: 'LA'},
+                    {id: 3, name: 'Chicago'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedCity)-[:UT_FLIGHT]-(:UntypedCity) AS {
+                unwind [
+                    {left_id: 1, right_id: 2, carrier: 'Delta'}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.carrier as carrier
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedCity)-[:UT_TRAIN]-(:UntypedCity) AS {
+                unwind [
+                    {left_id: 1, right_id: 3, carrier: 'Amtrak'}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.carrier as carrier
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:UntypedCity)-[r]->(b:UntypedCity)
+            RETURN a.name AS from, b.name AS to, r.type AS type
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"from": "NYC", "to": "LA", "type": "UT_FLIGHT"}
+        assert results[1] == {"from": "NYC", "to": "Chicago", "type": "UT_TRAIN"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_untyped_anonymous_relationship(self):
+        """Test match with untyped anonymous relationship."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedAnimal) AS {
+                unwind [
+                    {id: 1, name: 'Cat'},
+                    {id: 2, name: 'Dog'},
+                    {id: 3, name: 'Fish'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedAnimal)-[:UT_CHASES]-(:UntypedAnimal) AS {
+                unwind [
+                    {left_id: 1, right_id: 2}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:UntypedAnimal)-[:UT_EATS]-(:UntypedAnimal) AS {
+                unwind [
+                    {left_id: 1, right_id: 3}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (a:UntypedAnimal)-[]->(b:UntypedAnimal)
+            RETURN a.name AS from, b.name AS to
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"from": "Cat", "to": "Dog"}
+        assert results[1] == {"from": "Cat", "to": "Fish"}
+
+    @pytest.mark.asyncio
     async def test_relationship_properties_direct_and_via_properties_function(self):
         """Test relationship properties accessible via both direct access and properties()."""
         await Runner(

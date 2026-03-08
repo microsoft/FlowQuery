@@ -70,13 +70,40 @@ class Database:
         """Gets a relationship from the database."""
         return Database._relationships.get(relationship.type) if relationship.type else None
 
-    def get_relationships(self, relationship: 'Relationship') -> list['PhysicalRelationship']:
-        """Gets multiple physical relationships for ORed types."""
-        result = []
+    def _is_relationship_compatible(
+        self, relationship: 'Relationship', physical: 'PhysicalRelationship'
+    ) -> bool:
+        """Checks if a physical relationship is compatible with the pattern's endpoint labels."""
+        pattern_source = relationship.source.label if relationship.source else None
+        pattern_target = relationship.target.label if relationship.target else None
+        phys_source = physical.source.label if physical.source else None
+        phys_target = physical.target.label if physical.target else None
+
+        if relationship.direction == "left":
+            return (
+                (pattern_source is None or pattern_source == phys_target)
+                and (pattern_target is None or pattern_target == phys_source)
+            )
+        return (
+            (pattern_source is None or pattern_source == phys_source)
+            and (pattern_target is None or pattern_target == phys_target)
+        )
+
+    def _get_relationship_entries(
+        self, relationship: 'Relationship'
+    ) -> list[tuple[str, 'PhysicalRelationship']]:
+        """Gets (type_name, physical) pairs, filtered by endpoint label compatibility."""
+        if len(relationship.types) == 0:
+            return [
+                (t, p)
+                for t, p in Database._relationships.items()
+                if self._is_relationship_compatible(relationship, p)
+            ]
+        result: list[tuple[str, 'PhysicalRelationship']] = []
         for rel_type in relationship.types:
             physical = Database._relationships.get(rel_type)
-            if physical:
-                result.append(physical)
+            if physical and self._is_relationship_compatible(relationship, physical):
+                result.append((rel_type, physical))
         return result
 
     async def schema(self) -> List[Dict[str, Any]]:
@@ -123,14 +150,15 @@ class Database:
             return NodeData(data)
         elif isinstance(element, Relationship):
             args = self._extract_args(element.properties)
-            if len(element.types) > 1:
-                physicals = self.get_relationships(element)
-                if not physicals:
+            if len(element.types) != 1:
+                entries = self._get_relationship_entries(element)
+                if not entries:
+                    if len(element.types) == 0:
+                        return RelationshipData([])
                     raise ValueError(f"No physical relationships found for types {', '.join(element.types)}")
                 all_records = []
-                for i, physical in enumerate(physicals):
+                for type_name, physical in entries:
                     records = await physical.data(args)
-                    type_name = element.types[i]
                     for record in records:
                         all_records.append({**record, "_type": type_name})
                 return RelationshipData(all_records)

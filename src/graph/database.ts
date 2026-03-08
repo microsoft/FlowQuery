@@ -53,16 +53,6 @@ class Database {
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         return Database.relationships.get(relationship.type!) || null;
     }
-    public getRelationships(relationship: Relationship): PhysicalRelationship[] {
-        const result: PhysicalRelationship[] = [];
-        for (const type of relationship.types) {
-            const physical = Database.relationships.get(type);
-            if (physical) {
-                result.push(physical);
-            }
-        }
-        return result;
-    }
     private isRelationshipCompatible(
         relationship: Relationship,
         physical: PhysicalRelationship

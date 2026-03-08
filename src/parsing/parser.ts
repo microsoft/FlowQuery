@@ -720,7 +720,7 @@ class Parser extends BaseParser {
     private *parsePatterns(): IterableIterator<Pattern> {
         while (true) {
             let identifier: string | null = null;
-            if (this.token.isIdentifier()) {
+            if (this.token.isIdentifierOrKeyword()) {
                 identifier = this.token.value || "";
                 this.setNextToken();
                 this.skipWhitespaceAndComments();
@@ -1055,6 +1055,14 @@ class Parser extends BaseParser {
                 return true;
             }
         }
+        if (this.shouldParseReservedKeywordReference() && !this.peek()?.isLeftParenthesis()) {
+            const identifier: string = this.token.value || "";
+            const reference = new Reference(identifier, this._state.variables.get(identifier));
+            this.setNextToken();
+            const lookup = this.parseLookup(reference);
+            expression.addNode(lookup);
+            return true;
+        }
         if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
             if (identifier.startsWith("$")) {
@@ -1151,6 +1159,27 @@ class Parser extends BaseParser {
             return true;
         }
         return false;
+    }
+
+    private shouldParseReservedKeywordReference(): boolean {
+        const identifier = this.token.value;
+        if (
+            identifier === null ||
+            !this.token.isKeywordThatCannotBeIdentifier() ||
+            !this._state.variables.has(identifier)
+        ) {
+            return false;
+        }
+        if (this.token.isCase() && this.nextSignificantToken().isWhen()) {
+            return false;
+        }
+        if (this.token.isNull()) {
+            const previous = this.previousSignificantToken();
+            if (previous.isIs() || previous.isNot()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1536,12 +1565,7 @@ class Parser extends BaseParser {
     private parsePredicateFunction(): PredicateFunction | null {
         // Check for identifier(variable IN ...) or keyword(variable IN ...)
         // The keyword variant handles functions like all() where ALL is a keyword
-        const identifierPattern = this.ahead([
-            Token.IDENTIFIER(""),
-            Token.LEFT_PARENTHESIS,
-            Token.IDENTIFIER(""),
-            Token.IN,
-        ]);
+        const identifierPattern = this.looksLikePredicateFunctionIdentifier();
         const keywordPattern =
             !identifierPattern &&
             this.token.isKeyword() &&
@@ -1560,7 +1584,7 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.skipWhitespaceAndComments();
-        if (!this.token.isIdentifier()) {
+        if (!this.token.isIdentifierOrKeyword()) {
             throw new Error("Expected identifier");
         }
         const reference = new Reference(this.token.value);
@@ -1610,6 +1634,26 @@ class Parser extends BaseParser {
         this.setNextToken();
         this._state.variables.delete(reference.identifier);
         return func;
+    }
+
+    private looksLikePredicateFunctionIdentifier(): boolean {
+        if (!this.token.isIdentifier() || !this.peek()?.isLeftParenthesis()) {
+            return false;
+        }
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        const isPredicateVariable = this.token.isIdentifierOrKeyword();
+        if (!isPredicateVariable) {
+            this.tokenIndex = savedIndex;
+            return false;
+        }
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        const result = this.token.isIn();
+        this.tokenIndex = savedIndex;
+        return result;
     }
 
     private parseFString(): FString | null {

@@ -2654,6 +2654,28 @@ test("Test reserved keywords as parts of identifiers", async () => {
     expect(results[2]).toEqual({ from: "Charlie", to: "Alice", organizer: "Bob" });
 });
 
+test("Test structural keywords as aliases and references", async () => {
+    const runner = new Runner(`
+        WITH 1 AS case, 2 AS when, 3 AS then, 4 AS else, 5 AS end, 6 AS null
+        RETURN case, when, then, else, end, null
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ case: 1, when: 2, then: 3, else: 4, end: 5, null: 6 });
+});
+
+test("Test predicate variables can use keywords", async () => {
+    const runner = new Runner(`
+        RETURN all(from IN [1, 2, 3] WHERE from > 0) AS all_positive,
+               any(where IN [0, 1, 2] WHERE where > 1) AS any_gt_one
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ all_positive: true, any_gt_one: true });
+});
+
 test("Test reserved keywords as relationship types and labels", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Return) AS {

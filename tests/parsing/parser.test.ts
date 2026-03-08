@@ -346,6 +346,12 @@ test("Test lookup with reserved keyword property names", () => {
     );
 });
 
+test("Test keyword pattern assignment identifiers", () => {
+    const parser = new Parser();
+    const ast = parser.parse("MATCH from = (:Person) RETURN from");
+    expect(ast.print()).toContain("Reference (from)");
+});
+
 test("Test load with post", () => {
     const parser = new Parser();
     const ast = parser.parse(

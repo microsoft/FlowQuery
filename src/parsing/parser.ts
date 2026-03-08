@@ -821,29 +821,29 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         let variable: string | null = null;
+        const types: string[] = [];
         if (this.token.isIdentifierOrKeyword()) {
             variable = this.token.value || "";
             this.setNextToken();
         }
-        if (!this.token.isColon()) {
-            throw new Error("Expected ':' for relationship type");
-        }
-        this.setNextToken();
-        if (!this.token.isIdentifierOrKeyword()) {
-            throw new Error("Expected relationship type identifier");
-        }
-        const types: string[] = [this.token.value || ""];
-        this.setNextToken();
-        while (this.token.isPipe()) {
+        if (this.token.isColon()) {
             this.setNextToken();
-            if (this.token.isColon()) {
-                this.setNextToken();
-            }
             if (!this.token.isIdentifierOrKeyword()) {
-                throw new Error("Expected relationship type identifier after '|'");
+                throw new Error("Expected relationship type identifier");
             }
             types.push(this.token.value || "");
             this.setNextToken();
+            while (this.token.isPipe()) {
+                this.setNextToken();
+                if (this.token.isColon()) {
+                    this.setNextToken();
+                }
+                if (!this.token.isIdentifierOrKeyword()) {
+                    throw new Error("Expected relationship type identifier after '|'");
+                }
+                types.push(this.token.value || "");
+                this.setNextToken();
+            }
         }
         const hops: Hops | null = this.parseRelationshipHops();
         const properties: Map<string, Expression> = new Map(this.parseProperties());

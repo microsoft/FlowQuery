@@ -837,6 +837,30 @@ class TestParser:
         assert second_node.reference.identifier == "n"
         assert second_node.label == "Person"
 
+    def test_untyped_relationship(self):
+        """Test match with untyped relationship."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[]->(b:Person) RETURN a, b")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        relationship = match_op.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.types == []
+        assert relationship.identifier is None
+
+    def test_untyped_relationship_variable_and_hops(self):
+        """Test match with untyped relationship variable and hops."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[r*1..3]->(b:Person) RETURN a, r, b")
+        match_op = ast.first_child()
+        assert isinstance(match_op, Match)
+        relationship = match_op.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.identifier == "r"
+        assert relationship.types == []
+        assert relationship.hops.min == 1
+        assert relationship.hops.max == 3
+
     def test_relationship_reference_with_type_creates_relationship_reference(self):
         """Test that reusing a relationship variable with a type creates a RelationshipReference."""
         parser = Parser()

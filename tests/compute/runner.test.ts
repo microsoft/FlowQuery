@@ -3643,6 +3643,82 @@ test("Test match with ORed relationship types returns correct type in relationsh
     expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
 });
 
+test("Test match with untyped relationship unions all relationship types", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedCity) AS {
+            unwind [
+                {id: 1, name: 'NYC'},
+                {id: 2, name: 'LA'},
+                {id: 3, name: 'Chicago'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedCity)-[:FLIGHT]-(:UntypedCity) AS {
+            unwind [
+                {left_id: 1, right_id: 2, carrier: 'Delta'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.carrier as carrier
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedCity)-[:TRAIN]-(:UntypedCity) AS {
+            unwind [
+                {left_id: 1, right_id: 3, carrier: 'Amtrak'}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id, record.carrier as carrier
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:UntypedCity)-[r]->(b:UntypedCity)
+        RETURN a.name AS from, b.name AS to, r.type AS type
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ from: "NYC", to: "LA", type: "FLIGHT" });
+    expect(results[1]).toEqual({ from: "NYC", to: "Chicago", type: "TRAIN" });
+});
+
+test("Test match with untyped anonymous relationship", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedAnimal) AS {
+            unwind [
+                {id: 1, name: 'Cat'},
+                {id: 2, name: 'Dog'},
+                {id: 3, name: 'Fish'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedAnimal)-[:CHASES]-(:UntypedAnimal) AS {
+            unwind [
+                {left_id: 1, right_id: 2}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:UntypedAnimal)-[:EATS]-(:UntypedAnimal) AS {
+            unwind [
+                {left_id: 1, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (a:UntypedAnimal)-[]->(b:UntypedAnimal)
+        RETURN a.name AS from, b.name AS to
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ from: "Cat", to: "Dog" });
+    expect(results[1]).toEqual({ from: "Cat", to: "Fish" });
+});
+
 test("Test relationship properties can be accessed directly via dot notation", async () => {
     await new Runner(`
         CREATE VIRTUAL (:City) AS {

@@ -80,9 +80,10 @@ jobs:
           git add -A
           git diff --cached --quiet || git commit --amend --no-verify --no-edit
 
-          # Pull latest changes and rebase our commit on top
-          git pull --rebase origin main
-          git push
+          # Refresh the tracking ref before rebasing so push uses the current remote tip.
+          git fetch origin main:refs/remotes/origin/main
+          git rebase origin/main
+          git push origin HEAD:main
 
       - name: Install VS Code extension dependencies
         working-directory: ./flowquery-vscode

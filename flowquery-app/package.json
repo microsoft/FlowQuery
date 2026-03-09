@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node -e \"const fs=require('fs');if(!fs.existsSync('public'))fs.mkdirSync('public');fs.copyFileSync('../dist/flowquery.min.js','public/flowquery.min.js')\" && vite",
+    "dev": "vite",
     "build": "vite build"
   },
   "dependencies": {

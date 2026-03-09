@@ -7,6 +7,7 @@ import {
     webLightTheme,
 } from "@fluentui/react-components";
 import React from "react";
+import FlowQuery from "../../src/index.browser";
 import { Compression } from "./compression";
 import { CypherEditor } from "./CypherEditor";
 import { ResultsTable } from "./ResultsTable";

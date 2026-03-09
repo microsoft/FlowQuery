@@ -8,8 +8,8 @@ import "./datetime";
 import "./duration";
 import "./element_id";
 import Function from "./function";
+import type { AsyncDataProvider } from "./function_metadata";
 import {
-    AsyncDataProvider,
     FunctionMetadata,
     getFunctionMetadata,
     getRegisteredFunctionFactory,
@@ -58,7 +58,7 @@ import "./trim";
 import "./type";
 
 // Re-export AsyncDataProvider for backwards compatibility
-export { AsyncDataProvider };
+export type { AsyncDataProvider };
 
 /**
  * Factory for creating function instances by name.

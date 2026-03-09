@@ -22,9 +22,6 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Build FlowQuery
-        run: npm run build
-
       - name: Install flowquery-app dependencies
         working-directory: flowquery-app
         run: npm ci

@@ -1166,6 +1166,28 @@ test("Test limit as last operation", async () => {
     expect(results.length).toBe(5);
 });
 
+test("Test WITH with LIMIT", async () => {
+    const runner = new Runner(`
+        unwind range(1, 100) as x
+        with x limit 5
+        return x
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+});
+
+test("Test WITH DISTINCT with LIMIT", async () => {
+    const runner = new Runner(`
+        unwind [1, 2, 3, 4, 5, 1, 2, 3, 4, 5] as x
+        with distinct x limit 3
+        return x
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+});
+
 test("Test range lookup", async () => {
     const runner = new Runner(
         `

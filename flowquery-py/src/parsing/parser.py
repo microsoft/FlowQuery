@@ -227,7 +227,7 @@ class Parser(BaseParser):
 
             limit = self._parse_limit()
             if limit is not None:
-                if isinstance(operation, Return):
+                if isinstance(operation, Return) and not isinstance(operation, AggregatedWith):
                     operation.limit = limit
                 else:
                     operation.add_sibling(limit)

@@ -1207,6 +1207,30 @@ class TestRunner:
         assert len(results) == 5
 
     @pytest.mark.asyncio
+    async def test_with_limit(self):
+        """Test WITH with LIMIT."""
+        runner = Runner("""
+            unwind range(1, 100) as x
+            with x limit 5
+            return x
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+
+    @pytest.mark.asyncio
+    async def test_with_distinct_limit(self):
+        """Test WITH DISTINCT with LIMIT."""
+        runner = Runner("""
+            unwind [1, 2, 3, 4, 5, 1, 2, 3, 4, 5] as x
+            with distinct x limit 3
+            return x
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+
+    @pytest.mark.asyncio
     async def test_range_lookup(self):
         """Test range lookup."""
         runner = Runner(

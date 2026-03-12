@@ -240,7 +240,7 @@ class Parser extends BaseParser {
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                if (operation instanceof Return) {
+                if (operation instanceof Return && !(operation instanceof AggregatedWith)) {
                     (operation as Return).limit = limit;
                 } else {
                     operation!.addSibling(limit);

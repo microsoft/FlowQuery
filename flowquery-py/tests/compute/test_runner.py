@@ -3216,6 +3216,62 @@ class TestRunner:
         assert results[0]["fruit"] == "pineapple"
 
     @pytest.mark.asyncio
+    async def test_string_operators_with_null_propagation(self):
+        """Test CONTAINS with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana', null, 'pineapple'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_starts_with_null_propagation(self):
+        """Test STARTS WITH with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana'] as fruit
+            with fruit
+            where fruit STARTS WITH 'app'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "apple"
+
+    @pytest.mark.asyncio
+    async def test_ends_with_null_propagation(self):
+        """Test ENDS WITH with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana'] as fruit
+            with fruit
+            where fruit ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "apple"
+
+    @pytest.mark.asyncio
+    async def test_tolower_with_contains_on_null_values(self):
+        """Test toLower with CONTAINS on null values."""
+        runner = Runner("""
+            unwind ['Apple', null, 'PINEAPPLE', 'banana'] as fruit
+            with fruit
+            where toLower(fruit) CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["Apple", "PINEAPPLE"]
+
+    @pytest.mark.asyncio
     async def test_collected_nodes_and_re_matching(self):
         """Test that collected nodes can be unwound and used as node references in subsequent MATCH."""
         await Runner("""

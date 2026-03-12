@@ -3020,6 +3020,58 @@ test("Test WHERE with CONTAINS combined with AND", async () => {
     expect(results[0].fruit).toBe("pineapple");
 });
 
+test("Test string operators with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana', null, 'pineapple'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test STARTS WITH with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana'] as fruit
+        with fruit
+        where fruit STARTS WITH 'app'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("apple");
+});
+
+test("Test ENDS WITH with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana'] as fruit
+        with fruit
+        where fruit ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("apple");
+});
+
+test("Test toLower with CONTAINS on null values", async () => {
+    const runner = new Runner(`
+        unwind ['Apple', null, 'PINEAPPLE', 'banana'] as fruit
+        with fruit
+        where toLower(fruit) CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["Apple", "PINEAPPLE"]);
+});
+
 test("Test collected nodes and re-matching", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Person) AS {

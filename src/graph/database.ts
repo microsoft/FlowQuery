@@ -137,7 +137,9 @@ class Database {
             }
             const args = this.extractArgs(element.properties);
             const data = await node.data(args);
-            return new NodeData(data as NodeRecord[]);
+            const label = element.label!;
+            const records = (data as NodeRecord[]).map((record) => ({ ...record, _label: label }));
+            return new NodeData(records);
         } else if (element instanceof Relationship) {
             const args = this.extractArgs(element.properties);
             if (element.types.length !== 1) {

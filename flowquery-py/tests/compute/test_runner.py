@@ -4401,6 +4401,37 @@ class TestRunner:
         assert results[0] == {"eid": None}
 
     @pytest.mark.asyncio
+    async def test_labels_function_with_node(self):
+        """Test labels() function with a graph node."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        match = Runner("""
+            MATCH (n:Person)
+            RETURN labels(n) AS nodeLabels
+        """)
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"nodeLabels": ["Person"]}
+        assert results[1] == {"nodeLabels": ["Person"]}
+
+    @pytest.mark.asyncio
+    async def test_labels_function_with_null(self):
+        """Test labels() function with null."""
+        runner = Runner("RETURN labels(null) AS nodeLabels")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"nodeLabels": None}
+
+    @pytest.mark.asyncio
     async def test_head_function(self):
         """Test head() function."""
         runner = Runner("RETURN head([1, 2, 3]) AS h")

@@ -4200,6 +4200,35 @@ test("Test elementId() function with null", async () => {
     expect(results[0]).toEqual({ eid: null });
 });
 
+test("Test labels() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN labels(n) AS nodeLabels
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ nodeLabels: ["Person"] });
+    expect(results[1]).toEqual({ nodeLabels: ["Person"] });
+});
+
+test("Test labels() function with null", async () => {
+    const runner = new Runner("RETURN labels(null) AS nodeLabels");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ nodeLabels: null });
+});
+
 test("Test head() function", async () => {
     const runner = new Runner("RETURN head([1, 2, 3]) AS h");
     await runner.run();

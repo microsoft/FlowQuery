@@ -28,6 +28,7 @@ from .head import Head
 from .id_ import Id
 from .join import Join
 from .keys import Keys
+from .labels import Labels
 from .last import Last
 from .localdatetime import LocalDatetime
 from .localtime import LocalTime
@@ -97,6 +98,7 @@ __all__ = [
     "Head",
     "Id",
     "Join",
+    "Labels",
     "Last",
     "Keys",
     "Max",

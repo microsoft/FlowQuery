@@ -147,7 +147,9 @@ class Database:
                 raise ValueError(f"Physical node not found for label {element.label}")
             args = self._extract_args(element.properties)
             data = await node.data(args)
-            return NodeData(data)
+            label = element.label
+            records = [{**record, "_label": label} for record in data]
+            return NodeData(records)
         elif isinstance(element, Relationship):
             args = self._extract_args(element.properties)
             if len(element.types) != 1:

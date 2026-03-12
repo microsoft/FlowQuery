@@ -42,9 +42,9 @@ class Properties extends Function {
             return obj.properties;
         }
 
-        // If it's a node record (has id field), exclude id
+        // If it's a node record (has id field), exclude id and _label
         if ("id" in obj) {
-            const { id, ...props } = obj;
+            const { id, _label, ...props } = obj;
             return props;
         }
 

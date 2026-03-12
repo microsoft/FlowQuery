@@ -42,9 +42,9 @@ class Properties(Function):
         if all(k in obj for k in ("type", "startNode", "endNode", "properties")):
             return obj["properties"]
 
-        # If it's a node record (has id field), exclude id
+        # If it's a node record (has id field), exclude id and _label
         if "id" in obj:
-            return {k: v for k, v in obj.items() if k != "id"}
+            return {k: v for k, v in obj.items() if k not in ("id", "_label")}
 
         # Otherwise, treat as a plain map and return a copy
         return dict(obj)

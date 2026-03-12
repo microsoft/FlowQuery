@@ -82,3 +82,21 @@ class BaseParser:
         if self._token_index - 1 < 0:
             return Token.EOF()
         return self._tokens[self._token_index - 1]
+
+    def next_significant_token(self, offset: int = 1) -> Token:
+        """Gets the next non-whitespace/comment token."""
+        index = self._token_index + offset
+        while index < len(self._tokens) and self._tokens[index].is_whitespace_or_comment():
+            index += 1
+        if index >= len(self._tokens):
+            return Token.EOF()
+        return self._tokens[index]
+
+    def previous_significant_token(self, offset: int = 1) -> Token:
+        """Gets the previous non-whitespace/comment token."""
+        index = self._token_index - offset
+        while index >= 0 and self._tokens[index].is_whitespace_or_comment():
+            index -= 1
+        if index < 0:
+            return Token.EOF()
+        return self._tokens[index]

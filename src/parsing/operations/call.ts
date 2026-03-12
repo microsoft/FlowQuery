@@ -32,6 +32,7 @@ class Call extends Projection {
         const args = this._function.getArguments();
         for await (const item of this._function.generate(...args)) {
             if (!this.isLast) {
+                this._map.reset();
                 if (typeof item == "object" && !Array.isArray(item)) {
                     for (const [key, value] of Object.entries(item)) {
                         const expression = this._map.get(key);

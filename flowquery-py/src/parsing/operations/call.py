@@ -47,6 +47,7 @@ class Call(Projection):
         args = self._function.get_arguments()
         async for item in self._function.generate(*args):
             if not self.is_last:
+                self._map.reset()
                 if isinstance(item, dict):
                     for key, value in item.items():
                         expression = self._map.get(key)

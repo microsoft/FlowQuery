@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from ...graph.pattern_expression import PatternExpression
 
 
+_NOT_SET = object()
+
+
 class Expression(ASTNode):
     """Represents an expression in the FlowQuery AST.
 
@@ -32,7 +35,7 @@ class Expression(ASTNode):
         self._operators: List[ASTNode] = []
         self._output: List[ASTNode] = []
         self._alias: Optional[str] = None
-        self._overridden: Any = None
+        self._overridden: Any = _NOT_SET
         self._reducers: Optional[List['AggregateFunction']] = None
         self._patterns: Optional[List['PatternExpression']] = None
 
@@ -83,7 +86,7 @@ class Expression(ASTNode):
         return len(self._operators) > 0 or len(self._output) > 0
 
     def value(self) -> Any:
-        if self._overridden is not None:
+        if self._overridden is not _NOT_SET:
             return self._overridden
         if self.child_count() != 1:
             raise ValueError("Expected one child")

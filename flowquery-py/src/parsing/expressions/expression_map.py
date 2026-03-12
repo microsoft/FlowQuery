@@ -24,3 +24,7 @@ class ExpressionMap:
             if alias is None:
                 continue
             self._map[alias] = expr
+
+    def reset(self) -> None:
+        for expr in self._map.values():
+            expr.overridden = None

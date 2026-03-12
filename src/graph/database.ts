@@ -57,21 +57,25 @@ class Database {
         relationship: Relationship,
         physical: PhysicalRelationship
     ): boolean {
-        const patternSourceLabel = relationship.source?.label ?? null;
-        const patternTargetLabel = relationship.target?.label ?? null;
+        const patternSourceLabels = relationship.source?.labels ?? [];
+        const patternTargetLabels = relationship.target?.labels ?? [];
         const physicalSourceLabel = physical.source?.label ?? null;
         const physicalTargetLabel = physical.target?.label ?? null;
 
+        const matchesLabel = (patternLabels: string[], physicalLabel: string | null): boolean =>
+            patternLabels.length === 0 ||
+            (physicalLabel !== null && patternLabels.includes(physicalLabel));
+
         if (relationship.direction === "left") {
             return (
-                (patternSourceLabel === null || patternSourceLabel === physicalTargetLabel) &&
-                (patternTargetLabel === null || patternTargetLabel === physicalSourceLabel)
+                matchesLabel(patternSourceLabels, physicalTargetLabel) &&
+                matchesLabel(patternTargetLabels, physicalSourceLabel)
             );
         }
 
         return (
-            (patternSourceLabel === null || patternSourceLabel === physicalSourceLabel) &&
-            (patternTargetLabel === null || patternTargetLabel === physicalTargetLabel)
+            matchesLabel(patternSourceLabels, physicalSourceLabel) &&
+            matchesLabel(patternTargetLabels, physicalTargetLabel)
         );
     }
     private getRelationshipEntries(relationship: Relationship): [string, PhysicalRelationship][] {
@@ -131,13 +135,40 @@ class Database {
 
     public async getData(element: Node | Relationship): Promise<NodeData | RelationshipData> {
         if (element instanceof Node) {
+            const args = this.extractArgs(element.properties);
+            if (element.labels.length === 0) {
+                // Unlabeled node: match all physical nodes in the database
+                const allRecords: NodeRecord[] = [];
+                for (const [label, physical] of Database.nodes) {
+                    const data = await physical.data();
+                    for (const record of data as NodeRecord[]) {
+                        allRecords.push({ ...record, _label: label });
+                    }
+                }
+                return new NodeData(allRecords);
+            }
+            if (element.labels.length > 1) {
+                // ORed labels: collect from all matching physical nodes
+                const allRecords: NodeRecord[] = [];
+                for (const lbl of element.labels) {
+                    const physical = Database.nodes.get(lbl);
+                    if (physical) {
+                        const data = await physical.data(args);
+                        for (const record of data as NodeRecord[]) {
+                            allRecords.push({ ...record, _label: lbl });
+                        }
+                    }
+                }
+                return new NodeData(allRecords);
+            }
             const node = this.getNode(element);
             if (node === null) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const args = this.extractArgs(element.properties);
             const data = await node.data(args);
-            return new NodeData(data as NodeRecord[]);
+            const label = element.label;
+            const records = (data as NodeRecord[]).map((record) => ({ ...record, _label: label }));
+            return new NodeData(records);
         } else if (element instanceof Relationship) {
             const args = this.extractArgs(element.properties);
             if (element.types.length !== 1) {

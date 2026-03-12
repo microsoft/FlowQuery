@@ -203,9 +203,11 @@ class Contains(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("CONTAINS requires string operands")
         return 1 if search in s else 0
@@ -215,9 +217,11 @@ class NotContains(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("NOT CONTAINS requires string operands")
         return 0 if search in s else 1
@@ -227,9 +231,11 @@ class StartsWith(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("STARTS WITH requires string operands")
         return 1 if s.startswith(search) else 0
@@ -239,9 +245,11 @@ class NotStartsWith(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("NOT STARTS WITH requires string operands")
         return 0 if s.startswith(search) else 1
@@ -251,9 +259,11 @@ class EndsWith(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("ENDS WITH requires string operands")
         return 1 if s.endswith(search) else 0
@@ -263,9 +273,11 @@ class NotEndsWith(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         s = self.lhs.value()
         search = self.rhs.value()
+        if s is None or search is None:
+            return None
         if not isinstance(s, str) or not isinstance(search, str):
             raise ValueError("NOT ENDS WITH requires string operands")
         return 0 if s.endswith(search) else 1

@@ -13,11 +13,18 @@ Beyond graphs, FlowQuery provides a full data processing pipeline language with 
 The combination of graph querying and pipeline processing makes FlowQuery ideal for the retrieval stage of Retrieval Augmented Generation (RAG). A typical graph RAG flow works as follows:
 
 1. **User query** — The user asks a question in natural language.
-2. **Query generation** — The LLM, with knowledge of the virtual graph schema, generates a precise OpenCypher query to retrieve the grounding data needed to answer the question.
-3. **Query execution** — The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
-4. **Response formulation** — The LLM formulates a final response informed by the grounding data.
+2. **Schema retrieval** — The application retrieves the virtual graph schema via `CALL schema()` and injects it into the system instructions of the query-generation LLM, so it knows which node labels, relationship types, and properties are available.
+3. **Query generation** — The LLM, grounded in the schema, generates a precise OpenCypher query to retrieve the data needed to answer the question.
+4. **Query execution** — The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
+5. **Response formulation** — The LLM formulates a final response informed by the grounding data.
 
 ```
+                 ┌───────────────────┐
+                 │   Graph Schema    │
+                 │  (via schema())   │
+                 └────────┬──────────┘
+                          │ system instructions
+                          v
 ┌──────────┐     ┌───────────────┐     ┌─────────────────┐     ┌───────────────┐
 │   User   │────>│      LLM      │────>│    FlowQuery    │────>│      LLM      │
 │ Question │     │ Generate Query│     │ Execute Query   │     │  Formulate    │
@@ -29,6 +36,22 @@ The combination of graph querying and pipeline processing makes FlowQuery ideal 
                                                                  │  Answer  │
                                                                  └──────────┘
 ```
+
+The schema is retrieved using FlowQuery's built-in `schema()` function, which returns the structure of all registered virtual nodes and relationships — including labels, types, endpoint labels, property names, and sample values. This schema is then included in the LLM's system instructions so it can generate correct queries grounded in the actual graph model:
+
+```cypher
+CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
+RETURN kind, label, type, from_label, to_label, properties
+```
+
+For the [Virtual Org Chart](#virtual-org-chart) example, this returns:
+
+| kind         | label    | type       | from_label | to_label | properties                                  |
+| ------------ | -------- | ---------- | ---------- | -------- | ------------------------------------------- |
+| Node         | Employee | N/A        | N/A        | N/A      | [name, jobTitle, department, phone, skills] |
+| Relationship | N/A      | REPORTS_TO | Employee   | Employee | N/A                                         |
+
+Node rows carry `label` and `properties`; relationship rows carry `type`, `from_label`, `to_label`, and `properties`. Fields not applicable to a row are `null`.
 
 See the [Language Reference](#language-reference) and [Quick Cheat Sheet](#quick-cheat-sheet) for full syntax documentation. For a complete worked example, see [Virtual Org Chart](#virtual-org-chart).
 
@@ -468,6 +491,7 @@ UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
 | `last(list)`                   | Last element                           | `last([1,2,3])` → `3`                  |
 | `id(node_or_rel)`              | ID of a node or type of a relationship | `id(n)`                                |
 | `elementId(node)`              | String ID of a node                    | `elementId(n)` → `"1"`                 |
+| `labels(node)`                 | Labels of a node as an array           | `labels(n)` → `["Person"]`             |
 
 All scalar functions propagate `null`: if the primary input is `null`, the result is `null`.
 
@@ -539,6 +563,19 @@ Queries virtual graph data. Supports property constraints, `WHERE` clauses, and 
 MATCH (n:Person) RETURN n.name AS name
 MATCH (n:Person {name: 'Alice'}) RETURN n
 MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name
+```
+
+**Unlabeled node matching:** Omit the label to match all nodes in the graph.
+
+```cypher
+MATCH (n) RETURN n                                     // all nodes
+MATCH (n {name: 'Alice'}) RETURN n                     // all nodes with name='Alice'
+```
+
+**ORed node labels:** Match nodes with any of the specified labels.
+
+```cypher
+MATCH (n:Person|Animal) RETURN n, labels(n) AS lbls
 ```
 
 **Leftward direction:** `<-[:TYPE]-` reverses traversal direction.
@@ -719,6 +756,8 @@ RETURN f.name, f.description, f.category
 │  DELETE VIRTUAL (:Label)                                    │
 │  DELETE VIRTUAL (:L1)-[:TYPE]-(:L2)                         │
 │  MATCH (n:Label {prop: val}), ...  [WHERE cond]             │
+│  MATCH (n) ...                       -- unlabeled (all)     │
+│  MATCH (n:L1|L2) ...                 -- ORed node labels    │
 │  MATCH (a)-[:TYPE]->(b)              -- rightward           │
 │  MATCH (a)<-[:TYPE]-(b)              -- leftward            │
 │  MATCH (a)-[:TYPE*0..3]->(b)         -- variable length     │
@@ -771,7 +810,7 @@ RETURN f.name, f.description, f.category
 │  size  range  round  rand  split  join  replace             │
 │  toLower  trim  substring  toString  toInteger  toFloat     │
 │  tojson  stringify  string_distance  keys  properties       │
-│  type  coalesce  head  tail  last  id  elementId            │
+│  type  coalesce  head  tail  last  id  elementId  labels    │
 ├─────────────────────────────────────────────────────────────┤
 │  TEMPORAL FUNCTIONS                                         │
 ├─────────────────────────────────────────────────────────────┤

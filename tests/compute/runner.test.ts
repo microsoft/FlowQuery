@@ -1166,6 +1166,28 @@ test("Test limit as last operation", async () => {
     expect(results.length).toBe(5);
 });
 
+test("Test WITH with LIMIT", async () => {
+    const runner = new Runner(`
+        unwind range(1, 100) as x
+        with x limit 5
+        return x
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(5);
+});
+
+test("Test WITH DISTINCT with LIMIT", async () => {
+    const runner = new Runner(`
+        unwind [1, 2, 3, 4, 5, 1, 2, 3, 4, 5] as x
+        with distinct x limit 3
+        return x
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+});
+
 test("Test range lookup", async () => {
     const runner = new Runner(
         `
@@ -2617,6 +2639,7 @@ test("Test schema() returns nodes and relationships with sample data", async () 
 
     const chases = results.find((r: any) => r.kind === "Relationship" && r.type === "CHASES");
     expect(chases).toBeDefined();
+    expect(chases.label).toBeNull();
     expect(chases.from_label).toBe("Animal");
     expect(chases.to_label).toBe("Animal");
     expect(chases.properties).toEqual(["speed"]);
@@ -3018,6 +3041,58 @@ test("Test WHERE with CONTAINS combined with AND", async () => {
     const results = runner.results;
     expect(results.length).toBe(1);
     expect(results[0].fruit).toBe("pineapple");
+});
+
+test("Test string operators with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana', null, 'pineapple'] as fruit
+        with fruit
+        where fruit CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["apple", "pineapple"]);
+});
+
+test("Test STARTS WITH with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana'] as fruit
+        with fruit
+        where fruit STARTS WITH 'app'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("apple");
+});
+
+test("Test ENDS WITH with null propagation", async () => {
+    const runner = new Runner(`
+        unwind ['apple', null, 'banana'] as fruit
+        with fruit
+        where fruit ENDS WITH 'ple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].fruit).toBe("apple");
+});
+
+test("Test toLower with CONTAINS on null values", async () => {
+    const runner = new Runner(`
+        unwind ['Apple', null, 'PINEAPPLE', 'banana'] as fruit
+        with fruit
+        where toLower(fruit) CONTAINS 'apple'
+        return fruit
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results.map((r: any) => r.fruit)).toEqual(["Apple", "PINEAPPLE"]);
 });
 
 test("Test collected nodes and re-matching", async () => {
@@ -4124,6 +4199,35 @@ test("Test elementId() function with null", async () => {
     const results = runner.results;
     expect(results.length).toBe(1);
     expect(results[0]).toEqual({ eid: null });
+});
+
+test("Test labels() function with node", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (n:Person)
+        RETURN labels(n) AS nodeLabels
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ nodeLabels: ["Person"] });
+    expect(results[1]).toEqual({ nodeLabels: ["Person"] });
+});
+
+test("Test labels() function with null", async () => {
+    const runner = new Runner("RETURN labels(null) AS nodeLabels");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ nodeLabels: null });
 });
 
 test("Test head() function", async () => {
@@ -5901,4 +6005,100 @@ test("Test EXISTS as return expression", async () => {
     expect(results[0]).toEqual({ name: "Alice", hasFriends: true });
     expect(results[1]).toEqual({ name: "Bob", hasFriends: false });
     expect(results[2]).toEqual({ name: "Charlie", hasFriends: false });
+});
+
+test("Test unlabeled node match returns all nodes", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Fruit) AS {
+            UNWIND [
+                {id: 1, name: 'Apple'},
+                {id: 2, name: 'Banana'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Color) AS {
+            UNWIND [
+                {id: 3, name: 'Red'},
+                {id: 4, name: 'Blue'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const runner = new Runner("MATCH (n) RETURN n ORDER BY n.id");
+    await runner.run();
+    const results = runner.results;
+    // Should return all nodes from both Fruit and Color
+    expect(results.length).toBeGreaterThanOrEqual(4);
+    const names = results.map((r: any) => r.n.name);
+    expect(names).toContain("Apple");
+    expect(names).toContain("Banana");
+    expect(names).toContain("Red");
+    expect(names).toContain("Blue");
+});
+
+test("Test unlabeled node match with property filter", async () => {
+    const runner = new Runner("MATCH (n {name: 'Apple'}) RETURN n.name AS name");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].name).toBe("Apple");
+});
+
+test("Test match with ORed node labels", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Cat) AS {
+            UNWIND [
+                {id: 1, name: 'Whiskers'},
+                {id: 2, name: 'Mittens'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Dog) AS {
+            UNWIND [
+                {id: 3, name: 'Rex'},
+                {id: 4, name: 'Buddy'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Fish) AS {
+            UNWIND [
+                {id: 5, name: 'Nemo'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const runner = new Runner("MATCH (n:Cat|Dog) RETURN n ORDER BY n.id");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    const names = results.map((r: any) => r.n.name);
+    expect(names).toContain("Whiskers");
+    expect(names).toContain("Mittens");
+    expect(names).toContain("Rex");
+    expect(names).toContain("Buddy");
+    expect(names).not.toContain("Nemo");
+});
+
+test("Test match with ORed node labels returns correct label", async () => {
+    const runner = new Runner(
+        "MATCH (n:Cat|Dog) RETURN n.name AS name, labels(n) AS lbls ORDER BY n.id"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
+    expect(results[0]).toEqual({ name: "Whiskers", lbls: ["Cat"] });
+    expect(results[2]).toEqual({ name: "Rex", lbls: ["Dog"] });
+});
+
+test("Test match with ORed node labels with optional colon syntax", async () => {
+    const runner = new Runner("MATCH (n:Cat|:Dog) RETURN n ORDER BY n.id");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(4);
 });

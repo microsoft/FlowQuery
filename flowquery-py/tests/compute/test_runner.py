@@ -434,7 +434,7 @@ class TestRunner:
         assert results[0] == {"result": [4, 9, 16]}
 
     @pytest.mark.asyncio
-    async def test_list_comprehension_identity(self):
+    async def test_list_comprehension_identity_no_where_no_mapping(self):
         """Test list comprehension identity (no WHERE, no mapping)."""
         runner = Runner("RETURN [n IN [10, 20, 30]] AS result")
         await runner.run()
@@ -777,7 +777,7 @@ class TestRunner:
         assert results[0]["dist"] == pytest.approx(3 / 7)
 
     @pytest.mark.asyncio
-    async def test_string_distance_identical_strings(self):
+    async def test_string_distance_function_with_identical_strings(self):
         """Test string_distance function with identical strings."""
         runner = Runner('RETURN string_distance("hello", "hello") as dist')
         await runner.run()
@@ -786,7 +786,7 @@ class TestRunner:
         assert results[0] == {"dist": 0}
 
     @pytest.mark.asyncio
-    async def test_string_distance_empty_string(self):
+    async def test_string_distance_function_with_empty_string(self):
         """Test string_distance function with empty string."""
         runner = Runner('RETURN string_distance("", "abc") as dist')
         await runner.run()
@@ -795,7 +795,7 @@ class TestRunner:
         assert results[0] == {"dist": 1}
 
     @pytest.mark.asyncio
-    async def test_string_distance_both_empty(self):
+    async def test_string_distance_function_with_both_empty_strings(self):
         """Test string_distance function with both empty strings."""
         runner = Runner('RETURN string_distance("", "") as dist')
         await runner.run()
@@ -833,7 +833,7 @@ class TestRunner:
         assert results[0] == {"stringify": '{\n   "a": 1,\n   "b": 2\n}'}
 
     @pytest.mark.asyncio
-    async def test_to_string_function_with_number(self):
+    async def test_tostring_function_with_number(self):
         """Test toString function with a number."""
         runner = Runner("RETURN toString(42) as result")
         await runner.run()
@@ -842,7 +842,7 @@ class TestRunner:
         assert results[0] == {"result": "42"}
 
     @pytest.mark.asyncio
-    async def test_to_string_function_with_boolean(self):
+    async def test_tostring_function_with_boolean(self):
         """Test toString function with a boolean."""
         runner = Runner("RETURN toString(true) as result")
         await runner.run()
@@ -851,7 +851,7 @@ class TestRunner:
         assert results[0] == {"result": "true"}
 
     @pytest.mark.asyncio
-    async def test_to_string_function_with_object(self):
+    async def test_tostring_function_with_object(self):
         """Test toString function with an object."""
         runner = Runner("RETURN toString({a: 1}) as result")
         await runner.run()
@@ -860,7 +860,7 @@ class TestRunner:
         assert results[0] == {"result": '{"a": 1}'}
 
     @pytest.mark.asyncio
-    async def test_to_lower_function(self):
+    async def test_tolower_function(self):
         """Test toLower function."""
         runner = Runner('RETURN toLower("Hello World") as result')
         await runner.run()
@@ -869,7 +869,7 @@ class TestRunner:
         assert results[0] == {"result": "hello world"}
 
     @pytest.mark.asyncio
-    async def test_to_lower_function_with_all_uppercase(self):
+    async def test_tolower_function_with_all_uppercase(self):
         """Test toLower function with all uppercase."""
         runner = Runner('RETURN toLower("FOO BAR") as result')
         await runner.run()
@@ -952,7 +952,7 @@ class TestRunner:
     # --- Null propagation tests ---
 
     @pytest.mark.asyncio
-    async def test_to_lower_with_null_returns_null(self):
+    async def test_tolower_with_null_returns_null(self):
         """Test toLower with null returns null."""
         runner = Runner("RETURN toLower(null) as result")
         await runner.run()
@@ -1060,7 +1060,7 @@ class TestRunner:
         assert results[0] == {"result": None}
 
     @pytest.mark.asyncio
-    async def test_to_string_with_null_returns_null(self):
+    async def test_tostring_with_null_returns_null(self):
         """Test toString with null returns null."""
         runner = Runner("RETURN toString(null) as result")
         await runner.run()
@@ -1096,7 +1096,7 @@ class TestRunner:
         assert results[0] == {"aa": 1}
 
     @pytest.mark.asyncio
-    async def test_lookup_which_is_keyword_bracket(self):
+    async def test_lookup_which_is_keyword_with_bracket_notation(self):
         """Test lookup which is keyword with bracket notation."""
         runner = Runner('RETURN {return: 1}["return"] as aa')
         await runner.run()
@@ -1207,6 +1207,30 @@ class TestRunner:
         assert len(results) == 5
 
     @pytest.mark.asyncio
+    async def test_with_with_limit(self):
+        """Test WITH with LIMIT."""
+        runner = Runner("""
+            unwind range(1, 100) as x
+            with x limit 5
+            return x
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+
+    @pytest.mark.asyncio
+    async def test_with_distinct_with_limit(self):
+        """Test WITH DISTINCT with LIMIT."""
+        runner = Runner("""
+            unwind [1, 2, 3, 4, 5, 1, 2, 3, 4, 5] as x
+            with distinct x limit 3
+            return x
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+
+    @pytest.mark.asyncio
     async def test_range_lookup(self):
         """Test range lookup."""
         runner = Runner(
@@ -1228,7 +1252,7 @@ class TestRunner:
         }
 
     @pytest.mark.asyncio
-    async def test_return_negative_number(self):
+    async def test_return_minus_1(self):
         """Test return -1."""
         runner = Runner("return -1 as num")
         await runner.run()
@@ -1988,7 +2012,7 @@ class TestRunner:
         assert len(results) == 6
 
     @pytest.mark.asyncio
-    async def test_multi_hop_match_with_min_hops_constraint_1(self):
+    async def test_multi_hop_match_with_min_hops_constraint_star_1(self):
         """Test multi-hop match with min hops constraint *1.."""
         await Runner(
             """
@@ -2037,7 +2061,7 @@ class TestRunner:
         assert results[5] == {"name1": "Person 3", "name2": "Person 4"}
 
     @pytest.mark.asyncio
-    async def test_multi_hop_match_with_min_hops_constraint_2(self):
+    async def test_multi_hop_match_with_min_hops_constraint_star_2(self):
         """Test multi-hop match with min hops constraint *2.."""
         await Runner(
             """
@@ -2357,7 +2381,7 @@ class TestRunner:
         assert left_results[1] == {"manager": "Person 1", "employee": "Person 3"}
 
     @pytest.mark.asyncio
-    async def test_match_with_leftward_direction_swapped_data(self):
+    async def test_match_with_leftward_direction_produces_same_results_as_rightward_with_swapped_data(self):
         """Test match with leftward direction produces same results as rightward with swapped data."""
         await Runner(
             """
@@ -2396,7 +2420,7 @@ class TestRunner:
         assert results[1] == {"destination": "Chicago", "origin": "New York"}
 
     @pytest.mark.asyncio
-    async def test_match_with_leftward_variable_length(self):
+    async def test_match_with_leftward_variable_length_relationships(self):
         """Test match with leftward variable-length relationships."""
         await Runner(
             """
@@ -2717,7 +2741,7 @@ class TestRunner:
         assert len(results[2]["friends"]) == 1  # null is collected
 
     @pytest.mark.asyncio
-    async def test_standalone_optional_match_returns_data(self):
+    async def test_standalone_optional_match_returns_data_when_label_exists(self):
         """Test standalone optional match returns data when label exists."""
         await Runner(
             """
@@ -2820,6 +2844,7 @@ class TestRunner:
 
         chases = next((r for r in results if r.get("kind") == "Relationship" and r.get("type") == "CHASES"), None)
         assert chases is not None
+        assert chases.get("label") is None
         assert chases["from_label"] == "Animal"
         assert chases["to_label"] == "Animal"
         assert chases["properties"] == ["speed"]
@@ -2886,6 +2911,28 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"name1": "Node 1", "name2": "Node 2"}
+
+    @pytest.mark.asyncio
+    async def test_structural_keywords_as_aliases_and_references(self):
+        runner = Runner("""
+            WITH 1 AS case, 2 AS when, 3 AS then, 4 AS else, 5 AS end, 6 AS null
+            RETURN case, when, then, else, end, null
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"case": 1, "when": 2, "then": 3, "else": 4, "end": 5, "null": 6}
+
+    @pytest.mark.asyncio
+    async def test_predicate_variables_can_use_keywords(self):
+        runner = Runner("""
+            RETURN all(from IN [1, 2, 3] WHERE from > 0) AS all_positive,
+                   any(where IN [0, 1, 2] WHERE where > 1) AS any_gt_one
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"all_positive": True, "any_gt_one": True}
 
     @pytest.mark.asyncio
     async def test_match_with_node_reference_passed_through_with(self):
@@ -2995,7 +3042,7 @@ class TestRunner:
         assert results[0] == {"name": "Alice", "age": 30}
 
     @pytest.mark.asyncio
-    async def test_where_with_is_not_null_multiple_results(self):
+    async def test_where_with_is_not_null_filters_multiple_results(self):
         """Test WHERE with IS NOT NULL filters multiple results."""
         runner = Runner("""
             unwind [{name: 'Alice', age: 30}, {name: 'Bob', age: null}, {name: 'Carol', age: 25}] as person
@@ -3214,6 +3261,62 @@ class TestRunner:
         results = runner.results
         assert len(results) == 1
         assert results[0]["fruit"] == "pineapple"
+
+    @pytest.mark.asyncio
+    async def test_string_operators_with_null_propagation(self):
+        """Test CONTAINS with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana', null, 'pineapple'] as fruit
+            with fruit
+            where fruit CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["apple", "pineapple"]
+
+    @pytest.mark.asyncio
+    async def test_starts_with_with_null_propagation(self):
+        """Test STARTS WITH with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana'] as fruit
+            with fruit
+            where fruit STARTS WITH 'app'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "apple"
+
+    @pytest.mark.asyncio
+    async def test_ends_with_with_null_propagation(self):
+        """Test ENDS WITH with null values filters them out instead of erroring."""
+        runner = Runner("""
+            unwind ['apple', null, 'banana'] as fruit
+            with fruit
+            where fruit ENDS WITH 'ple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["fruit"] == "apple"
+
+    @pytest.mark.asyncio
+    async def test_tolower_with_contains_on_null_values(self):
+        """Test toLower with CONTAINS on null values."""
+        runner = Runner("""
+            unwind ['Apple', null, 'PINEAPPLE', 'banana'] as fruit
+            with fruit
+            where toLower(fruit) CONTAINS 'apple'
+            return fruit
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert [r["fruit"] for r in results] == ["Apple", "PINEAPPLE"]
 
     @pytest.mark.asyncio
     async def test_collected_nodes_and_re_matching(self):
@@ -3573,7 +3676,7 @@ class TestRunner:
         assert results == [{"a": 1}, {"a": 2}, {"a": 3}]
 
     @pytest.mark.asyncio
-    async def test_chained_union_removes_duplicates(self):
+    async def test_chained_union_removes_duplicates_across_all_branches(self):
         """Test chained UNION removes duplicates across all branches."""
         runner = Runner(
             "WITH 1 AS x RETURN x UNION WITH 2 AS x RETURN x UNION WITH 1 AS x RETURN x"
@@ -3595,7 +3698,7 @@ class TestRunner:
         assert results == [{"x": 1}, {"x": 2}, {"x": 3}, {"x": 4}]
 
     @pytest.mark.asyncio
-    async def test_union_with_mismatched_columns(self):
+    async def test_union_with_mismatched_columns_throws_error(self):
         """Test UNION with mismatched columns throws error."""
         runner = Runner("WITH 1 AS x RETURN x UNION WITH 2 AS y RETURN y")
         with pytest.raises(ValueError, match="All sub queries in a UNION must have the same return column names"):
@@ -3771,7 +3874,7 @@ class TestRunner:
         assert results[0] == {"sum": 0}
 
     @pytest.mark.asyncio
-    async def test_relationship_properties_direct_dot_notation(self):
+    async def test_relationship_properties_can_be_accessed_directly_via_dot_notation(self):
         """Test relationship properties can be accessed directly via dot notation."""
         await Runner(
             """
@@ -3806,7 +3909,112 @@ class TestRunner:
         assert results[0] == {"from": "NYC", "to": "LA", "airline": "Delta", "duration": 5}
 
     @pytest.mark.asyncio
-    async def test_match_with_untyped_relationship_unions_all_types(self):
+    async def test_match_with_ored_relationship_types(self):
+        """Test matching with ORed relationship types."""
+        await Runner("""
+            CREATE VIRTUAL (:OredRelPerson) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'},
+                    {id: 3, name: 'Charlie'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelPerson)-[:OR_KNOWS]-(:OredRelPerson) AS {
+                unwind [{left_id: 1, right_id: 2}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelPerson)-[:OR_FOLLOWS]-(:OredRelPerson) AS {
+                unwind [{left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:OredRelPerson)-[:OR_KNOWS|OR_FOLLOWS]->(b:OredRelPerson)
+            RETURN a.name AS name1, b.name AS name2
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name1": "Alice", "name2": "Bob"}
+        assert results[1] == {"name1": "Bob", "name2": "Charlie"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_relationship_types_with_optional_colon_syntax(self):
+        """Test ORed relationship types with optional colon syntax."""
+        await Runner("""
+            CREATE VIRTUAL (:OredRelAnimal) AS {
+                unwind [
+                    {id: 1, name: 'Cat'},
+                    {id: 2, name: 'Dog'},
+                    {id: 3, name: 'Fish'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelAnimal)-[:OR_CHASES]-(:OredRelAnimal) AS {
+                unwind [{left_id: 1, right_id: 2}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelAnimal)-[:OR_EATS]-(:OredRelAnimal) AS {
+                unwind [{left_id: 1, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:OredRelAnimal)-[:OR_CHASES|:OR_EATS]->(b:OredRelAnimal)
+            RETURN a.name AS name1, b.name AS name2
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name1": "Cat", "name2": "Dog"}
+        assert results[1] == {"name1": "Cat", "name2": "Fish"}
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_relationship_types_returns_correct_type_in_relationship_variable(self):
+        """Test that ORed relationship types return correct type in relationship variable."""
+        await Runner("""
+            CREATE VIRTUAL (:OredRelCity) AS {
+                unwind [
+                    {id: 1, name: 'NYC'},
+                    {id: 2, name: 'LA'},
+                    {id: 3, name: 'Chicago'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelCity)-[:OR_FLIGHT]-(:OredRelCity) AS {
+                unwind [{left_id: 1, right_id: 2, airline: 'Delta'}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.airline as airline
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:OredRelCity)-[:OR_TRAIN]-(:OredRelCity) AS {
+                unwind [{left_id: 1, right_id: 3, line: 'Amtrak'}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id, record.line as line
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:OredRelCity)-[r:OR_FLIGHT|OR_TRAIN]->(b:OredRelCity)
+            RETURN a.name AS from, b.name AS to, r.type AS rtype
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0]["rtype"] == "OR_FLIGHT"
+        assert results[1]["rtype"] == "OR_TRAIN"
+
+    @pytest.mark.asyncio
+    async def test_match_with_untyped_relationship_unions_all_relationship_types(self):
         """Test match with untyped relationship unions all relationship types."""
         await Runner(
             """
@@ -3900,7 +4108,7 @@ class TestRunner:
         assert results[1] == {"from": "Cat", "to": "Fish"}
 
     @pytest.mark.asyncio
-    async def test_relationship_properties_direct_and_via_properties_function(self):
+    async def test_relationship_properties_accessible_via_both_direct_access_and_properties(self):
         """Test relationship properties accessible via both direct access and properties()."""
         await Runner(
             """
@@ -3935,7 +4143,7 @@ class TestRunner:
         assert results[0] == {"from": "Alice", "to": "Bob", "since": 2020, "strength": "strong", "propSince": 2020}
 
     @pytest.mark.asyncio
-    async def test_coalesce_returns_first_non_null(self):
+    async def test_coalesce_returns_first_non_null_value(self):
         """Test coalesce returns first non-null value."""
         runner = Runner("RETURN coalesce(null, null, 'hello', 'world') as result")
         await runner.run()
@@ -3953,7 +4161,7 @@ class TestRunner:
         assert results[0] == {"result": "first"}
 
     @pytest.mark.asyncio
-    async def test_coalesce_returns_null_when_all_null(self):
+    async def test_coalesce_returns_null_when_all_arguments_are_null(self):
         """Test coalesce returns null when all arguments are null."""
         runner = Runner("RETURN coalesce(null, null, null) as result")
         await runner.run()
@@ -4286,7 +4494,7 @@ class TestRunner:
         assert results[0] == {"relId": "CONNECTED_TO"}
 
     @pytest.mark.asyncio
-    async def test_element_id_function_with_node(self):
+    async def test_elementid_function_with_node(self):
         """Test elementId() function with a graph node."""
         await Runner(
             """
@@ -4312,13 +4520,44 @@ class TestRunner:
         assert results[1] == {"eid": "2"}
 
     @pytest.mark.asyncio
-    async def test_element_id_function_with_null(self):
+    async def test_elementid_function_with_null(self):
         """Test elementId() function with null."""
         runner = Runner("RETURN elementId(null) AS eid")
         await runner.run()
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"eid": None}
+
+    @pytest.mark.asyncio
+    async def test_labels_function_with_node(self):
+        """Test labels() function with a graph node."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        match = Runner("""
+            MATCH (n:Person)
+            RETURN labels(n) AS nodeLabels
+        """)
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        assert results[0] == {"nodeLabels": ["Person"]}
+        assert results[1] == {"nodeLabels": ["Person"]}
+
+    @pytest.mark.asyncio
+    async def test_labels_function_with_null(self):
+        """Test labels() function with null."""
+        runner = Runner("RETURN labels(null) AS nodeLabels")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"nodeLabels": None}
 
     @pytest.mark.asyncio
     async def test_head_function(self):
@@ -4329,14 +4568,14 @@ class TestRunner:
         assert runner.results[0] == {"h": 1}
 
     @pytest.mark.asyncio
-    async def test_head_function_empty_list(self):
+    async def test_head_function_with_empty_list(self):
         """Test head() function with empty list."""
         runner = Runner("RETURN head([]) AS h")
         await runner.run()
         assert runner.results[0] == {"h": None}
 
     @pytest.mark.asyncio
-    async def test_head_function_null(self):
+    async def test_head_function_with_null(self):
         """Test head() function with null."""
         runner = Runner("RETURN head(null) AS h")
         await runner.run()
@@ -4351,14 +4590,14 @@ class TestRunner:
         assert runner.results[0] == {"t": [2, 3]}
 
     @pytest.mark.asyncio
-    async def test_tail_function_single_element(self):
+    async def test_tail_function_with_single_element(self):
         """Test tail() function with single element."""
         runner = Runner("RETURN tail([1]) AS t")
         await runner.run()
         assert runner.results[0] == {"t": []}
 
     @pytest.mark.asyncio
-    async def test_tail_function_null(self):
+    async def test_tail_function_with_null(self):
         """Test tail() function with null."""
         runner = Runner("RETURN tail(null) AS t")
         await runner.run()
@@ -4373,77 +4612,77 @@ class TestRunner:
         assert runner.results[0] == {"l": 3}
 
     @pytest.mark.asyncio
-    async def test_last_function_empty_list(self):
+    async def test_last_function_with_empty_list(self):
         """Test last() function with empty list."""
         runner = Runner("RETURN last([]) AS l")
         await runner.run()
         assert runner.results[0] == {"l": None}
 
     @pytest.mark.asyncio
-    async def test_last_function_null(self):
+    async def test_last_function_with_null(self):
         """Test last() function with null."""
         runner = Runner("RETURN last(null) AS l")
         await runner.run()
         assert runner.results[0] == {"l": None}
 
     @pytest.mark.asyncio
-    async def test_to_integer_function_string(self):
+    async def test_tointeger_function_with_string(self):
         """Test toInteger() function with string."""
         runner = Runner('RETURN toInteger("42") AS i')
         await runner.run()
         assert runner.results[0] == {"i": 42}
 
     @pytest.mark.asyncio
-    async def test_to_integer_function_float(self):
+    async def test_tointeger_function_with_float(self):
         """Test toInteger() function with float."""
         runner = Runner("RETURN toInteger(3.14) AS i")
         await runner.run()
         assert runner.results[0] == {"i": 3}
 
     @pytest.mark.asyncio
-    async def test_to_integer_function_boolean(self):
+    async def test_tointeger_function_with_boolean(self):
         """Test toInteger() function with boolean."""
         runner = Runner("RETURN toInteger(true) AS i")
         await runner.run()
         assert runner.results[0] == {"i": 1}
 
     @pytest.mark.asyncio
-    async def test_to_integer_function_null(self):
+    async def test_tointeger_function_with_null(self):
         """Test toInteger() function with null."""
         runner = Runner("RETURN toInteger(null) AS i")
         await runner.run()
         assert runner.results[0] == {"i": None}
 
     @pytest.mark.asyncio
-    async def test_to_float_function_string(self):
+    async def test_tofloat_function_with_string(self):
         """Test toFloat() function with string."""
         runner = Runner('RETURN toFloat("3.14") AS f')
         await runner.run()
         assert runner.results[0] == {"f": 3.14}
 
     @pytest.mark.asyncio
-    async def test_to_float_function_integer(self):
+    async def test_tofloat_function_with_integer(self):
         """Test toFloat() function with integer."""
         runner = Runner("RETURN toFloat(42) AS f")
         await runner.run()
         assert runner.results[0] == {"f": 42}
 
     @pytest.mark.asyncio
-    async def test_to_float_function_boolean(self):
+    async def test_tofloat_function_with_boolean(self):
         """Test toFloat() function with boolean."""
         runner = Runner("RETURN toFloat(true) AS f")
         await runner.run()
         assert runner.results[0] == {"f": 1.0}
 
     @pytest.mark.asyncio
-    async def test_to_float_function_null(self):
+    async def test_tofloat_function_with_null(self):
         """Test toFloat() function with null."""
         runner = Runner("RETURN toFloat(null) AS f")
         await runner.run()
         assert runner.results[0] == {"f": None}
 
     @pytest.mark.asyncio
-    async def test_duration_iso_string(self):
+    async def test_duration_with_iso_8601_string(self):
         """Test duration() with ISO 8601 string."""
         runner = Runner("RETURN duration('P1Y2M3DT4H5M6S') AS d")
         await runner.run()
@@ -4458,7 +4697,7 @@ class TestRunner:
         assert d["formatted"] == "P1Y2M3DT4H5M6S"
 
     @pytest.mark.asyncio
-    async def test_duration_map_argument(self):
+    async def test_duration_with_map_argument(self):
         """Test duration() with map argument."""
         runner = Runner("RETURN duration({days: 14, hours: 16}) AS d")
         await runner.run()
@@ -4469,7 +4708,7 @@ class TestRunner:
         assert d["totalSeconds"] == 57600
 
     @pytest.mark.asyncio
-    async def test_duration_weeks(self):
+    async def test_duration_with_weeks(self):
         """Test duration() with weeks."""
         runner = Runner("RETURN duration('P2W') AS d")
         await runner.run()
@@ -4479,14 +4718,14 @@ class TestRunner:
         assert d["totalDays"] == 14
 
     @pytest.mark.asyncio
-    async def test_duration_null(self):
+    async def test_duration_with_null(self):
         """Test duration() with null."""
         runner = Runner("RETURN duration(null) AS d")
         await runner.run()
         assert runner.results[0] == {"d": None}
 
     @pytest.mark.asyncio
-    async def test_duration_time_only(self):
+    async def test_duration_with_time_only(self):
         """Test duration() with time-only string."""
         runner = Runner("RETURN duration('PT2H30M') AS d")
         await runner.run()
@@ -4861,7 +5100,7 @@ class TestRunner:
         assert match.results[0]["n"]["name"] == "Keep"
 
     @pytest.mark.asyncio
-    async def test_return_alias_shadowing_graph_variable(self):
+    async def test_return_alias_shadowing_graph_variable_in_same_return_clause(self):
         """Test that RETURN alias doesn't shadow graph variable in same clause.
 
         When RETURN mentor.displayName AS mentor is followed by mentor.jobTitle,
@@ -4971,7 +5210,7 @@ class TestRunner:
         assert results[0]["manager4"] is None
 
     @pytest.mark.asyncio
-    async def test_chained_optional_match_all_null_from_first(self):
+    async def test_chained_optional_match_all_null_from_first_optional(self):
         """Test chained OPTIONAL MATCH where first optional returns null propagates nulls."""
         await Runner(
             """
@@ -5016,7 +5255,7 @@ class TestRunner:
         assert results[0]["mgr3"] is None
 
     @pytest.mark.asyncio
-    async def test_chained_optional_match_mixed_null_and_non_null(self):
+    async def test_chained_optional_match_with_mixed_null_and_non_null_paths(self):
         """Test chained OPTIONAL MATCH with multiple start nodes having different chain depths."""
         await Runner(
             """
@@ -5077,7 +5316,7 @@ class TestRunner:
     # ============================================================
 
     @pytest.mark.asyncio
-    async def test_create_virtual_node_with_filter_pass_down(self):
+    async def test_create_virtual_node_with_filter_pass_down_and_args_access_within_definition(self):
         """Test that inline property constraints are passed as $-parameters to virtual node definitions."""
         await Runner(
             """
@@ -5099,7 +5338,7 @@ class TestRunner:
         assert results[0] == {"id": 42}
 
     @pytest.mark.asyncio
-    async def test_dollar_prefixed_identifiers_not_allowed_outside_virtual_definitions(self):
+    async def test_dollar_prefixed_identifiers_are_not_allowed_outside_virtual_definitions(self):
         """Test that $-prefixed identifiers throw when used outside a virtual definition."""
         with pytest.raises(ValueError, match="Parameter references"):
             Runner("RETURN $id AS id")
@@ -5151,7 +5390,7 @@ class TestRunner:
         assert results[1] == {"id": 2, "name": "B"}
 
     @pytest.mark.asyncio
-    async def test_filter_pass_down_from_where_clause_equality(self):
+    async def test_filter_pass_down_from_where_clause_equality_predicate(self):
         """Test that simple equality predicates in WHERE are extracted and passed down."""
         await Runner(
             """
@@ -5174,7 +5413,7 @@ class TestRunner:
         assert results[0] == {"id": 99}
 
     @pytest.mark.asyncio
-    async def test_filter_pass_down_from_where_clause_with_and(self):
+    async def test_filter_pass_down_from_where_clause_with_and_predicates(self):
         """Test that AND-joined equality predicates in WHERE are all extracted."""
         await Runner(
             """
@@ -5220,7 +5459,7 @@ class TestRunner:
         assert results[0] == {"id": 77}
 
     @pytest.mark.asyncio
-    async def test_filter_pass_down_does_not_extract_non_equality(self):
+    async def test_filter_pass_down_does_not_extract_non_equality_where_predicates(self):
         """Test that non-equality WHERE predicates are NOT extracted (post-filter only)."""
         await Runner(
             """
@@ -5245,6 +5484,94 @@ class TestRunner:
         assert results[4] == {"id": 10}
 
     @pytest.mark.asyncio
+    async def test_filter_pass_down_inline_properties_take_precedence_over_where(self):
+        """Test that inline properties take precedence over WHERE."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:PrecedencePyNode) AS {
+                return coalesce($id, 0) AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:PrecedencePyNode {id: 10})
+            where n.id = 10
+            return n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"id": 10}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_for_virtual_relationship(self):
+        """Test that filter pass-down works for virtual relationships."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:RelPyPerson) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'},
+                    {id: 3, name: 'Charlie'}
+                ] as record
+                return record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:RelPyPerson)-[:REL_PY_KNOWS]-(:RelPyPerson) AS {
+                unwind [
+                    {left_id: 1, right_id: 2, since: coalesce($since, 2020)},
+                    {left_id: 2, right_id: 3, since: coalesce($since, 2021)}
+                ] as record
+                return record.left_id AS left_id, record.right_id AS right_id, record.since AS since
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (a:RelPyPerson)-[r:REL_PY_KNOWS {since: 2020}]->(b:RelPyPerson)
+            return a.name AS from, b.name AS to, r.since AS since
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"from": "Alice", "to": "Bob", "since": 2020}
+        assert results[1] == {"from": "Bob", "to": "Charlie", "since": 2020}
+
+    @pytest.mark.asyncio
+    async def test_filter_pass_down_with_where_and_mixed_and_non_equality(self):
+        """Test mixed equality + non-equality in WHERE; only equality is extracted."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:MixedWherePyNode) AS {
+                unwind range(1, 20) as i
+                return coalesce($category, 'all') as category, i AS id
+            }
+            """
+        ).run()
+
+        runner = Runner(
+            """
+            match (n:MixedWherePyNode)
+            where n.category = 'special' and n.id > 15
+            return n.category AS category, n.id AS id
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 5
+        for r in results:
+            assert r["category"] == "special"
+            assert r["id"] > 15
+
+    @pytest.mark.asyncio
     async def test_filter_pass_down_with_args_map_access(self):
         """Test that $args resolves to the full args map for $args.key lookups."""
         await Runner(
@@ -5267,7 +5594,7 @@ class TestRunner:
         assert results[0] == {"id": 123}
 
     @pytest.mark.asyncio
-    async def test_filter_pass_down_where_or_does_not_extract(self):
+    async def test_filter_pass_down_with_where_or_does_not_extract_predicates(self):
         """Test that OR predicates are NOT extracted (could match either side)."""
         await Runner(
             """
@@ -5292,7 +5619,7 @@ class TestRunner:
         assert results[1] == {"id": 3}
 
     @pytest.mark.asyncio
-    async def test_virtual_node_with_dynamic_api_filtering(self):
+    async def test_virtual_node_with_dynamic_api_filtering_via_parameter_pass_down(self):
         """Test a virtual node that loads from a real API with $-parameter in the URL."""
         await Runner(
             """
@@ -5364,7 +5691,7 @@ class TestMultiStatement:
         assert results[0] == {"origin": "NYC", "destination": "LA"}
 
     @pytest.mark.asyncio
-    async def test_multi_statement_with_only_creates(self):
+    async def test_multi_statement_with_only_create_statements(self):
         runner = Runner("""
             CREATE VIRTUAL (:PyMultiOnlyA) AS {
                 unwind [{id: 1, name: 'A'}] as record
@@ -5417,21 +5744,21 @@ class TestMultiStatement:
         assert len(runner.results) == 0
 
     @pytest.mark.asyncio
-    async def test_single_statement_still_works(self):
+    async def test_single_statement_still_works_no_semicolons(self):
         runner = Runner("RETURN 1 + 2 AS sum")
         await runner.run()
         assert len(runner.results) == 1
         assert runner.results[0] == {"sum": 3}
 
     @pytest.mark.asyncio
-    async def test_semicolon_inside_string_is_not_delimiter(self):
+    async def test_semicolon_inside_string_is_not_a_delimiter(self):
         runner = Runner('RETURN "hello; world" AS msg')
         await runner.run()
         assert len(runner.results) == 1
         assert runner.results[0] == {"msg": "hello; world"}
 
     @pytest.mark.asyncio
-    async def test_semicolon_inside_braces_is_not_delimiter(self):
+    async def test_semicolon_inside_sub_query_braces_is_not_a_delimiter(self):
         runner = Runner("""
             CREATE VIRTUAL (:PyBraceTestNode) AS {
                 RETURN 1 AS id
@@ -5467,7 +5794,7 @@ class TestMetadata:
     """Test cases for Runner metadata."""
 
     @pytest.mark.asyncio
-    async def test_metadata_for_simple_return(self):
+    async def test_metadata_for_simple_return_query(self):
         runner = Runner("RETURN 1 AS x")
         await runner.run()
         meta = runner.metadata
@@ -5552,7 +5879,7 @@ class TestMetadata:
         assert len(runner.results) == 1
         assert runner.results[0] == {"origin": "X", "destination": "Y"}
 
-    def test_metadata_is_a_copy(self):
+    def test_metadata_is_a_copy_and_not_mutable(self):
         runner = Runner("RETURN 1 AS x")
         meta1 = runner.metadata
         meta1.virtual_nodes_created = 999
@@ -5634,7 +5961,7 @@ class TestVirtualOrgChart:
         assert tomas["phone"] == "+1-555-0204"
 
     @pytest.mark.asyncio
-    async def test_virtual_org_chart_direct_reports(self):
+    async def test_virtual_org_chart_direct_reports_query(self):
         """Test querying direct reports from the virtual org chart."""
         runner = Runner("""
             MATCH (dr:PyOrgEmployee)-[:PY_ORG_REPORTS_TO]->(mgr:PyOrgEmployee)
@@ -5653,7 +5980,7 @@ class TestVirtualOrgChart:
         assert "Lin Zhang" in marcus["directReports"]
 
     @pytest.mark.asyncio
-    async def test_virtual_org_chart_management_chain(self):
+    async def test_virtual_org_chart_management_chain_query(self):
         """Test querying the full management chain from a leaf employee to the CEO."""
         runner = Runner("""
             MATCH (e:PyOrgEmployee)-[:PY_ORG_REPORTS_TO*1..]->(mgr:PyOrgEmployee)
@@ -5671,7 +5998,7 @@ class TestLocalFileLoading:
     """Tests for loading data from local files via file:// protocol."""
 
     @pytest.mark.asyncio
-    async def test_load_json_array_from_local_file(self):
+    async def test_load_json_from_local_file(self):
         """Test loading a JSON array from a local file."""
         import json
         import os
@@ -5725,7 +6052,7 @@ class TestLocalFileLoading:
             assert results[0] == {"content": "hello world"}
 
     @pytest.mark.asyncio
-    async def test_load_json_from_nonexistent_file_throws(self):
+    async def test_load_json_from_nonexistent_local_file_throws_error(self):
         """Test that loading from a nonexistent file raises an error."""
         runner = Runner('load json from "file:///nonexistent/path/data.json" as data return data')
         with pytest.raises(RuntimeError, match="Failed to load data from file:///nonexistent/path/data.json"):
@@ -5843,7 +6170,7 @@ class TestSubqueryExpressions:
         assert results[0] == {"name": "Alice"}
 
     @pytest.mark.asyncio
-    async def test_exists_subquery_without_graph(self):
+    async def test_exists_subquery_without_graph_pure_data(self):
         runner = Runner("""
             UNWIND [1, 2, 3, 4, 5] AS n
             WITH n
@@ -5954,7 +6281,7 @@ class TestSubqueryExpressions:
         assert results[0]["friends"] == ["Bob", "Charlie"]
 
     @pytest.mark.asyncio
-    async def test_collect_subquery_returns_empty_list(self):
+    async def test_collect_subquery_returns_empty_list_for_no_results(self):
         runner = Runner("""
             RETURN COLLECT {
                 UNWIND [] AS x
@@ -5998,73 +6325,73 @@ class TestPredicateFunctions:
     """Test cases for any, all, none, single predicate functions."""
 
     @pytest.mark.asyncio
-    async def test_any_predicate(self):
+    async def test_any_predicate_function(self):
         runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 2) AS result")
         await runner.run()
         assert runner.results[0] == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_any_predicate_false(self):
+    async def test_any_predicate_function_false(self):
         runner = Runner("RETURN any(n IN [1, 2, 3] WHERE n > 5) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_any_predicate_empty_list(self):
+    async def test_any_predicate_function_with_empty_list(self):
         runner = Runner("RETURN any(n IN [] WHERE n > 0) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_all_predicate(self):
+    async def test_all_predicate_function(self):
         runner = Runner("RETURN all(n IN [2, 4, 6] WHERE n > 0) AS result")
         await runner.run()
         assert runner.results[0] == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_all_predicate_false(self):
+    async def test_all_predicate_function_false(self):
         runner = Runner("RETURN all(n IN [1, 2, 3] WHERE n > 1) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_all_predicate_empty_list(self):
+    async def test_all_predicate_function_with_empty_list(self):
         runner = Runner("RETURN all(n IN [] WHERE n > 0) AS result")
         await runner.run()
         assert runner.results[0] == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_none_predicate(self):
+    async def test_none_predicate_function(self):
         runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 5) AS result")
         await runner.run()
         assert runner.results[0] == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_none_predicate_false(self):
+    async def test_none_predicate_function_false(self):
         runner = Runner("RETURN none(n IN [1, 2, 3] WHERE n > 2) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_single_predicate(self):
+    async def test_single_predicate_function(self):
         runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 2) AS result")
         await runner.run()
         assert runner.results[0] == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_single_predicate_false_multiple(self):
+    async def test_single_predicate_function_false_when_multiple_match(self):
         runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 1) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_single_predicate_false_none(self):
+    async def test_single_predicate_function_false_when_none_match(self):
         runner = Runner("RETURN single(n IN [1, 2, 3] WHERE n > 5) AS result")
         await runner.run()
         assert runner.results[0] == {"result": False}
 
     @pytest.mark.asyncio
-    async def test_any_predicate_in_where(self):
+    async def test_any_predicate_in_where_clause(self):
         runner = Runner("""
             UNWIND [[1, 2, 3], [4, 5, 6], [7, 8, 9]] AS nums
             WITH nums WHERE any(n IN nums WHERE n > 7)

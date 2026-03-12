@@ -243,9 +243,12 @@ class Contains extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("CONTAINS requires string operands");
         }
@@ -257,9 +260,12 @@ class NotContains extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("NOT CONTAINS requires string operands");
         }
@@ -271,9 +277,12 @@ class StartsWith extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("STARTS WITH requires string operands");
         }
@@ -285,9 +294,12 @@ class NotStartsWith extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("NOT STARTS WITH requires string operands");
         }
@@ -299,9 +311,12 @@ class EndsWith extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("ENDS WITH requires string operands");
         }
@@ -313,9 +328,12 @@ class NotEndsWith extends Operator {
     constructor() {
         super(0, true);
     }
-    public value(): number {
+    public value(): number | null {
         const str = this.lhs.value();
         const search = this.rhs.value();
+        if (str === null || str === undefined || search === null || search === undefined) {
+            return null;
+        }
         if (typeof str !== "string" || typeof search !== "string") {
             throw new Error("NOT ENDS WITH requires string operands");
         }

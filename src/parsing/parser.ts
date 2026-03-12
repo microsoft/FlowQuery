@@ -240,7 +240,7 @@ class Parser extends BaseParser {
             }
             const limit = this.parseLimit();
             if (limit !== null) {
-                if (operation instanceof Return) {
+                if (operation instanceof Return && !(operation instanceof AggregatedWith)) {
                     (operation as Return).limit = limit;
                 } else {
                     operation!.addSibling(limit);
@@ -640,7 +640,12 @@ class Parser extends BaseParser {
         }
         this.skipWhitespaceAndComments();
         let label: string | null = null;
-        if (!this.token.isColon() && this.peek()?.isIdentifierOrKeyword()) {
+        if (
+            !this.token.isColon() &&
+            !this.token.isOpeningBrace() &&
+            !this.token.isRightParenthesis() &&
+            this.peek()?.isIdentifierOrKeyword()
+        ) {
             throw new Error("Expected ':' for node label");
         }
         if (this.token.isColon() && !this.peek()?.isIdentifierOrKeyword()) {
@@ -651,10 +656,25 @@ class Parser extends BaseParser {
             label = this.token.value || "";
             this.setNextToken();
         }
+        // Parse additional ORed labels: (n:Person|Animal)
+        const labels: string[] = label !== null ? [label] : [];
+        while (label !== null && this.token.isPipe()) {
+            this.setNextToken();
+            if (this.token.isColon()) {
+                this.setNextToken();
+            }
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected node label identifier after '|'");
+            }
+            labels.push(this.token.value || "");
+            this.setNextToken();
+        }
         this.skipWhitespaceAndComments();
         let node = new Node();
         node.properties = new Map(this.parseProperties());
-        node.label = label!;
+        if (labels.length > 0) {
+            node.labels = labels;
+        }
         if (identifier !== null && this._state.variables.has(identifier)) {
             let reference = this._state.variables.get(identifier);
             if (

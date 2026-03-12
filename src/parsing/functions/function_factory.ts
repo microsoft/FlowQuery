@@ -20,6 +20,7 @@ import "./head";
 import "./id";
 import "./join";
 import "./keys";
+import "./labels";
 import "./last";
 import "./localdatetime";
 import "./localtime";

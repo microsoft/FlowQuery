@@ -2639,6 +2639,7 @@ test("Test schema() returns nodes and relationships with sample data", async () 
 
     const chases = results.find((r: any) => r.kind === "Relationship" && r.type === "CHASES");
     expect(chases).toBeDefined();
+    expect(chases.label).toBeNull();
     expect(chases.from_label).toBe("Animal");
     expect(chases.to_label).toBe("Animal");
     expect(chases.properties).toEqual(["speed"]);

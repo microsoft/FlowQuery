@@ -2844,6 +2844,7 @@ class TestRunner:
 
         chases = next((r for r in results if r.get("kind") == "Relationship" and r.get("type") == "CHASES"), None)
         assert chases is not None
+        assert chases.get("label") is None
         assert chases["from_label"] == "Animal"
         assert chases["to_label"] == "Animal"
         assert chases["properties"] == ["speed"]

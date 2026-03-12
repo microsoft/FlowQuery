@@ -24,7 +24,7 @@ class Expression extends ASTNode {
     private operators: ASTNode[] = <ASTNode[]>[];
     private output: ASTNode[] = <ASTNode[]>[];
     private _alias: string | null = null;
-    private _overridden: any | null = null;
+    private _overridden: any = undefined;
     private _reducers: AggregateFunction[] | null = null;
     private _patterns: PatternExpression[] | null = null;
 
@@ -86,7 +86,7 @@ class Expression extends ASTNode {
     }
 
     public value(): any {
-        if (this._overridden !== null) {
+        if (this._overridden !== undefined) {
             return this._overridden;
         }
         if (this.childCount() !== 1) {

@@ -17,6 +17,11 @@ class ExpressionMap {
             this._map.set(expr.alias, expr);
         }
     }
+    public reset(): void {
+        for (const expr of this._map.values()) {
+            expr.overridden = null;
+        }
+    }
 }
 
 export default ExpressionMap;

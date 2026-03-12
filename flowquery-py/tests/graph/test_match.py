@@ -38,3 +38,102 @@ class TestMatch:
         assert runner.results[1]["n"] is not None
         assert runner.results[1]["n"]["id"] == 2
         assert runner.results[1]["n"]["name"] == "Person 2"
+
+    @pytest.mark.asyncio
+    async def test_unlabeled_node_match_returns_all_nodes(self):
+        """Test that MATCH (n) returns all nodes from all labels."""
+        await Runner("""
+            CREATE VIRTUAL (:Veggie) AS {
+                UNWIND [
+                    {id: 1, name: 'Carrot'},
+                    {id: 2, name: 'Potato'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Spice) AS {
+                UNWIND [
+                    {id: 3, name: 'Pepper'},
+                    {id: 4, name: 'Salt'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        runner = Runner("MATCH (n) RETURN n")
+        await runner.run()
+        results = runner.results
+        # Should return nodes from all labels (at least Veggie + Spice)
+        assert len(results) >= 4
+        names = [r["n"]["name"] for r in results if "name" in r["n"]]
+        assert "Carrot" in names
+        assert "Potato" in names
+        assert "Pepper" in names
+        assert "Salt" in names
+
+    @pytest.mark.asyncio
+    async def test_unlabeled_node_match_with_property_filter(self):
+        """Test that MATCH (n {name: 'Carrot'}) filters across all labels."""
+        runner = Runner("MATCH (n {name: 'Carrot'}) RETURN n.name AS name")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["name"] == "Carrot"
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels(self):
+        """Test that MATCH (n:Label1|Label2) returns nodes from both labels."""
+        await Runner("""
+            CREATE VIRTUAL (:Mammal) AS {
+                UNWIND [
+                    {id: 1, name: 'Cat'},
+                    {id: 2, name: 'Dog'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Bird) AS {
+                UNWIND [
+                    {id: 3, name: 'Eagle'},
+                    {id: 4, name: 'Parrot'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Reptile) AS {
+                UNWIND [
+                    {id: 5, name: 'Snake'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        runner = Runner("MATCH (n:Mammal|Bird) RETURN n ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        names = [r["n"]["name"] for r in results]
+        assert "Cat" in names
+        assert "Dog" in names
+        assert "Eagle" in names
+        assert "Parrot" in names
+        assert "Snake" not in names
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels_returns_correct_label(self):
+        """Test that labels() returns the correct label for ORed label matches."""
+        runner = Runner("MATCH (n:Mammal|Bird) RETURN n.name AS name, labels(n) AS lbls ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert results[0] == {"name": "Cat", "lbls": ["Mammal"]}
+        assert results[2] == {"name": "Eagle", "lbls": ["Bird"]}
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels_optional_colon(self):
+        """Test that MATCH (n:Mammal|:Bird) syntax also works."""
+        runner = Runner("MATCH (n:Mammal|:Bird) RETURN n ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4

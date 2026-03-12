@@ -7,6 +7,7 @@ class NodeReference extends Node {
         super();
         this._identifier = base.identifier;
         this._label = base.label;
+        this._labels = base.labels;
         this._properties = base.properties;
         this._outgoing = base.outgoing;
         this._incoming = base.incoming;

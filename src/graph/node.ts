@@ -6,6 +6,7 @@ import Relationship from "./relationship";
 class Node extends ASTNode {
     protected _identifier: string | null = null;
     protected _label: string | null = null;
+    protected _labels: string[] = [];
     protected _properties: Map<string, Expression> = new Map();
     protected _value: NodeRecord | null = null;
 
@@ -25,6 +26,9 @@ class Node extends ASTNode {
         super();
         this._identifier = identifier;
         this._label = label;
+        if (label !== null) {
+            this._labels = [label];
+        }
     }
     public set identifier(identifier: string) {
         this._identifier = identifier;
@@ -34,9 +38,17 @@ class Node extends ASTNode {
     }
     public set label(label: string) {
         this._label = label;
+        this._labels = [label];
     }
     public get label(): string | null {
         return this._label;
+    }
+    public set labels(labels: string[]) {
+        this._labels = labels;
+        this._label = labels.length > 0 ? labels[0] : null;
+    }
+    public get labels(): string[] {
+        return this._labels;
     }
     public get properties(): Map<string, Expression> {
         return this._properties;
@@ -52,7 +64,7 @@ class Node extends ASTNode {
                 throw new Error("No current node data available");
             }
             if (!(key in record)) {
-                throw new Error("Node does not have property");
+                return false;
             }
             return record[key] === expression.value();
         }

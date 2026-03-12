@@ -74,19 +74,22 @@ class Database:
         self, relationship: 'Relationship', physical: 'PhysicalRelationship'
     ) -> bool:
         """Checks if a physical relationship is compatible with the pattern's endpoint labels."""
-        pattern_source = relationship.source.label if relationship.source else None
-        pattern_target = relationship.target.label if relationship.target else None
+        pattern_source_labels = relationship.source.labels if relationship.source else []
+        pattern_target_labels = relationship.target.labels if relationship.target else []
         phys_source = physical.source.label if physical.source else None
         phys_target = physical.target.label if physical.target else None
 
+        def matches_label(pattern_labels: List[str], phys_label: Optional[str]) -> bool:
+            return len(pattern_labels) == 0 or (phys_label is not None and phys_label in pattern_labels)
+
         if relationship.direction == "left":
             return (
-                (pattern_source is None or pattern_source == phys_target)
-                and (pattern_target is None or pattern_target == phys_source)
+                matches_label(pattern_source_labels, phys_target)
+                and matches_label(pattern_target_labels, phys_source)
             )
         return (
-            (pattern_source is None or pattern_source == phys_source)
-            and (pattern_target is None or pattern_target == phys_target)
+            matches_label(pattern_source_labels, phys_source)
+            and matches_label(pattern_target_labels, phys_target)
         )
 
     def _get_relationship_entries(
@@ -142,12 +145,30 @@ class Database:
     async def get_data(self, element: Union['Node', 'Relationship']) -> Union['NodeData', 'RelationshipData']:
         """Gets data for a node or relationship."""
         if isinstance(element, Node):
+            args = self._extract_args(element.properties)
+            if len(element.labels) == 0:
+                # Unlabeled node: match all physical nodes in the database
+                all_records = []
+                for label, physical in Database._nodes.items():
+                    data = await physical.data()
+                    for record in data:
+                        all_records.append({**record, "_label": label})
+                return NodeData(all_records)
+            if len(element.labels) > 1:
+                # ORed labels: collect from all matching physical nodes
+                all_records = []
+                for lbl in element.labels:
+                    phys_node = Database._nodes.get(lbl)
+                    if phys_node:
+                        data = await phys_node.data(args)
+                        for record in data:
+                            all_records.append({**record, "_label": lbl})
+                return NodeData(all_records)
             node = self.get_node(element)
             if node is None:
                 raise ValueError(f"Physical node not found for label {element.label}")
-            args = self._extract_args(element.properties)
             data = await node.data(args)
-            label = element.label
+            label = element.label or ""
             records = [{**record, "_label": label} for record in data]
             return NodeData(records)
         elif isinstance(element, Relationship):
@@ -159,8 +180,8 @@ class Database:
                         return RelationshipData([])
                     raise ValueError(f"No physical relationships found for types {', '.join(element.types)}")
                 all_records = []
-                for type_name, physical in entries:
-                    records = await physical.data(args)
+                for type_name, phys_rel in entries:
+                    records = await phys_rel.data(args)
                     for record in records:
                         all_records.append({**record, "_type": type_name})
                 return RelationshipData(all_records)

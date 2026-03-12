@@ -23,6 +23,7 @@ class Node(ASTNode):
         super().__init__()
         self._identifier = identifier
         self._label = label
+        self._labels: list[str] = [label] if label is not None else []
         self._properties: Dict[str, Expression] = {}
         self._value: Optional['NodeRecord'] = None
         self._incoming: Optional['Relationship'] = None
@@ -45,6 +46,16 @@ class Node(ASTNode):
     @label.setter
     def label(self, value: Optional[str]) -> None:
         self._label = value
+        self._labels = [value] if value is not None else []
+
+    @property
+    def labels(self) -> list[str]:
+        return self._labels
+
+    @labels.setter
+    def labels(self, value: list[str]) -> None:
+        self._labels = value
+        self._label = value[0] if value else None
 
     @property
     def properties(self) -> Dict[str, Expression]:
@@ -71,7 +82,7 @@ class Node(ASTNode):
             if record is None:
                 raise ValueError("No current node data available")
             if key not in record:
-                raise ValueError("Node does not have property")
+                return False
             return bool(record[key] == expression.value())
         return True
 

@@ -661,7 +661,13 @@ class Parser(BaseParser):
         self._skip_whitespace_and_comments()
         label: Optional[str] = None
         peek = self.peek()
-        if not self.token.is_colon() and peek is not None and peek.is_identifier_or_keyword():
+        if (
+            not self.token.is_colon()
+            and not self.token.is_opening_brace()
+            and not self.token.is_right_parenthesis()
+            and peek is not None
+            and peek.is_identifier_or_keyword()
+        ):
             raise ValueError("Expected ':' for node label")
         if self.token.is_colon() and (peek is None or not peek.is_identifier_or_keyword()):
             raise ValueError("Expected node label identifier")
@@ -669,9 +675,20 @@ class Parser(BaseParser):
             self.set_next_token()
             label = cast(str, self.token.value)  # Guaranteed by is_identifier check
             self.set_next_token()
+        # Parse additional ORed labels: (n:Person|Animal)
+        labels: list[str] = [label] if label is not None else []
+        while label is not None and self.token.is_pipe():
+            self.set_next_token()
+            if self.token.is_colon():
+                self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected node label identifier after '|'")
+            labels.append(cast(str, self.token.value))
+            self.set_next_token()
         self._skip_whitespace_and_comments()
         node = Node()
-        node.label = label
+        if labels:
+            node.labels = labels
         node.properties = dict(self._parse_properties())
         if identifier is not None and identifier in self._state.variables:
             reference = self._state.variables.get(identifier)
@@ -909,6 +926,14 @@ class Parser(BaseParser):
                 lookup = self._parse_lookup(subquery)
                 expression.add_node(lookup)
                 return True
+        if (self._should_parse_reserved_keyword_reference()
+                and (self.peek() is None or not self.peek().is_left_parenthesis())):
+            identifier = self.token.value or ""
+            reference = Reference(identifier, self._state.variables.get(identifier))
+            self.set_next_token()
+            lookup = self._parse_lookup(reference)
+            expression.add_node(lookup)
+            return True
         if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
             if identifier.startswith("$"):
@@ -1032,6 +1057,21 @@ class Parser(BaseParser):
             expression.finish()
             return expression
         return None
+
+    def _should_parse_reserved_keyword_reference(self) -> bool:
+        """Check if the current token is a reserved keyword that is registered as a variable."""
+        identifier = self.token.value
+        if (identifier is None
+                or not self.token.is_keyword_that_cannot_be_identifier()
+                or identifier not in self._state.variables):
+            return False
+        if self.token.is_case() and self.next_significant_token().is_when():
+            return False
+        if self.token.is_null():
+            prev = self.previous_significant_token()
+            if prev.is_is() or prev.is_not():
+                return False
+        return True
 
     def _looks_like_node_pattern(self) -> bool:
         """Peek ahead from a left parenthesis to determine whether the
@@ -1250,21 +1290,33 @@ class Parser(BaseParser):
         self._expect_previous_token_to_be_whitespace_or_comment()
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
-        if not self.token.is_identifier_or_keyword():
+        if (not self.token.is_identifier() and not self.token.is_keyword()) or self.token.value is None:
             raise ValueError("Expected identifier")
         alias = Alias(self.token.value or "")
         self.set_next_token()
         return alias
 
+    def _looks_like_predicate_function_identifier(self) -> bool:
+        """Peeks ahead to check if tokens form: identifier ( identifier_or_keyword IN ..."""
+        if not self.token.is_identifier() or self.peek() is None or not self.peek().is_left_parenthesis():
+            return False
+        saved_index = self._token_index
+        self.set_next_token()
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        is_predicate_variable = self.token.is_identifier_or_keyword()
+        if not is_predicate_variable:
+            self._token_index = saved_index
+            return False
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        result = self.token.is_in()
+        self._token_index = saved_index
+        return result
+
     def _parse_predicate_function(self) -> Optional[PredicateFunction]:
         """Parse a predicate function like sum(n in [...] | n where condition)."""
-        # Lookahead: identifier ( identifier in
-        identifier_pattern = self.ahead([
-            Token.IDENTIFIER(""),
-            Token.LEFT_PARENTHESIS(),
-            Token.IDENTIFIER(""),
-            Token.IN(),
-        ])
+        identifier_pattern = self._looks_like_predicate_function_identifier()
         keyword_pattern = (not identifier_pattern and self.token.is_keyword()
             and self.peek() is not None and self.peek().is_left_parenthesis()
             and FunctionFactory.has_predicate(self.token.value or ""))
@@ -1278,7 +1330,7 @@ class Parser(BaseParser):
             raise ValueError("Expected left parenthesis")
         self.set_next_token()
         self._skip_whitespace_and_comments()
-        if not self.token.is_identifier():
+        if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected identifier")
         reference = Reference(self.token.value)
         self._state.variables[reference.identifier] = reference

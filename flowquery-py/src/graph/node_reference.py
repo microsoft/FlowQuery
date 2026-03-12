@@ -11,6 +11,7 @@ class NodeReference(Node):
 
     def __init__(self, base: Node, reference: ASTNode) -> None:
         super().__init__(base.identifier, base.label)
+        self._labels = base.labels
         self._reference: ASTNode = reference
         # Copy properties from base
         self._properties = base._properties

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ..graph.database import Database
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.parameter_reference import ParameterReference
 from ..parsing.operations.create_node import CreateNode
@@ -77,8 +78,10 @@ class Runner:
         self._args = args
 
         if ast is not None:
+            self._is_top_level = False
             self._statements = [_ParsedStatement(ast)]
         else:
+            self._is_top_level = True
             self._statements = [
                 _ParsedStatement(root)
                 for root in Parser().parse_statements(statement or "")
@@ -109,6 +112,8 @@ class Runner:
         Raises:
             Exception: If an error occurs during execution
         """
+        if self._is_top_level:
+            Database.get_instance().clear_data_cache()
         for stmt in self._statements:
             self._bind_parameters(stmt.ast)
             await stmt.first.initialize()

@@ -63,7 +63,9 @@ class Relationship extends ASTNode {
             if (!(key in record)) {
                 throw new Error("Relationship does not have property");
             }
-            return record[key] === expression.value();
+            if (record[key] !== expression.value()) {
+                return false;
+            }
         }
         return true;
     }

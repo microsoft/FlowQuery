@@ -11,6 +11,7 @@ export type RelationshipMatchRecord = {
 class RelationshipMatchCollector {
     private _matches: RelationshipMatchRecord[] = [];
     private _nodeIds: Array<string> = [];
+    private _nodeIdSet: Set<string> = new Set();
 
     public push(relationship: Relationship, traversalId: string): RelationshipMatchRecord {
         const data = relationship.getData();
@@ -27,6 +28,7 @@ class RelationshipMatchCollector {
         };
         this._matches.push(match);
         this._nodeIds.push(traversalId);
+        this._nodeIdSet.add(traversalId);
         return match;
     }
     public set endNode(node: any) {
@@ -35,7 +37,10 @@ class RelationshipMatchCollector {
         }
     }
     public pop(): RelationshipMatchRecord | undefined {
-        this._nodeIds.pop();
+        const removedId = this._nodeIds.pop();
+        if (removedId !== undefined) {
+            this._nodeIdSet.delete(removedId);
+        }
         return this._matches.pop();
     }
     public value(): RelationshipMatchRecord | RelationshipMatchRecord[] | null {
@@ -57,7 +62,7 @@ class RelationshipMatchCollector {
      ** in the current traversal path
      */
     public isCircular(nextId: string): boolean {
-        return this._nodeIds.includes(nextId);
+        return this._nodeIdSet.has(nextId);
     }
 }
 

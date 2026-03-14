@@ -66,7 +66,9 @@ class Node extends ASTNode {
             if (!(key in record)) {
                 return false;
             }
-            return record[key] === expression.value();
+            if (record[key] !== expression.value()) {
+                return false;
+            }
         }
         return true;
     }

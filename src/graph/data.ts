@@ -22,7 +22,7 @@ class IndexEntry {
         return false;
     }
     public clone(): IndexEntry {
-        return new IndexEntry([...this._positions]);
+        return new IndexEntry(this._positions);
     }
 }
 

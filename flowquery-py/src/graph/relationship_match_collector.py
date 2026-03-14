@@ -21,6 +21,7 @@ class RelationshipMatchCollector:
     def __init__(self) -> None:
         self._matches: List[RelationshipMatchRecord] = []
         self._node_ids: List[str] = []
+        self._node_id_set: set[str] = set()
 
     def push(self, relationship: 'Relationship', traversal_id: str = "") -> RelationshipMatchRecord:
         """Push a new match onto the collector."""
@@ -42,6 +43,7 @@ class RelationshipMatchCollector:
         }
         self._matches.append(match)
         self._node_ids.append(traversal_id)
+        self._node_id_set.add(traversal_id)
         return match
 
     @property
@@ -61,7 +63,8 @@ class RelationshipMatchCollector:
     def pop(self) -> Optional[RelationshipMatchRecord]:
         """Pop the last match from the collector."""
         if self._node_ids:
-            self._node_ids.pop()
+            removed_id = self._node_ids.pop()
+            self._node_id_set.discard(removed_id)
         if self._matches:
             return self._matches.pop()
         return None
@@ -82,4 +85,4 @@ class RelationshipMatchCollector:
 
     def is_circular(self, next_id: str = "") -> bool:
         """Check if traversing to the given node id would form a cycle."""
-        return next_id in self._node_ids
+        return next_id in self._node_id_set

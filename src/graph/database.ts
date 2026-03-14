@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import DataCache from "./data_cache";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import PhysicalNode from "./physical_node";
@@ -10,7 +11,7 @@ class Database {
     private static instance: Database;
     private static nodes: Map<string, PhysicalNode> = new Map();
     private static relationships: Map<string, PhysicalRelationship> = new Map();
-    private static dataCache: Map<string, Record<string, any>[]> = new Map();
+    private _dataCache: DataCache = new DataCache();
 
     public static getInstance(): Database {
         if (!Database.instance) {
@@ -96,29 +97,11 @@ class Database {
         return result;
     }
     /**
-     * Clears the per-query data cache. Call at the start of each
-     * top-level Runner.run() so virtual definitions are only
-     * evaluated once per query execution.
+     * Sets the data cache for the current query execution.
+     * Each top-level Runner creates its own DataCache instance.
      */
-    public clearDataCache(): void {
-        Database.dataCache.clear();
-    }
-
-    private async cachedData(
-        key: string,
-        physical: PhysicalNode | PhysicalRelationship,
-        args: Record<string, any> | null
-    ): Promise<Record<string, any>[]> {
-        if (args !== null) {
-            return physical.data(args);
-        }
-        const cached = Database.dataCache.get(key);
-        if (cached !== undefined) {
-            return cached;
-        }
-        const data = await physical.data(null);
-        Database.dataCache.set(key, data);
-        return data;
+    public set dataCache(cache: DataCache) {
+        this._dataCache = cache;
     }
 
     public async schema(): Promise<Record<string, any>[]> {
@@ -167,7 +150,7 @@ class Database {
                 // Unlabeled node: match all physical nodes in the database
                 const allRecords: NodeRecord[] = [];
                 for (const [label, physical] of Database.nodes) {
-                    const data = await this.cachedData(`node:${label}`, physical, null);
+                    const data = await this._dataCache.get(`node:${label}`, physical, null);
                     for (const record of data as NodeRecord[]) {
                         allRecords.push({ ...record, _label: label });
                     }
@@ -180,7 +163,7 @@ class Database {
                 for (const lbl of element.labels) {
                     const physical = Database.nodes.get(lbl);
                     if (physical) {
-                        const data = await this.cachedData(`node:${lbl}`, physical, args);
+                        const data = await this._dataCache.get(`node:${lbl}`, physical, args);
                         for (const record of data as NodeRecord[]) {
                             allRecords.push({ ...record, _label: lbl });
                         }
@@ -192,7 +175,7 @@ class Database {
             if (node === null) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const data = await this.cachedData(`node:${element.label}`, node, args);
+            const data = await this._dataCache.get(`node:${element.label}`, node, args);
             const label = element.label;
             const records = (data as NodeRecord[]).map((record) => ({ ...record, _label: label }));
             return new NodeData(records);
@@ -210,7 +193,7 @@ class Database {
                 }
                 const allRecords: RelationshipRecord[] = [];
                 for (const [typeName, physical] of physicalEntries) {
-                    const records = (await this.cachedData(
+                    const records = (await this._dataCache.get(
                         `rel:${typeName}`,
                         physical,
                         args
@@ -225,7 +208,7 @@ class Database {
             if (relationship === null) {
                 throw new Error(`Physical relationship not found for type ${element.type}`);
             }
-            const data = await this.cachedData(`rel:${element.type}`, relationship, args);
+            const data = await this._dataCache.get(`rel:${element.type}`, relationship, args);
             return new RelationshipData(data as RelationshipRecord[]);
         } else {
             throw new Error("Element is neither Node nor Relationship");

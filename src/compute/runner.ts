@@ -1,3 +1,4 @@
+import DataCache from "../graph/data_cache";
 import Database from "../graph/database";
 import ASTNode from "../parsing/ast_node";
 import ParameterReference from "../parsing/expressions/parameter_reference";
@@ -121,7 +122,7 @@ class Runner {
         return new Promise<void>(async (resolve, reject) => {
             try {
                 if (this._isTopLevel) {
-                    Database.getInstance().clearDataCache();
+                    Database.getInstance().dataCache = new DataCache();
                 }
                 for (const stmt of this._statements) {
                     this.bindParameters(stmt.ast);

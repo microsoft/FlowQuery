@@ -6058,6 +6058,26 @@ class TestLocalFileLoading:
         with pytest.raises(RuntimeError, match="Failed to load data from file:///nonexistent/path/data.json"):
             await runner.run()
 
+    @pytest.mark.asyncio
+    async def test_load_json_from_local_file_with_f_string_path(self):
+        """Test loading a JSON file using an f-string path."""
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "data.json")
+            with open(file_path, "w") as f:
+                json.dump([{"value": 42}], f)
+            dir_uri = "file://" + tmpdir.replace("\\", "/")
+            runner = Runner(
+                f'with "{dir_uri}" as dir load json from f"{{dir}}/data.json" as item return item.value as value'
+            )
+            await runner.run()
+            results = runner.results
+            assert len(results) == 1
+            assert results[0] == {"value": 42}
+
 
 class TestSubqueryExpressions:
     """Test cases for EXISTS, COUNT, and COLLECT subquery expressions."""
@@ -6292,6 +6312,36 @@ class TestSubqueryExpressions:
         results = runner.results
         assert len(results) == 1
         assert results[0] == {"items": []}
+
+    @pytest.mark.asyncio
+    async def test_collect_subquery_with_in_operator(self):
+        """Test COLLECT subquery used with IN operator."""
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE 'Charlie' IN COLLECT {
+                MATCH (p)-[:KNOWS]->(friend:Person)
+                RETURN friend.name
+            }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice"}
+        assert results[1] == {"name": "Bob"}
 
     @pytest.mark.asyncio
     async def test_exists_as_return_expression(self):

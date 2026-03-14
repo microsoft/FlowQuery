@@ -1,3 +1,5 @@
+import DataCache from "../graph/data_cache";
+import Database from "../graph/database";
 import ASTNode from "../parsing/ast_node";
 import ParameterReference from "../parsing/expressions/parameter_reference";
 import CreateNode from "../parsing/operations/create_node";
@@ -44,6 +46,7 @@ interface ParsedStatement {
 class Runner {
     private _statements: ParsedStatement[];
     private _args: Record<string, any> | null = null;
+    private _isTopLevel: boolean;
     private _metadata: RunnerMetadata;
 
     /**
@@ -65,8 +68,10 @@ class Runner {
         this._args = args;
 
         if (ast !== null) {
+            this._isTopLevel = false;
             this._statements = [Runner.toStatement(ast)];
         } else {
+            this._isTopLevel = true;
             this._statements = Array.from(
                 new Parser().parseStatements(statement!),
                 Runner.toStatement
@@ -116,6 +121,9 @@ class Runner {
     public async run(): Promise<void> {
         return new Promise<void>(async (resolve, reject) => {
             try {
+                if (this._isTopLevel) {
+                    Database.getInstance().dataCache = new DataCache();
+                }
                 for (const stmt of this._statements) {
                     this.bindParameters(stmt.ast);
                     await stmt.first.initialize();

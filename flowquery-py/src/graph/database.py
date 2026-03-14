@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
+from .data_cache import DataCache
 from .node import Node
 from .node_data import NodeData
 from .physical_node import PhysicalNode
@@ -21,13 +22,23 @@ class Database:
     _relationships: Dict[str, 'PhysicalRelationship'] = {}
 
     def __init__(self) -> None:
-        pass
+        self._data_cache: DataCache = DataCache()
 
     @classmethod
     def get_instance(cls) -> 'Database':
         if cls._instance is None:
             cls._instance = Database()
         return cls._instance
+
+    @property
+    def data_cache(self) -> DataCache:
+        return self._data_cache
+
+    @data_cache.setter
+    def data_cache(self, cache: DataCache) -> None:
+        """Sets the data cache for the current query execution.
+        Each top-level Runner creates its own DataCache instance."""
+        self._data_cache = cache
 
     def add_node(self, node: 'Node', statement: ASTNode) -> None:
         """Adds a node to the database."""
@@ -150,7 +161,7 @@ class Database:
                 # Unlabeled node: match all physical nodes in the database
                 all_records = []
                 for label, physical in Database._nodes.items():
-                    data = await physical.data()
+                    data = await self._data_cache.get(f"node:{label}", physical, None)
                     for record in data:
                         all_records.append({**record, "_label": label})
                 return NodeData(all_records)
@@ -160,14 +171,14 @@ class Database:
                 for lbl in element.labels:
                     phys_node = Database._nodes.get(lbl)
                     if phys_node:
-                        data = await phys_node.data(args)
+                        data = await self._data_cache.get(f"node:{lbl}", phys_node, args)
                         for record in data:
                             all_records.append({**record, "_label": lbl})
                 return NodeData(all_records)
             node = self.get_node(element)
             if node is None:
                 raise ValueError(f"Physical node not found for label {element.label}")
-            data = await node.data(args)
+            data = await self._data_cache.get(f"node:{element.label}", node, args)
             label = element.label or ""
             records = [{**record, "_label": label} for record in data]
             return NodeData(records)
@@ -181,14 +192,14 @@ class Database:
                     raise ValueError(f"No physical relationships found for types {', '.join(element.types)}")
                 all_records = []
                 for type_name, phys_rel in entries:
-                    records = await phys_rel.data(args)
+                    records = await self._data_cache.get(f"rel:{type_name}", phys_rel, args)
                     for record in records:
                         all_records.append({**record, "_type": type_name})
                 return RelationshipData(all_records)
             relationship = self.get_relationship(element)
             if relationship is None:
                 raise ValueError(f"Physical relationship not found for type {element.type}")
-            data = await relationship.data(args)
+            data = await self._data_cache.get(f"rel:{element.type}", relationship, args)
             return RelationshipData(data)
         else:
             raise ValueError("Element is neither Node nor Relationship")

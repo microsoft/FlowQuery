@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import DataCache from "./data_cache";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import PhysicalNode from "./physical_node";
@@ -10,6 +11,7 @@ class Database {
     private static instance: Database;
     private static nodes: Map<string, PhysicalNode> = new Map();
     private static relationships: Map<string, PhysicalRelationship> = new Map();
+    private _dataCache: DataCache = new DataCache();
 
     public static getInstance(): Database {
         if (!Database.instance) {
@@ -94,6 +96,14 @@ class Database {
         }
         return result;
     }
+    /**
+     * Sets the data cache for the current query execution.
+     * Each top-level Runner creates its own DataCache instance.
+     */
+    public set dataCache(cache: DataCache) {
+        this._dataCache = cache;
+    }
+
     public async schema(): Promise<Record<string, any>[]> {
         const result: Record<string, any>[] = [];
 
@@ -140,7 +150,7 @@ class Database {
                 // Unlabeled node: match all physical nodes in the database
                 const allRecords: NodeRecord[] = [];
                 for (const [label, physical] of Database.nodes) {
-                    const data = await physical.data();
+                    const data = await this._dataCache.get(`node:${label}`, physical, null);
                     for (const record of data as NodeRecord[]) {
                         allRecords.push({ ...record, _label: label });
                     }
@@ -153,7 +163,7 @@ class Database {
                 for (const lbl of element.labels) {
                     const physical = Database.nodes.get(lbl);
                     if (physical) {
-                        const data = await physical.data(args);
+                        const data = await this._dataCache.get(`node:${lbl}`, physical, args);
                         for (const record of data as NodeRecord[]) {
                             allRecords.push({ ...record, _label: lbl });
                         }
@@ -165,7 +175,7 @@ class Database {
             if (node === null) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const data = await node.data(args);
+            const data = await this._dataCache.get(`node:${element.label}`, node, args);
             const label = element.label;
             const records = (data as NodeRecord[]).map((record) => ({ ...record, _label: label }));
             return new NodeData(records);
@@ -183,7 +193,11 @@ class Database {
                 }
                 const allRecords: RelationshipRecord[] = [];
                 for (const [typeName, physical] of physicalEntries) {
-                    const records = (await physical.data(args)) as RelationshipRecord[];
+                    const records = (await this._dataCache.get(
+                        `rel:${typeName}`,
+                        physical,
+                        args
+                    )) as RelationshipRecord[];
                     for (const record of records) {
                         allRecords.push({ ...record, _type: typeName });
                     }
@@ -194,7 +208,7 @@ class Database {
             if (relationship === null) {
                 throw new Error(`Physical relationship not found for type ${element.type}`);
             }
-            const data = await relationship.data(args);
+            const data = await this._dataCache.get(`rel:${element.type}`, relationship, args);
             return new RelationshipData(data as RelationshipRecord[]);
         } else {
             throw new Error("Element is neither Node nor Relationship");

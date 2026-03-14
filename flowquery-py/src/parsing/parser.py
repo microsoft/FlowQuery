@@ -581,7 +581,7 @@ class Parser(BaseParser):
     def _parse_patterns(self) -> Iterator[Pattern]:
         while True:
             identifier: Optional[str] = None
-            if self.token.is_identifier():
+            if self.token.is_identifier_or_keyword():
                 identifier = self.token.value
                 self.set_next_token()
                 self._skip_whitespace_and_comments()

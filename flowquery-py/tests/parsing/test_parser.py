@@ -1294,3 +1294,54 @@ class TestParser:
         output = ast.print()
         assert "JSONArray" in output
         assert "ListComprehension" not in output
+
+    def test_keyword_pattern_assignment_identifiers(self):
+        """Test keyword pattern assignment identifiers."""
+        parser = Parser()
+        ast = parser.parse("MATCH from = (:Person) RETURN from")
+        assert "Reference (from)" in ast.print()
+
+    def test_match_with_ored_relationship_types(self):
+        """Match with ORed relationship types."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[:KNOWS|FOLLOWS]->(b:Person) RETURN a, b")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        assert len(match.patterns[0].chain) == 3
+        relationship = match.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.types == ["KNOWS", "FOLLOWS"]
+        assert relationship.type == "KNOWS"
+
+    def test_match_with_ored_relationship_types_optional_colons(self):
+        """Match with ORed relationship types with optional colons."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[:KNOWS|:FOLLOWS|:LIKES]->(b:Person) RETURN a, b")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        relationship = match.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.types == ["KNOWS", "FOLLOWS", "LIKES"]
+
+    def test_match_with_ored_relationship_types_and_variable(self):
+        """Match with ORed relationship types and variable."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[r:KNOWS|FOLLOWS]->(b:Person) RETURN a, r, b")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        relationship = match.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.identifier == "r"
+        assert relationship.types == ["KNOWS", "FOLLOWS"]
+
+    def test_match_with_ored_relationship_types_and_hops(self):
+        """Match with ORed relationship types and hops."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:Person)-[:KNOWS|FOLLOWS*1..3]->(b:Person) RETURN a, b")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        relationship = match.patterns[0].chain[1]
+        assert isinstance(relationship, Relationship)
+        assert relationship.types == ["KNOWS", "FOLLOWS"]
+        assert relationship.hops.min == 1
+        assert relationship.hops.max == 3

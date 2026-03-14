@@ -81,7 +81,8 @@ class Relationship(ASTNode):
                 raise ValueError("No current relationship data available")
             if key not in record:
                 raise ValueError("Relationship does not have property")
-            return bool(record[key] == expression.value())
+            if record[key] != expression.value():
+                return False
         return True
 
     @property

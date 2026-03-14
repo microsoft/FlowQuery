@@ -83,7 +83,8 @@ class Node(ASTNode):
                 raise ValueError("No current node data available")
             if key not in record:
                 return False
-            return bool(record[key] == expression.value())
+            if record[key] != expression.value():
+                return False
         return True
 
     def set_value(self, value: Optional[Dict[str, Any]]) -> None:

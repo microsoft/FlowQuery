@@ -31,8 +31,12 @@ class IndexEntry:
         return False
 
     def clone(self) -> "IndexEntry":
-        """Create a copy of this index entry."""
-        return IndexEntry(list(self._positions))
+        """Create a copy of this index entry.
+
+        Shares the underlying positions list since it is immutable after
+        index construction.  Only the iteration cursor is independent.
+        """
+        return IndexEntry(self._positions)
 
 
 class Layer:

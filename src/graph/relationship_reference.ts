@@ -12,13 +12,17 @@ class RelationshipReference extends Relationship {
         this._target = base.target;
         this._reference = reference;
     }
-    public async find(left_id: string, hop: number = 0): Promise<void> {
+    public async *find(left_id: string, hop: number = 0): AsyncGenerator<void> {
         this.setValue(this._reference!);
         const data: RelationshipRecord = this._reference!.getData()?.current(
             hop
         ) as RelationshipRecord;
         const followId = this._direction === "left" ? "left_id" : "right_id";
-        await this._target?.find(data[followId], hop);
+        if (this._target) {
+            yield* this._target.find(data[followId], hop);
+        } else {
+            yield;
+        }
     }
 }
 

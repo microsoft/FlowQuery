@@ -112,4 +112,5 @@ class Pattern(ASTNode):
     async def traverse(self) -> None:
         first = self.first_node()
         if first and isinstance(first, Node):
-            await first.next()
+            async for _ in first.next():
+                pass

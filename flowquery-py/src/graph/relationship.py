@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from .hops import Hops
@@ -151,44 +151,49 @@ class Relationship(ASTNode):
     def _left_id_or_right_id(self) -> str:
         return "left_id" if self._direction == "left" else "right_id"
 
-    async def find(self, left_id: str, hop: int = 0) -> None:
+    async def find(self, left_id: str, hop: int = 0) -> AsyncIterator[None]:
         """Find relationships starting from the given node ID."""
         # Save original source node
         original = self._source
         if hop > 0:
             # For hops greater than 0, the source becomes the target of the previous hop
             self._source = self._target
-        if hop == 0:
-            if self._data:
-                self._data.reset()
+        try:
+            if hop == 0:
+                if self._data:
+                    self._data.reset()
 
-            # Handle zero-hop case: when min is 0 on a variable-length relationship,
-            # match source node as target (no traversal)
-            if self._hops and self._hops.multi() and self._hops.min == 0 and self._target:
-                # For zero-hop, target finds the same node as source (left_id)
-                # No relationship match is pushed since no edge is traversed
-                await self._target.find(left_id, hop)
+                # Handle zero-hop case: when min is 0 on a variable-length relationship,
+                # match source node as target (no traversal)
+                if self._hops and self._hops.multi() and self._hops.min == 0 and self._target:
+                    # For zero-hop, target finds the same node as source (left_id)
+                    # No relationship match is pushed since no edge is traversed
+                    async for _ in self._target.find(left_id, hop):
+                        yield
 
-        while self._data and self._data.find(left_id, hop, self._direction):
-            data = self._data.current(hop)
-            if data is None:
-                continue
-            id = data[self._left_id_or_right_id()]
-            if hop + 1 >= self._hops.min:
-                self.set_value(self, left_id)
-                if not self._matches_properties(hop):
+            while self._data and self._data.find(left_id, hop, self._direction):
+                data = self._data.current(hop)
+                if data is None:
                     continue
-                if self._target:
-                    await self._target.find(id, hop)
-                if hop + 1 < self._hops.max:
-                    if self._matches.is_circular(id):
-                        self._matches.pop()
+                id = data[self._left_id_or_right_id()]
+                if hop + 1 >= self._hops.min:
+                    self.set_value(self, left_id)
+                    if not self._matches_properties(hop):
                         continue
-                    await self.find(id, hop + 1)
-                self._matches.pop()
-            else:
-                # Below minimum hops: traverse the edge without yielding a match
-                await self.find(id, hop + 1)
-
-        # Restore original source node
-        self._source = original
+                    if self._target:
+                        async for _ in self._target.find(id, hop):
+                            yield
+                    if hop + 1 < self._hops.max:
+                        if self._matches.is_circular(id):
+                            self._matches.pop()
+                            continue
+                        async for _ in self.find(id, hop + 1):
+                            yield
+                    self._matches.pop()
+                else:
+                    # Below minimum hops: traverse the edge without yielding a match
+                    async for _ in self.find(id, hop + 1):
+                        yield
+        finally:
+            # Restore original source node
+            self._source = original

@@ -38,13 +38,11 @@ class Match extends Operation {
         this.extractWherePredicates();
         await this._patterns!.initialize();
         let matched = false;
-        this._patterns!.toDoNext = async () => {
+        for await (const _ of this._patterns!.traverse()) {
             matched = true;
             // Continue to the next operation after all patterns are matched
             await this.next?.run();
-        };
-        // Kick off the graph pattern traversal
-        await this._patterns!.traverse();
+        }
         // For OPTIONAL MATCH: if nothing matched, continue with null values
         if (!matched && this._optional) {
             for (const pattern of this._patterns!.patterns) {

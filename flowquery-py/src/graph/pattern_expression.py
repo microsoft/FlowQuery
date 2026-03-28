@@ -51,12 +51,8 @@ class PatternExpression(Pattern):
         Sets _evaluation to True if the pattern is matched, False otherwise.
         """
         self._evaluation = False
-
-        async def set_evaluation_true() -> None:
+        async for _ in self.start_node.next():
             self._evaluation = True
-
-        self.end_node.todo_next = set_evaluation_true
-        await self.start_node.next()
 
     def value(self) -> Any:
         """Returns the result of the pattern evaluation."""

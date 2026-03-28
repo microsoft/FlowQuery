@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Optional
 
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.expression import Expression
@@ -29,7 +29,6 @@ class Node(ASTNode):
         self._incoming: Optional['Relationship'] = None
         self._outgoing: Optional['Relationship'] = None
         self._data: Optional['NodeData'] = None
-        self._todo_next: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
 
     @property
     def identifier(self) -> Optional[str]:
@@ -112,7 +111,7 @@ class Node(ASTNode):
     def set_data(self, data: Optional['NodeData']) -> None:
         self._data = data
 
-    async def next(self) -> None:
+    async def next(self) -> AsyncIterator[None]:
         if self._data:
             self._data.reset()
             while self._data.next():
@@ -122,10 +121,12 @@ class Node(ASTNode):
                     if not self._matches_properties():
                         continue
                     if self._outgoing and self._value:
-                        await self._outgoing.find(self._value['id'])
-                    await self.run_todo_next()
+                        async for _ in self._outgoing.find(self._value['id']):
+                            yield
+                    else:
+                        yield
 
-    async def find(self, id_: str, hop: int = 0) -> None:
+    async def find(self, id_: str, hop: int = 0) -> AsyncIterator[None]:
         if self._data:
             self._data.reset()
             while self._data.find(id_, hop):
@@ -137,19 +138,7 @@ class Node(ASTNode):
                     if self._incoming:
                         self._incoming.set_end_node(self)
                     if self._outgoing and self._value:
-                        await self._outgoing.find(self._value['id'], hop)
-                    await self.run_todo_next()
-
-    @property
-    def todo_next(self) -> Optional[Callable[[], Union[None, Awaitable[None]]]]:
-        return self._todo_next
-
-    @todo_next.setter
-    def todo_next(self, func: Optional[Callable[[], Union[None, Awaitable[None]]]]) -> None:
-        self._todo_next = func
-
-    async def run_todo_next(self) -> None:
-        if self._todo_next:
-            result = self._todo_next()
-            if result is not None:
-                await result
+                        async for _ in self._outgoing.find(self._value['id'], hop):
+                            yield
+                    else:
+                        yield

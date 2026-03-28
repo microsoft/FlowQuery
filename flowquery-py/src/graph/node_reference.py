@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from ..parsing.ast_node import ASTNode
 from .node import Node
@@ -30,22 +30,26 @@ class NodeReference(Node):
     def value(self) -> Optional[Any]:
         return self._reference.value() if self._reference else None
 
-    async def next(self) -> None:
+    async def next(self) -> AsyncIterator[None]:
         """Process next using the referenced node's value."""
         ref_value = self._reference.value()
         if ref_value is None:
             return
         self.set_value(dict(ref_value))
         if self._outgoing and self._value:
-            await self._outgoing.find(self._value['id'])
-        await self.run_todo_next()
+            async for _ in self._outgoing.find(self._value['id']):
+                yield
+        else:
+            yield
 
-    async def find(self, id_: str, hop: int = 0) -> None:
+    async def find(self, id_: str, hop: int = 0) -> AsyncIterator[None]:
         """Find by ID, only matching if it equals the referenced node's ID."""
         referenced = self._reference.value()
         if referenced is None or id_ != referenced.get('id'):
             return
         self.set_value(dict(referenced))
         if self._outgoing and self._value:
-            await self._outgoing.find(self._value['id'], hop)
-        await self.run_todo_next()
+            async for _ in self._outgoing.find(self._value['id'], hop):
+                yield
+        else:
+            yield

@@ -34,7 +34,7 @@ jobs:
       new_version: ${{ steps.bump.outputs.new_version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
@@ -90,7 +90,7 @@ jobs:
         working-directory: flowquery-py
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0

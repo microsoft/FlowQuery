@@ -1068,6 +1068,38 @@ test("Test return with expression alias which starts with keyword", async () => 
     expect(results[0]).toEqual({ return1: 1, notes: ["hello", "world"] });
 });
 
+test("Test lookup missing property returns null", async () => {
+    const runner = new Runner("RETURN {a: 1}.b as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: undefined });
+});
+
+test("Test lookup missing property bracket notation returns null", async () => {
+    const runner = new Runner('RETURN {a: 1}["b"] as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: undefined });
+});
+
+test("Test lookup missing property with coalesce", async () => {
+    const runner = new Runner('RETURN coalesce({a: 1}.b, "default") as result');
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: "default" });
+});
+
+test("Test lookup on null returns null", async () => {
+    const runner = new Runner("WITH null as obj RETURN obj.x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
 test("Test load which should throw error", async () => {
     const runner = new Runner('load json from "http://non_existing" as data return data');
     runner

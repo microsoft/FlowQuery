@@ -1114,6 +1114,42 @@ class TestRunner:
         assert results[0] == {"return1": 1, "notes": ["hello", "world"]}
 
     @pytest.mark.asyncio
+    async def test_lookup_missing_property_returns_null(self):
+        """Test that accessing a missing property returns null instead of raising KeyError."""
+        runner = Runner('RETURN {a: 1}.b as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_lookup_missing_property_bracket_notation_returns_null(self):
+        """Test that bracket notation on a missing property returns null."""
+        runner = Runner('RETURN {a: 1}["b"] as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_lookup_missing_property_with_coalesce(self):
+        """Test coalesce with a missing property lookup."""
+        runner = Runner('RETURN coalesce({a: 1}.b, "default") as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": "default"}
+
+    @pytest.mark.asyncio
+    async def test_lookup_on_null_returns_null(self):
+        """Test that lookup on null returns null."""
+        runner = Runner('WITH null as obj RETURN obj.x as result')
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
     async def test_return_with_where_clause(self):
         """Test return with where clause."""
         runner = Runner("unwind range(1,100) as n with n return n where n >= 20 and n <= 30")

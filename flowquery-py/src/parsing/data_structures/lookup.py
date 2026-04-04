@@ -44,8 +44,13 @@ class Lookup(ASTNode):
         # Try dict-like access first, then fall back to attribute access for objects
         try:
             return obj[key]
-        except (TypeError, KeyError):
+        except KeyError:
             # For objects with attributes (like dataclasses), use getattr
+            if hasattr(obj, key):
+                return getattr(obj, key)
+            # Return None for missing keys, matching JavaScript obj[key] behavior
+            return None
+        except TypeError:
             if hasattr(obj, key):
                 return getattr(obj, key)
             raise

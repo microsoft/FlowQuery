@@ -28,10 +28,9 @@ class PatternExpression extends Pattern {
     }
     public async evaluate(): Promise<void> {
         this._evaluation = false;
-        this.endNode.todoNext = async () => {
+        for await (const _ of this.startNode.next()) {
             this._evaluation = true;
-        };
-        await this.startNode.next();
+        }
     }
     public value(): boolean {
         return this._evaluation;

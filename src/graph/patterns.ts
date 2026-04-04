@@ -9,26 +9,21 @@ class Patterns {
         return this._patterns;
     }
     public async initialize(): Promise<void> {
-        let previous: Pattern | null = null;
         for (const pattern of this._patterns) {
-            await pattern.fetchData(); // Ensure data is loaded
-            if (previous !== null) {
-                // Chain the patterns together
-                previous.endNode.todoNext = async () => {
-                    await pattern.startNode.next();
-                };
+            await pattern.fetchData();
+        }
+    }
+    public async *traverse(): AsyncGenerator<void> {
+        if (this._patterns.length === 0) return;
+        yield* this._chainPatterns(0);
+    }
+    private async *_chainPatterns(index: number): AsyncGenerator<void> {
+        for await (const _ of this._patterns[index].startNode.next()) {
+            if (index + 1 < this._patterns.length) {
+                yield* this._chainPatterns(index + 1);
+            } else {
+                yield;
             }
-            previous = pattern;
-        }
-    }
-    public set toDoNext(func: () => Promise<void>) {
-        if (this._patterns.length > 0) {
-            this._patterns[this._patterns.length - 1].endNode.todoNext = func;
-        }
-    }
-    public async traverse(): Promise<void> {
-        if (this._patterns.length > 0) {
-            await this._patterns[0].startNode.next();
         }
     }
 }

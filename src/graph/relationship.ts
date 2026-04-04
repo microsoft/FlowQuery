@@ -121,48 +121,51 @@ class Relationship extends ASTNode {
     public _left_id_or_right_id(): string {
         return this._direction === "left" ? "left_id" : "right_id";
     }
-    public async find(left_id: string, hop: number = 0): Promise<void> {
+    public async *find(left_id: string, hop: number = 0): AsyncGenerator<void> {
         // Save original source node
         const original = this._source;
         if (hop > 0) {
             // For hops greater than 0, the source becomes the target of the previous hop
             this._source = this._target;
         }
-        if (hop === 0) {
-            this._data?.reset();
+        try {
+            if (hop === 0) {
+                this._data?.reset();
 
-            // Handle zero-hop case: when min is 0 on a variable-length relationship,
-            // match source node as target (no traversal)
-            if (this.hops?.multi() && this.hops.min === 0 && this._target) {
-                // For zero-hop, target finds the same node as source (left_id)
-                // No relationship match is pushed since no edge is traversed
-                await this._target.find(left_id, hop);
-            }
-        }
-        while (this._data!.find(left_id, hop, this._direction)) {
-            const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
-            const id = data[this._left_id_or_right_id()];
-            if (hop + 1 >= this.hops!.min) {
-                this.setValue(this, left_id);
-                if (!this._matchesProperties(hop)) {
-                    continue;
+                // Handle zero-hop case: when min is 0 on a variable-length relationship,
+                // match source node as target (no traversal)
+                if (this.hops?.multi() && this.hops.min === 0 && this._target) {
+                    // For zero-hop, target finds the same node as source (left_id)
+                    // No relationship match is pushed since no edge is traversed
+                    yield* this._target.find(left_id, hop);
                 }
-                await this._target?.find(id, hop);
-                if (hop + 1 < this.hops!.max) {
-                    if (this._matches.isCircular(id)) {
-                        this._matches.pop();
+            }
+            while (this._data!.find(left_id, hop, this._direction)) {
+                const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
+                const id = data[this._left_id_or_right_id()];
+                if (hop + 1 >= this.hops!.min) {
+                    this.setValue(this, left_id);
+                    if (!this._matchesProperties(hop)) {
                         continue;
                     }
-                    await this.find(id, hop + 1);
+                    yield* this._target!.find(id, hop);
+                    if (hop + 1 < this.hops!.max) {
+                        if (this._matches.isCircular(id)) {
+                            this._matches.pop();
+                            continue;
+                        }
+                        yield* this.find(id, hop + 1);
+                    }
+                    this._matches.pop();
+                } else {
+                    // Below minimum hops: traverse the edge without yielding a match
+                    yield* this.find(id, hop + 1);
                 }
-                this._matches.pop();
-            } else {
-                // Below minimum hops: traverse the edge without yielding a match
-                await this.find(id, hop + 1);
             }
+        } finally {
+            // Restore original source node
+            this._source = original;
         }
-        // Restore original source node
-        this._source = original;
     }
 }
 

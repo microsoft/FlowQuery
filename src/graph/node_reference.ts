@@ -16,23 +16,29 @@ class NodeReference extends Node {
     public get reference(): ASTNode | null {
         return this._reference;
     }
-    public async next(): Promise<void> {
+    public async *next(): AsyncGenerator<void> {
         const referenced = this._reference?.value();
         if (referenced == null) {
             return;
         }
         this.setValue(referenced);
-        await this._outgoing?.find(this._value!.id);
-        await this.runTodoNext();
+        if (this._outgoing) {
+            yield* this._outgoing.find(this._value!.id);
+        } else {
+            yield;
+        }
     }
-    public async find(id: string, hop: number = 0): Promise<void> {
+    public async *find(id: string, hop: number = 0): AsyncGenerator<void> {
         const referenced = this._reference?.value();
         if (id !== referenced?.id) {
             return;
         }
         this.setValue(referenced!);
-        await this._outgoing?.find(this._value!.id, hop);
-        await this.runTodoNext();
+        if (this._outgoing) {
+            yield* this._outgoing.find(this._value!.id, hop);
+        } else {
+            yield;
+        }
     }
 }
 

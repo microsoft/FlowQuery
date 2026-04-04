@@ -41,14 +41,10 @@ class Match(Operation):
         await self._patterns.initialize()
         matched = False
 
-        async def to_do_next() -> None:
-            nonlocal matched
+        async for _ in self._patterns.traverse():
             matched = True
             if self.next:
                 await self.next.run()
-
-        self._patterns.to_do_next = to_do_next
-        await self._patterns.traverse()
 
         # For OPTIONAL MATCH: if nothing matched, continue with None values
         if not matched and self._optional:

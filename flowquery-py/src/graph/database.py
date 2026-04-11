@@ -8,6 +8,7 @@ from ..parsing.ast_node import ASTNode
 from .data_cache import DataCache
 from .node import Node
 from .node_data import NodeData
+from .node_reference import NodeReference
 from .physical_node import PhysicalNode
 from .physical_relationship import PhysicalRelationship
 from .relationship import Relationship
@@ -19,7 +20,7 @@ class Database:
 
     _instance: Optional['Database'] = None
     _nodes: Dict[str, 'PhysicalNode'] = {}
-    _relationships: Dict[str, 'PhysicalRelationship'] = {}
+    _relationships: Dict[str, list['PhysicalRelationship']] = {}
 
     def __init__(self) -> None:
         self._data_cache: DataCache = DataCache()
@@ -58,6 +59,12 @@ class Database:
         """Gets a node from the database."""
         return Database._nodes.get(node.label) if node.label else None
 
+    @staticmethod
+    def _rel_key(physical: 'PhysicalRelationship') -> str:
+        src = physical.source.label if physical.source else ""
+        tgt = physical.target.label if physical.target else ""
+        return f"{src}:{physical.type}:{tgt}"
+
     def add_relationship(self, relationship: 'Relationship', statement: ASTNode) -> None:
         """Adds a relationship to the database."""
         if relationship.type is None:
@@ -69,24 +76,74 @@ class Database:
             physical.source = relationship.source
         if relationship.target is not None:
             physical.target = relationship.target
-        Database._relationships[relationship.type] = physical
+        arr = Database._relationships.get(relationship.type, [])
+        source_label = relationship.source.label if relationship.source else None
+        target_label = relationship.target.label if relationship.target else None
+        idx = next(
+            (
+                i
+                for i, p in enumerate(arr)
+                if (p.source.label if p.source else None) == source_label
+                and (p.target.label if p.target else None) == target_label
+            ),
+            -1,
+        )
+        if idx >= 0:
+            arr[idx] = physical
+        else:
+            arr.append(physical)
+        Database._relationships[relationship.type] = arr
 
     def remove_relationship(self, relationship: 'Relationship') -> None:
         """Removes a relationship from the database."""
         if relationship.type is None:
             raise ValueError("Relationship type is null")
-        Database._relationships.pop(relationship.type, None)
+        arr = Database._relationships.get(relationship.type)
+        if arr is None:
+            return
+        source_label = relationship.source.label if relationship.source else None
+        target_label = relationship.target.label if relationship.target else None
+        filtered = [
+            p
+            for p in arr
+            if (p.source.label if p.source else None) != source_label
+            or (p.target.label if p.target else None) != target_label
+        ]
+        if not filtered:
+            Database._relationships.pop(relationship.type, None)
+        else:
+            Database._relationships[relationship.type] = filtered
 
     def get_relationship(self, relationship: 'Relationship') -> Optional['PhysicalRelationship']:
         """Gets a relationship from the database."""
-        return Database._relationships.get(relationship.type) if relationship.type else None
+        arr = Database._relationships.get(relationship.type, []) if relationship.type else []
+        source_label = relationship.source.label if relationship.source else None
+        target_label = relationship.target.label if relationship.target else None
+        for p in reversed(arr):
+            if (source_label is None or (p.source.label if p.source else None) == source_label) and \
+               (target_label is None or (p.target.label if p.target else None) == target_label):
+                return p
+        return None
+
+    @staticmethod
+    def _resolve_labels(node: Optional['Node']) -> List[str]:
+        """Resolve labels for a node, falling back to referenced node's labels for NodeReferences."""
+        if node is None:
+            return []
+        if node.labels:
+            return node.labels
+        if isinstance(node, NodeReference):
+            ref = node.reference
+            if isinstance(ref, Node):
+                return list(ref.labels)
+        return []
 
     def _is_relationship_compatible(
         self, relationship: 'Relationship', physical: 'PhysicalRelationship'
     ) -> bool:
         """Checks if a physical relationship is compatible with the pattern's endpoint labels."""
-        pattern_source_labels = relationship.source.labels if relationship.source else []
-        pattern_target_labels = relationship.target.labels if relationship.target else []
+        pattern_source_labels = Database._resolve_labels(relationship.source)
+        pattern_target_labels = Database._resolve_labels(relationship.target)
         phys_source = physical.source.label if physical.source else None
         phys_target = physical.target.label if physical.target else None
 
@@ -107,17 +164,18 @@ class Database:
         self, relationship: 'Relationship'
     ) -> list[tuple[str, 'PhysicalRelationship']]:
         """Gets (type_name, physical) pairs, filtered by endpoint label compatibility."""
-        if len(relationship.types) == 0:
-            return [
-                (t, p)
-                for t, p in Database._relationships.items()
-                if self._is_relationship_compatible(relationship, p)
-            ]
         result: list[tuple[str, 'PhysicalRelationship']] = []
+        if len(relationship.types) == 0:
+            for t, physicals in Database._relationships.items():
+                for p in physicals:
+                    if self._is_relationship_compatible(relationship, p):
+                        result.append((t, p))
+            return result
         for rel_type in relationship.types:
-            physical = Database._relationships.get(rel_type)
-            if physical and self._is_relationship_compatible(relationship, physical):
-                result.append((rel_type, physical))
+            physicals = Database._relationships.get(rel_type, [])
+            for p in physicals:
+                if self._is_relationship_compatible(relationship, p):
+                    result.append((rel_type, p))
         return result
 
     async def schema(self) -> List[Dict[str, Any]]:
@@ -137,21 +195,22 @@ class Database:
                     entry["sample"] = sample
             yield entry
 
-        for rel_type, physical_rel in Database._relationships.items():
-            records = await physical_rel.data()
-            entry_rel: Dict[str, Any] = {
-                "kind": "Relationship",
-                "type": rel_type,
-                "from_label": physical_rel.source.label if physical_rel.source else None,
-                "to_label": physical_rel.target.label if physical_rel.target else None,
-            }
-            if records:
-                sample = {k: v for k, v in records[0].items() if k not in ("left_id", "right_id")}
-                properties = list(sample.keys())
-                if properties:
-                    entry_rel["properties"] = properties
-                    entry_rel["sample"] = sample
-            yield entry_rel
+        for rel_type, physicals in Database._relationships.items():
+            for physical_rel in physicals:
+                records = await physical_rel.data()
+                entry_rel: Dict[str, Any] = {
+                    "kind": "Relationship",
+                    "type": rel_type,
+                    "from_label": physical_rel.source.label if physical_rel.source else None,
+                    "to_label": physical_rel.target.label if physical_rel.target else None,
+                }
+                if records:
+                    sample = {k: v for k, v in records[0].items() if k not in ("left_id", "right_id")}
+                    properties = list(sample.keys())
+                    if properties:
+                        entry_rel["properties"] = properties
+                        entry_rel["sample"] = sample
+                yield entry_rel
 
     async def get_data(self, element: Union['Node', 'Relationship']) -> Union['NodeData', 'RelationshipData']:
         """Gets data for a node or relationship."""
@@ -184,23 +243,20 @@ class Database:
             return NodeData(records)
         elif isinstance(element, Relationship):
             args = self._extract_args(element.properties)
-            if len(element.types) != 1:
-                entries = self._get_relationship_entries(element)
-                if not entries:
-                    if len(element.types) == 0:
-                        return RelationshipData([])
-                    raise ValueError(f"No physical relationships found for types {', '.join(element.types)}")
-                all_records = []
-                for type_name, phys_rel in entries:
-                    records = await self._data_cache.get(f"rel:{type_name}", phys_rel, args)
-                    for record in records:
-                        all_records.append({**record, "_type": type_name})
-                return RelationshipData(all_records)
-            relationship = self.get_relationship(element)
-            if relationship is None:
-                raise ValueError(f"Physical relationship not found for type {element.type}")
-            data = await self._data_cache.get(f"rel:{element.type}", relationship, args)
-            return RelationshipData(data)
+            entries = self._get_relationship_entries(element)
+            if not entries:
+                if len(element.types) == 0:
+                    return RelationshipData([])
+                suffix = "s" if len(element.types) > 1 else ""
+                types = ", ".join(element.types)
+                raise ValueError(f"No physical relationships found for type{suffix} {types}")
+            all_records = []
+            for type_name, phys_rel in entries:
+                cache_key = f"rel:{Database._rel_key(phys_rel)}"
+                records = await self._data_cache.get(cache_key, phys_rel, args)
+                for record in records:
+                    all_records.append({**record, "_type": type_name})
+            return RelationshipData(all_records)
         else:
             raise ValueError("Element is neither Node nor Relationship")
 

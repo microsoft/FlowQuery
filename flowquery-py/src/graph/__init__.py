@@ -1,5 +1,6 @@
 """Graph module for FlowQuery."""
 
+from .data_resolver import DataResolver
 from .database import Database
 from .hops import Hops
 from .node import Node
@@ -21,6 +22,7 @@ __all__ = [
     "Patterns",
     "PatternExpression",
     "Database",
+    "DataResolver",
     "Hops",
     "NodeData",
     "NodeReference",

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ..graph.data_cache import DataCache
-from ..graph.database import Database
+from ..graph.data_resolver import DataResolver
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.parameter_reference import ParameterReference
 from ..parsing.operations.create_node import CreateNode
@@ -114,7 +114,7 @@ class Runner:
             Exception: If an error occurs during execution
         """
         if self._is_top_level:
-            Database.get_instance().data_cache = DataCache()
+            DataResolver.get_instance().data_cache = DataCache()
         for stmt in self._statements:
             self._bind_parameters(stmt.ast)
             await stmt.first.initialize()

@@ -6486,3 +6486,150 @@ class TestPredicateFunctions:
         await runner.run()
         assert len(runner.results) == 1
         assert runner.results[0] == {"nums": [7, 8, 9]}
+
+    @pytest.mark.asyncio
+    async def test_same_relationship_type_between_different_node_labels(self):
+        await Runner("""
+            CREATE VIRTUAL (:SRPerson) AS {
+                UNWIND [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}] AS r
+                RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SRMovie) AS {
+                UNWIND [{id: 1, title: 'Inception'}, {id: 2, title: 'Matrix'}] AS r
+                RETURN r.id AS id, r.title AS title
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SRFood) AS {
+                UNWIND [{id: 1, name: 'Pizza'}, {id: 2, name: 'Sushi'}] AS r
+                RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRMovie) AS {
+                UNWIND [{left_id: 1, right_id: 1}, {left_id: 2, right_id: 2}] AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRFood) AS {
+                UNWIND [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 1}] AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+
+        # Query movies liked by persons
+        movie_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie)
+            RETURN p.name AS person, m.title AS movie ORDER BY p.name
+        """)
+        await movie_runner.run()
+        assert len(movie_runner.results) == 2
+        assert movie_runner.results[0] == {"person": "Alice", "movie": "Inception"}
+        assert movie_runner.results[1] == {"person": "Bob", "movie": "Matrix"}
+
+        # Query food liked by persons
+        food_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood)
+            RETURN p.name AS person, f.name AS food ORDER BY p.name
+        """)
+        await food_runner.run()
+        assert len(food_runner.results) == 2
+        assert food_runner.results[0] == {"person": "Alice", "food": "Sushi"}
+        assert food_runner.results[1] == {"person": "Bob", "food": "Pizza"}
+
+    @pytest.mark.asyncio
+    async def test_same_relationship_type_matches_both_label_pairs_independently(self):
+        # Verify both relationship definitions coexist by querying each separately
+        movie_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie) RETURN count(p) AS cnt
+        """)
+        await movie_runner.run()
+        assert movie_runner.results[0]["cnt"] == 2
+
+        food_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood) RETURN count(p) AS cnt
+        """)
+        await food_runner.run()
+        assert food_runner.results[0]["cnt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_delete_virtual_same_rel_type_only_removes_specific_label_pair(self):
+        await Runner("""
+            DELETE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRFood)
+        """).run()
+
+        # Movie relationship should still work
+        movie_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie)
+            RETURN p.name AS person, m.title AS movie ORDER BY p.name
+        """)
+        await movie_runner.run()
+        assert len(movie_runner.results) == 2
+        assert movie_runner.results[0] == {"person": "Alice", "movie": "Inception"}
+
+        # Food relationship should no longer exist
+        food_runner = Runner("""
+            MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood)
+            RETURN p.name AS person, f.name AS food
+        """)
+        with pytest.raises(ValueError):
+            await food_runner.run()
+
+        # Cleanup
+        await Runner("DELETE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRMovie)").run()
+        await Runner("DELETE VIRTUAL (:SRPerson)").run()
+        await Runner("DELETE VIRTUAL (:SRMovie)").run()
+        await Runner("DELETE VIRTUAL (:SRFood)").run()
+
+    @pytest.mark.asyncio
+    async def test_schema_with_same_relationship_type_between_different_labels(self):
+        await Runner("""
+            CREATE VIRTUAL (:SchPerson) AS {
+                UNWIND [{id: 1, name: 'Alice'}] AS r RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SchMovie) AS {
+                UNWIND [{id: 1, title: 'X'}] AS r RETURN r.id AS id, r.title AS title
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SchFood) AS {
+                UNWIND [{id: 1, item: 'Y'}] AS r RETURN r.id AS id, r.item AS item
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchMovie) AS {
+                UNWIND [{left_id: 1, right_id: 1}] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchFood) AS {
+                UNWIND [{left_id: 1, right_id: 1}] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+
+        schema_runner = Runner("""
+            CALL schema() YIELD kind, label, type, from_label, to_label
+            WITH kind, label, type, from_label, to_label
+            WHERE type = 'SCH_LIKES'
+            RETURN kind, type, from_label, to_label ORDER BY to_label
+        """)
+        await schema_runner.run()
+        assert len(schema_runner.results) == 2
+        assert schema_runner.results[0] == {
+            "kind": "Relationship", "type": "SCH_LIKES", "from_label": "SchPerson", "to_label": "SchFood"
+        }
+        assert schema_runner.results[1] == {
+            "kind": "Relationship", "type": "SCH_LIKES", "from_label": "SchPerson", "to_label": "SchMovie"
+        }
+
+        # Cleanup
+        await Runner("DELETE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchMovie)").run()
+        await Runner("DELETE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchFood)").run()
+        await Runner("DELETE VIRTUAL (:SchPerson)").run()
+        await Runner("DELETE VIRTUAL (:SchMovie)").run()
+        await Runner("DELETE VIRTUAL (:SchFood)").run()

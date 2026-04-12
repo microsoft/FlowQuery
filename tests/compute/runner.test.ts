@@ -6134,3 +6134,151 @@ test("Test match with ORed node labels with optional colon syntax", async () => 
     const results = runner.results;
     expect(results.length).toBe(4);
 });
+
+test("Test same relationship type between different node labels", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:SRPerson) AS {
+            UNWIND [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}] AS r
+            RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SRMovie) AS {
+            UNWIND [{id: 1, title: 'Inception'}, {id: 2, title: 'Matrix'}] AS r
+            RETURN r.id AS id, r.title AS title
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SRFood) AS {
+            UNWIND [{id: 1, name: 'Pizza'}, {id: 2, name: 'Sushi'}] AS r
+            RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRMovie) AS {
+            UNWIND [{left_id: 1, right_id: 1}, {left_id: 2, right_id: 2}] AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRFood) AS {
+            UNWIND [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 1}] AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+
+    // Query movies liked by persons
+    const movieRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie)
+        RETURN p.name AS person, m.title AS movie ORDER BY p.name
+    `);
+    await movieRunner.run();
+    expect(movieRunner.results.length).toBe(2);
+    expect(movieRunner.results[0]).toEqual({ person: "Alice", movie: "Inception" });
+    expect(movieRunner.results[1]).toEqual({ person: "Bob", movie: "Matrix" });
+
+    // Query food liked by persons
+    const foodRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood)
+        RETURN p.name AS person, f.name AS food ORDER BY p.name
+    `);
+    await foodRunner.run();
+    expect(foodRunner.results.length).toBe(2);
+    expect(foodRunner.results[0]).toEqual({ person: "Alice", food: "Sushi" });
+    expect(foodRunner.results[1]).toEqual({ person: "Bob", food: "Pizza" });
+});
+
+test("Test same relationship type matches both label pairs independently", async () => {
+    // Verify both relationship definitions coexist by querying each separately
+    const movieRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie) RETURN count(p) AS cnt
+    `);
+    await movieRunner.run();
+    expect(movieRunner.results[0].cnt).toBe(2);
+
+    const foodRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood) RETURN count(p) AS cnt
+    `);
+    await foodRunner.run();
+    expect(foodRunner.results[0].cnt).toBe(2);
+});
+
+test("Test delete virtual with same relationship type only removes specific label pair", async () => {
+    await new Runner(`
+        DELETE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRFood)
+    `).run();
+
+    // Movie relationship should still work
+    const movieRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(m:SRMovie)
+        RETURN p.name AS person, m.title AS movie ORDER BY p.name
+    `);
+    await movieRunner.run();
+    expect(movieRunner.results.length).toBe(2);
+    expect(movieRunner.results[0]).toEqual({ person: "Alice", movie: "Inception" });
+
+    // Food relationship should no longer exist
+    const foodRunner = new Runner(`
+        MATCH (p:SRPerson)-[:SR_LIKES]->(f:SRFood)
+        RETURN p.name AS person, f.name AS food
+    `);
+    await expect(foodRunner.run()).rejects.toThrow();
+
+    // Cleanup
+    await new Runner("DELETE VIRTUAL (:SRPerson)-[:SR_LIKES]-(:SRMovie)").run();
+    await new Runner("DELETE VIRTUAL (:SRPerson)").run();
+    await new Runner("DELETE VIRTUAL (:SRMovie)").run();
+    await new Runner("DELETE VIRTUAL (:SRFood)").run();
+});
+
+test("Test schema with same relationship type between different node labels", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:SchPerson) AS {
+            UNWIND [{id: 1, name: 'Alice'}] AS r RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SchMovie) AS { UNWIND [{id: 1, title: 'X'}] AS r RETURN r.id AS id, r.title AS title }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SchFood) AS { UNWIND [{id: 1, item: 'Y'}] AS r RETURN r.id AS id, r.item AS item }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchMovie) AS {
+            UNWIND [{left_id: 1, right_id: 1}] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchFood) AS {
+            UNWIND [{left_id: 1, right_id: 1}] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+
+    const schemaRunner = new Runner(`
+        CALL schema() YIELD kind, label, type, from_label, to_label
+        WITH kind, label, type, from_label, to_label
+        WHERE type = 'SCH_LIKES'
+        RETURN kind, type, from_label, to_label ORDER BY to_label
+    `);
+    await schemaRunner.run();
+    expect(schemaRunner.results.length).toBe(2);
+    expect(schemaRunner.results[0]).toEqual({
+        kind: "Relationship",
+        type: "SCH_LIKES",
+        from_label: "SchPerson",
+        to_label: "SchFood",
+    });
+    expect(schemaRunner.results[1]).toEqual({
+        kind: "Relationship",
+        type: "SCH_LIKES",
+        from_label: "SchPerson",
+        to_label: "SchMovie",
+    });
+
+    // Cleanup
+    await new Runner("DELETE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchMovie)").run();
+    await new Runner("DELETE VIRTUAL (:SchPerson)-[:SCH_LIKES]-(:SchFood)").run();
+    await new Runner("DELETE VIRTUAL (:SchPerson)").run();
+    await new Runner("DELETE VIRTUAL (:SchMovie)").run();
+    await new Runner("DELETE VIRTUAL (:SchFood)").run();
+});

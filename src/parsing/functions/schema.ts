@@ -1,4 +1,4 @@
-import Database from "../../graph/database";
+import DataResolver from "../../graph/data_resolver";
 import AsyncFunction from "./async_function";
 import { FunctionDef } from "./function_metadata";
 
@@ -29,7 +29,7 @@ import { FunctionDef } from "./function_metadata";
 })
 class Schema extends AsyncFunction {
     public async *generate(): AsyncGenerator<any> {
-        const entries = await Database.getInstance().schema();
+        const entries = await DataResolver.getInstance().schema();
         for (const entry of entries) {
             yield entry;
         }

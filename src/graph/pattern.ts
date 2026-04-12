@@ -1,5 +1,5 @@
 import ASTNode from "../parsing/ast_node";
-import Database from "./database";
+import DataResolver from "./data_resolver";
 import Node from "./node";
 import NodeData from "./node_data";
 import NodeReference from "./node_reference";
@@ -90,7 +90,7 @@ class Pattern extends ASTNode {
         }
     }
     public async fetchData(): Promise<void> {
-        const db: Database = Database.getInstance();
+        const resolver = DataResolver.getInstance();
         for (const element of this._chain) {
             if (
                 element.constructor === NodeReference ||
@@ -98,7 +98,7 @@ class Pattern extends ASTNode {
             ) {
                 continue;
             }
-            const data = await db.getData(element);
+            const data = await resolver.getData(element);
             if (element.constructor === Node) {
                 element.setData(data as NodeData);
             } else if (element.constructor === Relationship) {

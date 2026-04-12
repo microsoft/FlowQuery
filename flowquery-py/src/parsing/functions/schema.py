@@ -34,7 +34,7 @@ class Schema(AsyncFunction):
 
     async def generate(self) -> AsyncGenerator[Any, None]:
         # Import at runtime to avoid circular dependency
-        from ...graph.database import Database
-        entries = await Database.get_instance().schema()
+        from ...graph.data_resolver import DataResolver
+        entries = await DataResolver.get_instance().schema()
         for entry in entries:
             yield entry

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Generator, List, Optional, Sequence, Union
 
 from ..parsing.ast_node import ASTNode
-from .database import Database
+from .data_resolver import DataResolver
 from .node import Node
 from .node_data import NodeData
 from .relationship import Relationship
@@ -95,12 +95,12 @@ class Pattern(ASTNode):
 
     async def fetch_data(self) -> None:
         """Loads data from the database for all elements."""
-        db = Database.get_instance()
+        resolver = DataResolver.get_instance()
         for element in self._chain:
             # Use type name comparison to avoid issues with module double-loading
             if type(element).__name__ in ('NodeReference', 'RelationshipReference'):
                 continue
-            data = await db.get_data(element)
+            data = await resolver.get_data(element)
             if isinstance(element, Node) and isinstance(data, NodeData):
                 element.set_data(data)
             elif isinstance(element, Relationship) and isinstance(data, RelationshipData):

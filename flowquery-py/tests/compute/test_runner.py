@@ -5005,6 +5005,52 @@ class TestRunner:
         assert results[2] == {"name": "Bob", "score": 2}    # Bob
 
     @pytest.mark.asyncio
+    async def test_order_by_property_of_alias_shadowed_match_variable(self):
+        """Regression: ORDER BY peer.name where the projection ``peer.name AS peer``
+        shadows a variable bound by a chained MATCH must still resolve ``peer``
+        to the matched node, not the projected scalar.
+        """
+        await Runner(
+            """
+            CREATE VIRTUAL (:OrderShadowEmp) AS {
+                unwind [
+                    {id: 'alice', name: 'Zoe',   title: 'Eng'},
+                    {id: 'carol', name: 'Carol', title: 'Eng'},
+                    {id: 'dave',  name: 'Anna',  title: 'Eng'},
+                    {id: 'bob',   name: 'Bob',   title: 'Mgr'}
+                ] as r
+                RETURN r.id as id, r.name as name, r.title as title
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:OrderShadowEmp)-[:REPORTS_TO]-(:OrderShadowEmp) AS {
+                unwind [
+                    {left_id: 'alice', right_id: 'bob'},
+                    {left_id: 'carol', right_id: 'bob'},
+                    {left_id: 'dave',  right_id: 'bob'}
+                ] as r
+                RETURN r.left_id as left_id, r.right_id as right_id
+            }
+            """
+        ).run()
+        runner = Runner(
+            """
+            MATCH (u:OrderShadowEmp {name: 'Zoe'})-[:REPORTS_TO]->(mgr:OrderShadowEmp)
+            MATCH (mgr)<-[:REPORTS_TO]-(peer:OrderShadowEmp)
+            RETURN mgr.name AS manager, peer.name AS peer, peer.title
+            ORDER BY peer.name
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"manager": "Bob", "peer": "Anna",  "expr2": "Eng"}
+        assert results[1] == {"manager": "Bob", "peer": "Carol", "expr2": "Eng"}
+        assert results[2] == {"manager": "Bob", "peer": "Zoe",   "expr2": "Eng"}
+
+    @pytest.mark.asyncio
     async def test_delete_virtual_node_operation(self):
         """Test delete virtual node operation."""
         db = Database.get_instance()

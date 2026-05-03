@@ -7,6 +7,7 @@ from .context import Context
 class ParserState:
     def __init__(self) -> None:
         self._variables: Dict[str, ASTNode] = {}
+        self._shadowed: Dict[str, ASTNode] = {}
         self._context = Context()
         self._returns = 0
         self._in_virtual_definition = False
@@ -22,6 +23,16 @@ class ParserState:
     @property
     def variables(self) -> Dict[str, ASTNode]:
         return self._variables
+
+    @property
+    def shadowed(self) -> Dict[str, ASTNode]:
+        """Tracks the previously-bound value for variable names that have
+        been overwritten by a projection alias (RETURN/WITH).  Used by
+        expression parsing to recover the original binding when it would
+        otherwise be hidden — for example, ``ORDER BY peer.name`` after
+        ``RETURN peer.name AS peer`` should still see the matched node
+        ``peer``, not the projected string."""
+        return self._shadowed
 
     @property
     def context(self) -> Context:

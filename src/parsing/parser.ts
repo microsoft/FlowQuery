@@ -247,6 +247,11 @@ class Parser extends BaseParser {
                     operation = limit;
                 }
             }
+            // Trailing modifiers (WHERE/ORDER BY/LIMIT) for this clause
+            // have been parsed; release the input-scope snapshot taken
+            // by any preceding WITH/RETURN so that the next clause
+            // starts from a clean lookup state.
+            this._state.clearInputScope();
             previous = operation;
         }
         // Handle UNION: wrap left and right pipelines into a Union node
@@ -307,6 +312,10 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
+        // Snapshot the pre-projection scope so trailing modifiers
+        // (ORDER BY / WHERE / LIMIT) can resolve identifiers against
+        // the bindings that existed before this clause's aliases.
+        this._state.takeInputScopeSnapshot();
         const expressions = this.parseExpressions(AliasOption.REQUIRED);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
@@ -362,6 +371,8 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
         }
+        // Snapshot the pre-projection scope (see parseWith for details).
+        this._state.takeInputScopeSnapshot();
         const expressions = this.parseExpressions(AliasOption.OPTIONAL);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
@@ -1077,7 +1088,12 @@ class Parser extends BaseParser {
         }
         if (this.shouldParseReservedKeywordReference() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
-            const reference = new Reference(identifier, this._state.variables.get(identifier));
+            const next = this.peek();
+            const propertyAccess = next !== null && (next.isDot() || next.isOpeningBracket());
+            const reference = new Reference(
+                identifier,
+                this._state.resolve(identifier, propertyAccess)
+            );
             this.setNextToken();
             const lookup = this.parseLookup(reference);
             expression.addNode(lookup);
@@ -1099,7 +1115,12 @@ class Parser extends BaseParser {
                 expression.addNode(lookup);
                 return true;
             }
-            const reference = new Reference(identifier, this._state.variables.get(identifier));
+            const next = this.peek();
+            const propertyAccess = next !== null && (next.isDot() || next.isOpeningBracket());
+            const reference = new Reference(
+                identifier,
+                this._state.resolve(identifier, propertyAccess)
+            );
             this.setNextToken();
             const lookup = this.parseLookup(reference);
             expression.addNode(lookup);
@@ -1608,6 +1629,8 @@ class Parser extends BaseParser {
             throw new Error("Expected identifier");
         }
         const reference = new Reference(this.token.value);
+        // Block-local binding: visible inside the predicate body only.
+        this._state.pushVariableScope();
         this._state.variables.set(reference.identifier, reference);
         func.addChild(reference);
         this.setNextToken();
@@ -1652,7 +1675,7 @@ class Parser extends BaseParser {
             throw new Error("Expected right parenthesis");
         }
         this.setNextToken();
-        this._state.variables.delete(reference.identifier);
+        this._state.popVariableScope();
         return func;
     }
 
@@ -1749,6 +1772,8 @@ class Parser extends BaseParser {
             throw new Error("Expected identifier");
         }
         const reference = new Reference(this.token.value || "");
+        // Block-local binding: visible inside the comprehension only.
+        this._state.pushVariableScope();
         this._state.variables.set(reference.identifier, reference);
         listComp.addChild(reference);
         this.setNextToken();
@@ -1793,7 +1818,7 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
 
-        this._state.variables.delete(reference.identifier);
+        this._state.popVariableScope();
         return listComp;
     }
 
@@ -1951,13 +1976,13 @@ class Parser extends BaseParser {
         }
         this.setNextToken(); // consume EXISTS/COUNT/COLLECT keyword
         this.skipWhitespaceAndComments();
-        // Save and restore parser state for the subquery scope
+        // The subquery runs as a nested top-level query: it gets its own
+        // returns counter, aggregate context, input-scope snapshot and
+        // virtual-definition flag.  Variables are inherited from the
+        // outer scope so the subquery body can reference them.
         const outerState = this._state;
         this._state = new ParserState();
-        // Inherit outer variables so inner query can reference them
-        for (const [k, v] of outerState.variables) {
-            this._state.variables.set(k, v);
-        }
+        this._state.inheritVariablesFrom(outerState);
         const subqueryAST = this.parseSubQuery();
         this._state = outerState;
         if (subqueryAST === null) {

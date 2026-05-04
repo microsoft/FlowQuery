@@ -233,6 +233,12 @@ class Parser(BaseParser):
                     operation.add_sibling(limit)
                     operation = limit
 
+            # Trailing modifiers (WHERE/ORDER BY/LIMIT) for this clause
+            # have been parsed; release the input-scope snapshot taken by
+            # any preceding WITH/RETURN so that the next clause starts
+            # from a clean lookup state.
+            self._state.clear_input_scope()
+
             previous = operation
 
         # Handle UNION: wrap left and right pipelines into a Union node
@@ -282,6 +288,10 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
+        # Snapshot the pre-projection scope so trailing modifiers
+        # (ORDER BY / WHERE / LIMIT) can resolve identifiers against
+        # the bindings that existed before this clause's aliases.
+        self._state.take_input_scope_snapshot()
         expressions = self._parse_expressions(AliasOption.REQUIRED)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
@@ -322,6 +332,8 @@ class Parser(BaseParser):
             distinct = True
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
+        # Snapshot the pre-projection scope (see _parse_with for details).
+        self._state.take_input_scope_snapshot()
         expressions = self._parse_expressions(AliasOption.OPTIONAL)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
@@ -929,7 +941,13 @@ class Parser(BaseParser):
         if (self._should_parse_reserved_keyword_reference()
                 and (self.peek() is None or not self.peek().is_left_parenthesis())):
             identifier = self.token.value or ""
-            reference = Reference(identifier, self._state.variables.get(identifier))
+            next_tok = self.peek()
+            property_access = next_tok is not None and (
+                next_tok.is_dot() or next_tok.is_opening_bracket()
+            )
+            reference = Reference(
+                identifier, self._state.resolve(identifier, property_access)
+            )
             self.set_next_token()
             lookup = self._parse_lookup(reference)
             expression.add_node(lookup)
@@ -947,7 +965,13 @@ class Parser(BaseParser):
                 lookup = self._parse_lookup(param_ref)
                 expression.add_node(lookup)
                 return True
-            reference = Reference(identifier, self._state.variables.get(identifier))
+            next_tok = self.peek()
+            property_access = next_tok is not None and (
+                next_tok.is_dot() or next_tok.is_opening_bracket()
+            )
+            reference = Reference(
+                identifier, self._state.resolve(identifier, property_access)
+            )
             self.set_next_token()
             lookup = self._parse_lookup(reference)
             expression.add_node(lookup)
@@ -1333,6 +1357,8 @@ class Parser(BaseParser):
         if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected identifier")
         reference = Reference(self.token.value)
+        # Block-local binding: visible inside the predicate body only.
+        self._state.push_variable_scope()
         self._state.variables[reference.identifier] = reference
         func.add_child(reference)
         self.set_next_token()
@@ -1368,7 +1394,7 @@ class Parser(BaseParser):
         if not self.token.is_right_parenthesis():
             raise ValueError("Expected right parenthesis")
         self.set_next_token()
-        del self._state.variables[reference.identifier]
+        self._state.pop_variable_scope()
         return func
 
     def _parse_function(self) -> Optional[Function]:
@@ -1477,6 +1503,8 @@ class Parser(BaseParser):
         if not self.token.is_identifier_or_keyword():
             raise ValueError("Expected identifier")
         reference = Reference(self.token.value or "")
+        # Block-local binding: visible inside the comprehension only.
+        self._state.push_variable_scope()
         self._state.variables[reference.identifier] = reference
         list_comp.add_child(reference)
         self.set_next_token()
@@ -1515,7 +1543,7 @@ class Parser(BaseParser):
             raise ValueError("Expected closing bracket")
         self.set_next_token()
 
-        del self._state.variables[reference.identifier]
+        self._state.pop_variable_scope()
         return list_comp
 
     def _parse_json(self) -> Optional[ASTNode]:
@@ -1638,12 +1666,13 @@ class Parser(BaseParser):
             return None
         self.set_next_token()  # consume EXISTS/COUNT/COLLECT keyword
         self._skip_whitespace_and_comments()
-        # Save and restore parser state for the subquery scope
+        # The subquery runs as a nested top-level query: it gets its own
+        # returns counter, aggregate context, input-scope snapshot and
+        # virtual-definition flag.  Variables are inherited from the
+        # outer scope so the subquery body can reference them.
         outer_state = self._state
         self._state = ParserState()
-        # Inherit outer variables so inner query can reference them
-        for k, v in outer_state.variables.items():
-            self._state.variables[k] = v
+        self._state.inherit_variables_from(outer_state)
         subquery_ast = self._parse_sub_query()
         self._state = outer_state
         if subquery_ast is None:

@@ -4793,6 +4793,45 @@ test("Test RETURN alias shadowing graph variable in same RETURN clause", async (
     });
 });
 
+test("Test ORDER BY property of alias-shadowed MATCH variable", async () => {
+    // Regression: ORDER BY peer.name where the projection peer.name AS peer
+    // shadows a variable bound by a chained MATCH must still resolve peer
+    // to the matched node, not the projected scalar.
+    await new Runner(`
+        CREATE VIRTUAL (:OrderShadowEmp) AS {
+            unwind [
+                {id: 'alice', name: 'Zoe',   title: 'Eng'},
+                {id: 'carol', name: 'Carol', title: 'Eng'},
+                {id: 'dave',  name: 'Anna',  title: 'Eng'},
+                {id: 'bob',   name: 'Bob',   title: 'Mgr'}
+            ] as r
+            RETURN r.id as id, r.name as name, r.title as title
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:OrderShadowEmp)-[:REPORTS_TO]-(:OrderShadowEmp) AS {
+            unwind [
+                {left_id: 'alice', right_id: 'bob'},
+                {left_id: 'carol', right_id: 'bob'},
+                {left_id: 'dave',  right_id: 'bob'}
+            ] as r
+            RETURN r.left_id as left_id, r.right_id as right_id
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (u:OrderShadowEmp {name: 'Zoe'})-[:REPORTS_TO]->(mgr:OrderShadowEmp)
+        MATCH (mgr)<-[:REPORTS_TO]-(peer:OrderShadowEmp)
+        RETURN mgr.name AS manager, peer.name AS peer, peer.title
+        ORDER BY peer.name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ manager: "Bob", peer: "Anna", expr2: "Eng" });
+    expect(results[1]).toEqual({ manager: "Bob", peer: "Carol", expr2: "Eng" });
+    expect(results[2]).toEqual({ manager: "Bob", peer: "Zoe", expr2: "Eng" });
+});
+
 test("Test chained optional match with null intermediate node", async () => {
     // Create a chain: A -> B -> C (C has no outgoing REPORTS_TO)
     await new Runner(`

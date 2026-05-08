@@ -645,7 +645,10 @@ class Parser extends BaseParser {
         this.setNextToken();
         this.skipWhitespaceAndComments();
         let identifier: string | null = null;
-        if (this.token.isIdentifierOrKeyword()) {
+        // In a node-definition position, any identifier or keyword is unambiguously the
+        // node variable name — including reserved keywords like END/NULL/CASE that are
+        // otherwise blocked by isIdentifierOrKeyword().
+        if (this.token.isIdentifier() || this.token.isKeyword()) {
             identifier = this.token.value || "";
             this.setNextToken();
         }
@@ -853,7 +856,10 @@ class Parser extends BaseParser {
         this.setNextToken();
         let variable: string | null = null;
         const types: string[] = [];
-        if (this.token.isIdentifierOrKeyword()) {
+        // In a relationship-definition position, any identifier or keyword is
+        // unambiguously the relationship variable name — including reserved keywords
+        // like END/NULL/CASE that are otherwise blocked by isIdentifierOrKeyword().
+        if (this.token.isIdentifier() || this.token.isKeyword()) {
             variable = this.token.value || "";
             this.setNextToken();
         }

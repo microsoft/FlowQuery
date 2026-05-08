@@ -667,7 +667,10 @@ class Parser(BaseParser):
         self.set_next_token()
         self._skip_whitespace_and_comments()
         identifier: Optional[str] = None
-        if self.token.is_identifier_or_keyword():
+        # In a node-definition position, any identifier or keyword is unambiguously the
+        # node variable name — including reserved keywords like END/NULL/CASE that are
+        # otherwise blocked by is_identifier_or_keyword().
+        if self.token.is_identifier() or self.token.is_keyword():
             identifier = self.token.value
             self.set_next_token()
         self._skip_whitespace_and_comments()
@@ -733,7 +736,10 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         variable: Optional[str] = None
-        if self.token.is_identifier_or_keyword():
+        # In a relationship-definition position, any identifier or keyword is
+        # unambiguously the relationship variable name — including reserved keywords
+        # like END/NULL/CASE that are otherwise blocked by is_identifier_or_keyword().
+        if self.token.is_identifier() or self.token.is_keyword():
             variable = self.token.value
             self.set_next_token()
         rel_types: List[str] = []

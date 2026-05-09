@@ -6336,6 +6336,236 @@ class TestStatementInfo:
         await Runner("DELETE VIRTUAL (:PyLinMovie)").run()
         await Runner("DELETE VIRTUAL (:PyLinFood)").run()
 
+    def test_captures_node_properties_from_order_by_attached_to_return(self):
+        # ORDER BY clauses attached to a RETURN are stored privately on
+        # the Return operation, so the crawler must descend into them
+        # explicitly.
+        runner = Runner("""
+            MATCH (u:PyOrderUser)
+            RETURN u.name AS n
+            ORDER BY u.age DESC
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_properties == {"PyOrderUser": ["age", "name"]}
+
+    def test_captures_node_properties_from_where_attached_to_return(self):
+        # WHERE attached to RETURN is also stored privately on the Return
+        # operation rather than as an op.next sibling.
+        runner = Runner("""
+            MATCH (u:PyWhereOnReturnUser)
+            RETURN u.name AS n WHERE u.age > 18
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_properties == {"PyWhereOnReturnUser": ["age", "name"]}
+
+    def test_captures_node_properties_from_with_clauses(self):
+        runner = Runner("""
+            MATCH (u:PyWithUser)
+            WITH u.team AS t, u.name AS n
+            RETURN t AS team, n AS name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_properties == {"PyWithUser": ["name", "team"]}
+
+    def test_captures_literal_values_from_inline_node_properties(self):
+        runner = Runner("""
+            MATCH (u:PyLitInlineUser {id: 'rick.o', tenant: 'engineering'})
+            RETURN u.displayName
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyLitInlineUser"].literal_values == {
+            "id": ["rick.o"],
+            "tenant": ["engineering"],
+        }
+
+    def test_captures_literal_values_from_inline_relationship_properties(self):
+        runner = Runner("""
+            MATCH (a:PyLitRelLeft)-[:PY_LIT_REL {issuingAuthority: 'ISC2'}]->(b:PyLitRelRight)
+            RETURN a, b
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.relationships["PY_LIT_REL"].literal_values == {
+            "issuingAuthority": ["ISC2"],
+        }
+
+    def test_captures_literal_values_from_where_equality_predicates(self):
+        runner = Runner("""
+            MATCH (u:PyLitEqUser)
+            WHERE u.displayName = 'Richard Davies' AND 'admin' = u.role
+            RETURN u
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyLitEqUser"].literal_values == {
+            "displayName": ["Richard Davies"],
+            "role": ["admin"],
+        }
+
+    def test_captures_literal_values_from_where_in_predicates(self):
+        runner = Runner("""
+            MATCH (u:PyLitInUser)
+            WHERE u.id IN ['rick.o', 'helena.i']
+            RETURN u
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyLitInUser"].literal_values == {
+            "id": ["rick.o", "helena.i"],
+        }
+
+    def test_literal_values_combine_inline_and_predicate_without_duplicates(self):
+        runner = Runner("""
+            MATCH (u:PyLitMergeUser {id: 'rick.o'})
+            WHERE u.id = 'rick.o' OR u.id IN ['helena.i', 'rick.o']
+            RETURN u.name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyLitMergeUser"].literal_values == {
+            "id": ["rick.o", "helena.i"],
+        }
+
+    def test_skips_non_literal_expressions_for_literal_values(self):
+        # Non-literal rhs (a Reference bound by an earlier UNWIND) must not
+        # be captured into literal_values.
+        runner = Runner("""
+            UNWIND ['rick.o'] AS pickedId
+            MATCH (u:PyLitNonLitUser)
+            WHERE u.id = pickedId
+            RETURN u
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        # u.id is consumed\u2026
+        assert info.node_properties == {"PyLitNonLitUser": ["id"]}
+        # \u2026but its rhs is a Reference, not a literal.
+        assert info.nodes["PyLitNonLitUser"].literal_values == {}
+
+    def test_declared_properties_from_inline_create_virtual(self):
+        from flowquery.parsing.statement_info_crawler import DeclaredEntityInfo
+
+        runner = Runner("""
+            CREATE VIRTUAL (:PyDeclInline) AS {
+                UNWIND [{id: 'a', name: 'A', age: 30}] AS r
+                RETURN r.id AS id, r.name AS displayName, r.age AS age
+            }
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.declared.nodes == {
+            "PyDeclInline": DeclaredEntityInfo(
+                properties=["age", "displayName", "id"],
+                sources=[],
+            ),
+        }
+
+    @pytest.mark.asyncio
+    async def test_declared_properties_from_registered_virtuals(self):
+        from flowquery.parsing.statement_info_crawler import DeclaredEntityInfo
+
+        await Runner("""
+            CREATE VIRTUAL (:PyDeclReg) AS {
+                LOAD JSON FROM "https://example.com/decl-reg" AS r
+                RETURN r.id AS id, r.name AS displayName, r.role AS role
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (n:PyDeclReg)
+            RETURN n.displayName AS dn
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyDeclReg"].properties == ["displayName"]
+        assert info.declared.nodes == {
+            "PyDeclReg": DeclaredEntityInfo(
+                properties=["displayName", "id", "role"],
+                sources=["https://example.com/decl-reg"],
+            ),
+        }
+
+        await Runner("DELETE VIRTUAL (:PyDeclReg)").run()
+
+    @pytest.mark.asyncio
+    async def test_declared_properties_for_relationships(self):
+        from flowquery.parsing.statement_info_crawler import DeclaredEntityInfo
+
+        await Runner(
+            "CREATE VIRTUAL (:PyDeclLeft) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }"
+        ).run()
+        await Runner(
+            "CREATE VIRTUAL (:PyDeclRight) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }"
+        ).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyDeclLeft)-[:PY_DECL_REL]-(:PyDeclRight) AS {
+                LOAD JSON FROM "https://example.com/decl-rel" AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id, r.weight AS weight
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (a:PyDeclLeft)-[r:PY_DECL_REL]->(b:PyDeclRight)
+            RETURN r.weight AS w
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.declared.relationships == {
+            "PY_DECL_REL": DeclaredEntityInfo(
+                properties=["left_id", "right_id", "weight"],
+                sources=["https://example.com/decl-rel"],
+            ),
+        }
+
+        await Runner(
+            "DELETE VIRTUAL (:PyDeclLeft)-[:PY_DECL_REL]-(:PyDeclRight)"
+        ).run()
+        await Runner("DELETE VIRTUAL (:PyDeclLeft)").run()
+        await Runner("DELETE VIRTUAL (:PyDeclRight)").run()
+
+    def test_declared_map_omits_labels_that_have_no_declaration(self):
+        # A query that matches an unregistered label has no schema info to
+        # surface, so it should not appear in info.declared.
+        runner = Runner("""
+            MATCH (u:PyDeclMissing)
+            RETURN u.name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.declared.nodes == {}
+        assert info.declared.relationships == {}
+
+    def test_clone_preserves_declared_and_literal_values(self):
+        from flowquery.parsing.statement_info_crawler import (
+            DeclaredEntityInfo,
+        )
+
+        runner = Runner("""
+            CREATE VIRTUAL (:PyCloneDecl) AS {
+                UNWIND [{id: 'x', name: 'X'}] AS r
+                RETURN r.id AS id, r.name AS displayName
+            }
+        """)
+        info1 = runner.metadata.info
+        assert info1 is not None
+        info1.declared.nodes["Mutated"] = DeclaredEntityInfo(
+            properties=["m"], sources=[]
+        )
+        info1.nodes["PyCloneDecl"].literal_values["mut"] = ["m"]
+
+        info2 = runner.metadata.info
+        assert info2 is not None
+        assert info2.declared.nodes["PyCloneDecl"] == DeclaredEntityInfo(
+            properties=["displayName", "id"],
+            sources=[],
+        )
+        assert "Mutated" not in info2.declared.nodes
+        assert info2.nodes["PyCloneDecl"].literal_values == {}
+
 
 class TestVirtualOrgChart:
     """Tests for the virtual org chart example from the README."""

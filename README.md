@@ -256,12 +256,24 @@ console.log(runner.metadata);
 #### Statement Info: Labels, Properties, and Source Lineage
 
 `metadata.info` carries a `StatementInfo` describing the _structure_ the
-query touches — independent of execution. It captures the node labels and
-relationship types referenced, the data sources backing the underlying
-virtual definitions, and the node/relationship properties accessed by the
-query (i.e. `n.name`, not the columns produced by the virtual definition's
-inner sub-query). This is useful for governance, lineage UIs, query-cost
-estimation, or routing decisions before the query runs.
+query touches — independent of execution. It captures:
+
+- The node labels and relationship types referenced.
+- The data sources backing the underlying virtual definitions.
+- The node/relationship properties **consumed** by the query —
+  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
+  `ORDER BY`, or function arguments, plus inline pattern properties
+  like `(u:User {id: 'rick.o'})`.
+- The properties **declared** by each virtual's `RETURN` clause via
+  `info.declared`, so you can validate that a query references only
+  declared properties.
+- Literal values supplied for properties at the call site via
+  `info.nodes[Label].literal_values` — collected from inline pattern
+  properties and from equality / `IN` predicates such as
+  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
+
+This is useful for governance, lineage UIs, query-cost estimation, schema
+validation, or routing decisions before the query runs.
 
 The same `StatementInfoCrawler` can also be used directly on any parsed
 AST without going through a `Runner`:
@@ -280,30 +292,48 @@ per-entity `nodes` and `relationships` maps:
 const runner = new FlowQuery(`
   CREATE VIRTUAL (:City) AS {
     LOAD JSON FROM "https://example.com/cities" AS c
-    RETURN c.id AS id, c.name AS name
+    RETURN c.id AS id, c.name AS name, c.country AS country
   };
   CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
     LOAD JSON FROM "https://example.com/flights" AS f
     RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
   };
-  MATCH (a:City)-[r:FLIGHT]->(b:City)
+  MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+  WHERE b.country IN ['US', 'CA']
   RETURN a.name AS origin, b.name AS destination, r.airline AS airline
 `);
 const { info } = runner.metadata;
+
 console.log(info.nodes);
-// { City: { properties: ["name"], sources: ["https://example.com/cities"] } }
+// {
+//   City: {
+//     properties: ["country", "name"],
+//     sources: ["https://example.com/cities"],
+//     literal_values: { country: ["US", "CA"], name: ["NYC"] }
+//   }
+// }
 console.log(info.relationships);
-// { FLIGHT: { properties: ["airline"], sources: ["https://example.com/flights"] } }
+// {
+//   FLIGHT: {
+//     properties: ["airline"],
+//     sources: ["https://example.com/flights"],
+//     literal_values: {}
+//   }
+// }
+console.log(info.declared.nodes.City);
+// { properties: ["country", "id", "name"], sources: ["https://example.com/cities"] }
 console.log(info.sources);
 // ["https://example.com/cities", "https://example.com/flights"]
 ```
 
-`StatementInfo` resolves sources for **any** virtual the query touches — both
-inline `CREATE VIRTUAL` clauses and previously-registered virtuals reached
-via `MATCH` or `DELETE`. The flat `node_labels`, `relationship_types`,
-`sources`, `node_properties`, and `relationship_properties` fields stay in
-sync with the per-entity `nodes` / `relationships` maps and are convenient
-for quick aggregate checks.
+`StatementInfo` resolves sources and declared schemas for **any** virtual
+the query touches — both inline `CREATE VIRTUAL` clauses and
+previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
+`node_labels`, `relationship_types`, `sources`, `node_properties`, and
+`relationship_properties` fields stay in sync with the per-entity `nodes` /
+`relationships` maps and are convenient for quick aggregate checks. Only
+purely literal AST subtrees end up in `literal_values` — values that depend
+on parameters, references, f-strings, or subqueries are skipped.
 
 ### WHERE Clause
 

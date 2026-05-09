@@ -21,6 +21,8 @@ from .parsing.functions.predicate_function import PredicateFunction
 from .parsing.functions.reducer_element import ReducerElement
 from .parsing.parser import Parser
 from .parsing.statement_info_crawler import (
+    DeclaredEntityInfo,
+    DeclaredInfo,
     NodeInfo,
     RelationshipInfo,
     StatementInfo,
@@ -35,6 +37,8 @@ __all__ = [
     "StatementInfoCrawler",
     "NodeInfo",
     "RelationshipInfo",
+    "DeclaredEntityInfo",
+    "DeclaredInfo",
     "CommandLine",
     "Parser",
     "Function",

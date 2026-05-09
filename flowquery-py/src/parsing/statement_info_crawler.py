@@ -4,16 +4,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
 
 from ..graph.database import Database
 from ..graph.node import Node
 from ..graph.relationship import Relationship
 from .ast_node import ASTNode
 from .data_structures.lookup import Lookup
+from .expressions.expression import Expression
+from .expressions.f_string import FString
 from .expressions.identifier import Identifier
+from .expressions.operator import Equals, In
+from .expressions.parameter_reference import ParameterReference
 from .expressions.reference import Reference
 from .expressions.subquery_expression import SubqueryExpression
+from .operations.aggregated_return import AggregatedReturn
+from .operations.aggregated_with import AggregatedWith
 from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
@@ -21,19 +27,32 @@ from .operations.delete_relationship import DeleteRelationship
 from .operations.load import Load
 from .operations.match import Match
 from .operations.operation import Operation
+from .operations.order_by import OrderBy
+from .operations.projection import Projection
+from .operations.return_op import Return
+from .operations.with_op import With
 
 
 @dataclass
 class NodeInfo:
     """Per-entity lineage for a node label.
 
-    Captures which properties the query accesses on a label and which
-    sources (URLs / file URIs / async-function names) back the virtual
-    definition for that label.
+    Captures which properties the query accesses on a label, the sources
+    backing the virtual definition, and any literal values supplied for
+    those properties at the call site.
     """
 
     properties: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
+    #: Literal values supplied for this label's properties at the call
+    #: site. Collected from inline node-property assignments
+    #: (``(u:User {id: 'rick.o'})``) and from equality / ``IN`` predicates
+    #: (``WHERE u.id = 'rick.o'``, ``WHERE u.id IN ['a', 'b']``).
+    #:
+    #: Only purely literal AST subtrees (no references, parameters,
+    #: f-strings, or subqueries) are captured. Empty when no qualifying
+    #: literals exist.
+    literal_values: Dict[str, List[Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -46,6 +65,27 @@ class RelationshipInfo:
 
     properties: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
+    #: Literal values supplied for this type's properties at the call site.
+    literal_values: Dict[str, List[Any]] = field(default_factory=dict)
+
+
+@dataclass
+class DeclaredEntityInfo:
+    """Schema-level lineage: the full set of properties projected by a virtual
+    definition (independent of whether the crawled statement consumes them)
+    plus the sources that back the definition.
+    """
+
+    properties: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DeclaredInfo:
+    """Schema-declared lineage for both nodes and relationships."""
+
+    nodes: Dict[str, DeclaredEntityInfo] = field(default_factory=dict)
+    relationships: Dict[str, DeclaredEntityInfo] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,12 +95,18 @@ class StatementInfo:
     Captures the node labels, relationship types, data sources, and properties
     the query references — independent of whether/when it has been executed.
     The properties listed are those accessed by the *query itself* (e.g.
-    ``n.name`` in a MATCH/RETURN/WHERE), not the columns produced by the
-    underlying virtual node/relationship definitions.
+    ``n.name`` in a MATCH/RETURN/WHERE/ORDER BY), not the columns produced
+    by the underlying virtual node/relationship definitions.
 
     To trace the full lineage from a property to its source, use the
     :attr:`nodes` / :attr:`relationships` maps. Each entry there links a
-    label/type to its accessed properties and the sources that back it.
+    label/type to its accessed properties, the sources that back it, and
+    any literal values supplied at the call site.
+
+    To validate a query against the registered schema, use
+    :attr:`declared`, which lists the *full* set of properties projected
+    by each virtual's RETURN clause (or final WITH if no RETURN exists)
+    regardless of whether the query consumes them.
     """
 
     #: Unique node labels referenced by MATCH/CREATE/DELETE in the statement(s).
@@ -77,11 +123,18 @@ class StatementInfo:
     #: Relationship properties accessed by the statement, grouped by type.
     relationship_properties: Dict[str, List[str]] = field(default_factory=dict)
     #: Per-label lineage: each accessed node label mapped to the properties
-    #: accessed on it and the sources that back it.
+    #: accessed on it, the sources that back it, and any literal values
+    #: supplied at the call site.
     nodes: Dict[str, NodeInfo] = field(default_factory=dict)
     #: Per-type lineage: each accessed relationship type mapped to the
-    #: properties accessed on it and the sources that back it.
+    #: properties accessed on it, the sources that back it, and any
+    #: literal values supplied at the call site.
     relationships: Dict[str, RelationshipInfo] = field(default_factory=dict)
+    #: Schema-declared lineage. Lists, per label / relationship type, the
+    #: full set of properties projected by the virtual's RETURN clause
+    #: (or final WITH if no RETURN is present) — independent of whether
+    #: the crawled statement actually consumes them.
+    declared: DeclaredInfo = field(default_factory=DeclaredInfo)
 
 
 class StatementInfoCrawler:
@@ -105,6 +158,12 @@ class StatementInfoCrawler:
         self._rel_props: Dict[str, Set[str]] = {}
         self._node_sources: Dict[str, Set[str]] = {}
         self._rel_sources: Dict[str, Set[str]] = {}
+        self._node_literals: Dict[str, Dict[str, List[Any]]] = {}
+        self._rel_literals: Dict[str, Dict[str, List[Any]]] = {}
+        self._node_declared_props: Dict[str, Set[str]] = {}
+        self._rel_declared_props: Dict[str, Set[str]] = {}
+        self._node_declared_sources: Dict[str, Set[str]] = {}
+        self._rel_declared_sources: Dict[str, Set[str]] = {}
         self._own_created_node_labels: Set[str] = set()
         self._own_created_rel_types: Set[str] = set()
         # (label, statement) for inline CREATE VIRTUAL node clauses.
@@ -127,7 +186,7 @@ class StatementInfoCrawler:
             roots = statements
         for root in roots:
             self._crawl_statement(root)
-        self._resolve_registered_sources()
+        self._resolve_registered_definitions()
         return self._snapshot()
 
     def _reset(self) -> None:
@@ -137,6 +196,12 @@ class StatementInfoCrawler:
         self._rel_props = {}
         self._node_sources = {}
         self._rel_sources = {}
+        self._node_literals = {}
+        self._rel_literals = {}
+        self._node_declared_props = {}
+        self._rel_declared_props = {}
+        self._node_declared_sources = {}
+        self._rel_declared_sources = {}
         self._own_created_node_labels = set()
         self._own_created_rel_types = set()
         self._own_node_creates = []
@@ -190,13 +255,15 @@ class StatementInfoCrawler:
                     if isinstance(element, Node):
                         for lbl in element.labels:
                             self._node_labels.add(lbl)
-                        for prop_key in element.properties.keys():
+                        for prop_key, expr in element.properties.items():
                             self._add_node_prop(element.labels, prop_key)
+                            self._try_add_node_literal(element.labels, prop_key, expr)
                     elif isinstance(element, Relationship):
                         for t in element.types:
                             self._rel_types.add(t)
-                        for prop_key in element.properties.keys():
+                        for prop_key, expr in element.properties.items():
                             self._add_rel_prop(element.types, prop_key)
+                            self._try_add_rel_literal(element.types, prop_key, expr)
 
         # CREATE/DELETE VIRTUAL operations describe registry mutations rather
         # than query-side property accesses; their inner ASTs are crawled
@@ -206,15 +273,27 @@ class StatementInfoCrawler:
         ):
             self._collect_property_accesses(op)
 
-    def _resolve_registered_sources(self) -> None:
-        # Sources from inline CREATE VIRTUAL clauses in the crawled statements.
+    def _resolve_registered_definitions(self) -> None:
+        # Sources and declared properties from inline CREATE VIRTUAL clauses
+        # in the crawled statements.
         for label, stmt in self._own_node_creates:
             self._collect_sources(stmt, self._node_sources.setdefault(label, set()))
+            self._collect_sources(
+                stmt, self._node_declared_sources.setdefault(label, set())
+            )
+            self._collect_declared_props(
+                stmt, self._node_declared_props.setdefault(label, set())
+            )
         for type_, stmt in self._own_rel_creates:
             self._collect_sources(stmt, self._rel_sources.setdefault(type_, set()))
+            self._collect_sources(
+                stmt, self._rel_declared_sources.setdefault(type_, set())
+            )
+            self._collect_declared_props(
+                stmt, self._rel_declared_props.setdefault(type_, set())
+            )
 
-        # Sources from already-registered virtuals that the crawled statements
-        # reference (e.g. MATCH/DELETE against a virtual registered earlier).
+        # Sources / declared properties from already-registered virtuals.
         db = Database.get_instance()
         for label in self._node_labels:
             if label in self._own_created_node_labels:
@@ -222,7 +301,16 @@ class StatementInfoCrawler:
             physical = db.nodes.get(label)
             if physical is not None and physical.statement is not None:
                 self._collect_sources(
-                    physical.statement, self._node_sources.setdefault(label, set())
+                    physical.statement,
+                    self._node_sources.setdefault(label, set()),
+                )
+                self._collect_sources(
+                    physical.statement,
+                    self._node_declared_sources.setdefault(label, set()),
+                )
+                self._collect_declared_props(
+                    physical.statement,
+                    self._node_declared_props.setdefault(label, set()),
                 )
         for type_ in self._rel_types:
             if type_ in self._own_created_rel_types:
@@ -236,8 +324,21 @@ class StatementInfoCrawler:
                         physical_rel.statement,
                         self._rel_sources.setdefault(type_, set()),
                     )
+                    self._collect_sources(
+                        physical_rel.statement,
+                        self._rel_declared_sources.setdefault(type_, set()),
+                    )
+                    self._collect_declared_props(
+                        physical_rel.statement,
+                        self._rel_declared_props.setdefault(type_, set()),
+                    )
 
     def _collect_property_accesses(self, root: ASTNode) -> None:
+        """Walk the AST rooted at ``root`` recording property accesses,
+        literal values from equality / IN predicates, and descending into
+        subqueries plus the privately-held WHERE / ORDER BY ASTs of
+        RETURN-style operations.
+        """
         visited: Set[int] = set()
         stack: List[ASTNode] = [root]
         while stack:
@@ -248,16 +349,12 @@ class StatementInfoCrawler:
             visited.add(node_id)
 
             if isinstance(node, Lookup):
-                variable = node.variable
-                index = node.index
-                if isinstance(variable, Reference) and isinstance(index, Identifier):
-                    referred = variable.referred
-                    prop_name = index.value()
-                    if isinstance(prop_name, str) and prop_name:
-                        if isinstance(referred, Node):
-                            self._add_node_prop(referred.labels, prop_name)
-                        elif isinstance(referred, Relationship):
-                            self._add_rel_prop(referred.types, prop_name)
+                self._handle_lookup_access(node)
+
+            if isinstance(node, Equals):
+                self._handle_equality_literal(node)
+            elif isinstance(node, In):
+                self._handle_in_literal(node)
 
             for child in node.get_children():
                 stack.append(child)
@@ -267,6 +364,172 @@ class StatementInfoCrawler:
                 inner = getattr(node, "_subquery_ast", None)
                 if isinstance(inner, ASTNode):
                     stack.append(inner)
+            # RETURN / AggregatedReturn hold WHERE and ORDER BY clauses in
+            # private fields; descend into the ones with expression trees.
+            if isinstance(node, Return):
+                w = getattr(node, "_where", None)
+                o = getattr(node, "_order_by", None)
+                if isinstance(w, ASTNode):
+                    stack.append(w)
+                if isinstance(o, ASTNode):
+                    stack.append(o)
+            # OrderBy stores its sort expressions in a private array of
+            # SortField objects rather than as AST children; descend
+            # explicitly.
+            if isinstance(node, OrderBy):
+                for sort_field in node.fields:
+                    if isinstance(sort_field.expression, ASTNode):
+                        stack.append(sort_field.expression)
+
+    def _handle_lookup_access(self, node: Lookup) -> None:
+        target = self._resolve_lookup_target(node)
+        if target is None:
+            return
+        kind, names, prop = target
+        if kind == "node":
+            self._add_node_prop(names, prop)
+        else:
+            self._add_rel_prop(names, prop)
+
+    def _resolve_lookup_target(
+        self, lookup: Lookup
+    ) -> Optional[Tuple[str, List[str], str]]:
+        """Resolve a ``Lookup`` of the shape ``alias.prop`` to (kind,
+        labels-or-types, prop). Returns ``None`` if the lookup isn't of
+        that shape or doesn't bind to a Node/Relationship.
+        """
+        variable = lookup.variable
+        index = lookup.index
+        if not isinstance(variable, Reference) or not isinstance(index, Identifier):
+            return None
+        prop_name = index.value()
+        if not isinstance(prop_name, str) or not prop_name:
+            return None
+        referred = variable.referred
+        if isinstance(referred, Node):
+            return ("node", list(referred.labels), prop_name)
+        if isinstance(referred, Relationship):
+            return ("rel", list(referred.types), prop_name)
+        return None
+
+    def _handle_equality_literal(self, op: Equals) -> None:
+        lhs = op.lhs
+        rhs = op.rhs
+        # Try both orientations: ``alias.prop = literal`` and ``literal = alias.prop``.
+        self._try_record_prop_equality(lhs, rhs)
+        self._try_record_prop_equality(rhs, lhs)
+
+    def _try_record_prop_equality(self, side: ASTNode, other: ASTNode) -> None:
+        if not isinstance(side, Lookup):
+            return
+        if not self._is_literal_ast(other):
+            return
+        target = self._resolve_lookup_target(side)
+        if target is None:
+            return
+        value = self._safe_evaluate(other)
+        if value is _UNDEFINED:
+            return
+        kind, names, prop = target
+        if kind == "node":
+            self._add_node_literal_value(names, prop, value)
+        else:
+            self._add_rel_literal_value(names, prop, value)
+
+    def _handle_in_literal(self, op: In) -> None:
+        lhs = op.lhs
+        rhs = op.rhs
+        if not isinstance(lhs, Lookup):
+            return
+        if not self._is_literal_ast(rhs):
+            return
+        target = self._resolve_lookup_target(lhs)
+        if target is None:
+            return
+        value = self._safe_evaluate(rhs)
+        if value is _UNDEFINED or not isinstance(value, list):
+            return
+        kind, names, prop = target
+        for item in value:
+            if kind == "node":
+                self._add_node_literal_value(names, prop, item)
+            else:
+                self._add_rel_literal_value(names, prop, item)
+
+    def _is_literal_ast(self, node: ASTNode) -> bool:
+        """Return True iff the AST subtree contains only literal nodes
+        (no References, ParameterReferences, Lookups, FStrings, or
+        SubqueryExpressions). Used to guard literal-value extraction
+        against runtime-dependent expressions.
+        """
+        if isinstance(
+            node,
+            (Reference, ParameterReference, Lookup, FString, SubqueryExpression),
+        ):
+            return False
+        for child in node.get_children():
+            if not self._is_literal_ast(child):
+                return False
+        return True
+
+    def _safe_evaluate(self, node: ASTNode) -> Any:
+        try:
+            return node.value()
+        except Exception:
+            return _UNDEFINED
+
+    def _try_add_node_literal(
+        self, labels: Iterable[str], prop: str, expr: Expression
+    ) -> None:
+        if not self._is_literal_ast(expr):
+            return
+        value = self._safe_evaluate(expr)
+        if value is _UNDEFINED:
+            return
+        self._add_node_literal_value(labels, prop, value)
+
+    def _try_add_rel_literal(
+        self, types: Iterable[str], prop: str, expr: Expression
+    ) -> None:
+        if not self._is_literal_ast(expr):
+            return
+        value = self._safe_evaluate(expr)
+        if value is _UNDEFINED:
+            return
+        self._add_rel_literal_value(types, prop, value)
+
+    def _collect_declared_props(self, statement: ASTNode, target: Set[str]) -> None:
+        """Walk a virtual definition's inner statement to find the final
+        RETURN-style projection and record its aliases as the declared
+        property set. Falls back to the last WITH if no RETURN exists.
+        """
+        try:
+            op = statement.first_child()
+        except Exception:
+            return
+        if not isinstance(op, Operation):
+            return
+        last_return: Optional[Projection] = None
+        last_with: Optional[Projection] = None
+        current: Optional[Operation] = op
+        while current is not None:
+            if isinstance(current, (Return, AggregatedReturn)):
+                last_return = current
+            elif isinstance(current, (With, AggregatedWith)):
+                last_with = current
+            current = current.next
+        projection = last_return if last_return is not None else last_with
+        if projection is None:
+            return
+        for alias in self._projection_aliases(projection):
+            target.add(alias)
+
+    def _projection_aliases(self, projection: Projection) -> Generator[str, None, None]:
+        """Yield the alias of every projected expression in a Projection."""
+        for i, child in enumerate(projection.get_children()):
+            alias = getattr(child, "alias", None) or f"expr{i}"
+            if isinstance(alias, str) and alias:
+                yield alias
 
     def _collect_sources(self, statement: ASTNode, target: Set[str]) -> None:
         try:
@@ -304,6 +567,52 @@ class StatementInfoCrawler:
                 continue
             self._rel_props.setdefault(type_, set()).add(prop)
 
+    def _add_node_literal_value(
+        self, labels: Iterable[str], prop: str, value: Any
+    ) -> None:
+        for label in labels:
+            if not label:
+                continue
+            prop_map = self._node_literals.setdefault(label, {})
+            self._append_unique_literal(prop_map, prop, value)
+
+    def _add_rel_literal_value(
+        self, types: Iterable[str], prop: str, value: Any
+    ) -> None:
+        for type_ in types:
+            if not type_:
+                continue
+            prop_map = self._rel_literals.setdefault(type_, {})
+            self._append_unique_literal(prop_map, prop, value)
+
+    def _append_unique_literal(
+        self, prop_map: Dict[str, List[Any]], prop: str, value: Any
+    ) -> None:
+        arr = prop_map.setdefault(prop, [])
+        for existing in arr:
+            if self._literals_equal(existing, value):
+                return
+        arr.append(value)
+
+    def _literals_equal(self, a: Any, b: Any) -> bool:
+        # Mirrors deepEquals for JSON-comparable values; falls back to ==
+        # for primitives. Python's == handles most cases natively, but we
+        # special-case bool/int because True == 1 in Python.
+        if type(a) is not type(b):
+            return False
+        return bool(a == b)
+
+    def _literals_snapshot(
+        self, lit_map: Dict[str, Dict[str, List[Any]]], key: str
+    ) -> Dict[str, List[Any]]:
+        prop_map = lit_map.get(key)
+        if not prop_map:
+            return {}
+        out: Dict[str, List[Any]] = {}
+        for prop_key in sorted(prop_map.keys()):
+            out[prop_key] = list(prop_map[prop_key])
+        return out
+
     def _snapshot(self) -> StatementInfo:
         all_sources: Set[str] = set()
         nodes: Dict[str, NodeInfo] = {}
@@ -314,6 +623,7 @@ class StatementInfoCrawler:
             nodes[label] = NodeInfo(
                 properties=sorted(props),
                 sources=sorted(sources),
+                literal_values=self._literals_snapshot(self._node_literals, label),
             )
         relationships: Dict[str, RelationshipInfo] = {}
         for type_ in self._rel_types:
@@ -323,7 +633,26 @@ class StatementInfoCrawler:
             relationships[type_] = RelationshipInfo(
                 properties=sorted(props),
                 sources=sorted(sources),
+                literal_values=self._literals_snapshot(self._rel_literals, type_),
             )
+        declared_nodes: Dict[str, DeclaredEntityInfo] = {}
+        for label in self._node_labels:
+            props = self._node_declared_props.get(label, set())
+            sources = self._node_declared_sources.get(label, set())
+            if props or sources:
+                declared_nodes[label] = DeclaredEntityInfo(
+                    properties=sorted(props),
+                    sources=sorted(sources),
+                )
+        declared_relationships: Dict[str, DeclaredEntityInfo] = {}
+        for type_ in self._rel_types:
+            props = self._rel_declared_props.get(type_, set())
+            sources = self._rel_declared_sources.get(type_, set())
+            if props or sources:
+                declared_relationships[type_] = DeclaredEntityInfo(
+                    properties=sorted(props),
+                    sources=sorted(sources),
+                )
         info = StatementInfo(
             node_labels=sorted(self._node_labels),
             relationship_types=sorted(self._rel_types),
@@ -336,6 +665,10 @@ class StatementInfoCrawler:
             },
             nodes=nodes,
             relationships=relationships,
+            declared=DeclaredInfo(
+                nodes=declared_nodes,
+                relationships=declared_relationships,
+            ),
         )
         return info
 
@@ -352,6 +685,7 @@ class StatementInfoCrawler:
                 label: NodeInfo(
                     properties=list(entry.properties),
                     sources=list(entry.sources),
+                    literal_values=deepcopy(entry.literal_values),
                 )
                 for label, entry in info.nodes.items()
             },
@@ -359,7 +693,29 @@ class StatementInfoCrawler:
                 type_: RelationshipInfo(
                     properties=list(entry.properties),
                     sources=list(entry.sources),
+                    literal_values=deepcopy(entry.literal_values),
                 )
                 for type_, entry in info.relationships.items()
             },
+            declared=DeclaredInfo(
+                nodes={
+                    label: DeclaredEntityInfo(
+                        properties=list(entry.properties),
+                        sources=list(entry.sources),
+                    )
+                    for label, entry in info.declared.nodes.items()
+                },
+                relationships={
+                    type_: DeclaredEntityInfo(
+                        properties=list(entry.properties),
+                        sources=list(entry.sources),
+                    )
+                    for type_, entry in info.declared.relationships.items()
+                },
+            ),
         )
+
+
+# Sentinel used internally to distinguish "evaluation succeeded with value
+# None" from "evaluation could not be performed".
+_UNDEFINED = object()

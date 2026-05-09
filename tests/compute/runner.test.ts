@@ -6692,6 +6692,7 @@ test("Test metadata lineage links node label to properties and sources", async (
         MetaLinPerson: {
             properties: ["age", "name"],
             sources: ["https://example.com/persons"],
+            literal_values: {},
         },
     });
     expect(info.relationships).toEqual({});
@@ -6725,12 +6726,14 @@ test("Test metadata lineage links relationship type to properties and sources", 
         MetaLinCity: {
             properties: ["name"],
             sources: ["https://example.com/cities"],
+            literal_values: {},
         },
     });
     expect(info.relationships).toEqual({
         META_LIN_FLIGHT: {
             properties: ["airline"],
             sources: ["https://example.com/flights"],
+            literal_values: {},
         },
     });
     expect(info.sources).toEqual(["https://example.com/cities", "https://example.com/flights"]);
@@ -6786,4 +6789,222 @@ test("Test metadata lineage aggregates multiple sources for one relationship typ
     await new Runner("DELETE VIRTUAL (:MetaLinPerson2)").run();
     await new Runner("DELETE VIRTUAL (:MetaLinMovie)").run();
     await new Runner("DELETE VIRTUAL (:MetaLinFood)").run();
+});
+
+test("Test metadata captures node properties from ORDER BY attached to RETURN", () => {
+    // ORDER BY clauses attached to a RETURN are stored privately on the
+    // Return operation, so the crawler must descend into them explicitly.
+    const runner = new Runner(`
+        MATCH (u:MetaOrderUser)
+        RETURN u.name AS n
+        ORDER BY u.age DESC
+    `);
+    const info = runner.metadata.info!;
+    expect(info.node_properties).toEqual({ MetaOrderUser: ["age", "name"] });
+});
+
+test("Test metadata captures node properties from WHERE attached to RETURN", () => {
+    // WHERE attached to a RETURN is also stored privately on the Return
+    // operation rather than as an op.next sibling.
+    const runner = new Runner(`
+        MATCH (u:MetaWhereOnReturnUser)
+        RETURN u.name AS n WHERE u.age > 18
+    `);
+    const info = runner.metadata.info!;
+    expect(info.node_properties).toEqual({
+        MetaWhereOnReturnUser: ["age", "name"],
+    });
+});
+
+test("Test metadata captures node properties from WITH clauses", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaWithUser)
+        WITH u.team AS t, u.name AS n
+        RETURN t AS team, n AS name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.node_properties).toEqual({ MetaWithUser: ["name", "team"] });
+});
+
+test("Test metadata captures literal values from inline node properties", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaLitInlineUser {id: 'rick.o', tenant: 'engineering'})
+        RETURN u.displayName
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaLitInlineUser.literal_values).toEqual({
+        id: ["rick.o"],
+        tenant: ["engineering"],
+    });
+});
+
+test("Test metadata captures literal values from inline relationship properties", () => {
+    const runner = new Runner(`
+        MATCH (a:MetaLitRelLeft)-[:META_LIT_REL {issuingAuthority: 'ISC2'}]->(b:MetaLitRelRight)
+        RETURN a, b
+    `);
+    const info = runner.metadata.info!;
+    expect(info.relationships.META_LIT_REL.literal_values).toEqual({
+        issuingAuthority: ["ISC2"],
+    });
+});
+
+test("Test metadata captures literal values from WHERE equality predicates", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaLitEqUser)
+        WHERE u.displayName = 'Richard Davies' AND 'admin' = u.role
+        RETURN u
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaLitEqUser.literal_values).toEqual({
+        displayName: ["Richard Davies"],
+        role: ["admin"],
+    });
+});
+
+test("Test metadata captures literal values from WHERE IN predicates", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaLitInUser)
+        WHERE u.id IN ['rick.o', 'helena.i']
+        RETURN u
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaLitInUser.literal_values).toEqual({
+        id: ["rick.o", "helena.i"],
+    });
+});
+
+test("Test metadata literal values combine inline and predicate sources without duplicates", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaLitMergeUser {id: 'rick.o'})
+        WHERE u.id = 'rick.o' OR u.id IN ['helena.i', 'rick.o']
+        RETURN u.name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaLitMergeUser.literal_values).toEqual({
+        id: ["rick.o", "helena.i"],
+    });
+});
+
+test("Test metadata skips non-literal expressions for literal values", () => {
+    // Non-literal rhs (a Reference bound by an earlier UNWIND) must not
+    // be captured into literal_values.
+    const runner = new Runner(`
+        UNWIND ['rick.o'] AS pickedId
+        MATCH (u:MetaLitNonLitUser)
+        WHERE u.id = pickedId
+        RETURN u
+    `);
+    const info = runner.metadata.info!;
+    // u.id appears in info.node_properties (consumed)…
+    expect(info.node_properties).toEqual({ MetaLitNonLitUser: ["id"] });
+    // …but its rhs is a Reference, not a literal, so no literal_values
+    // entry is recorded.
+    expect(info.nodes.MetaLitNonLitUser.literal_values).toEqual({});
+});
+
+test("Test metadata declared properties from inline CREATE VIRTUAL", () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaDeclInline) AS {
+            UNWIND [{id: 'a', name: 'A', age: 30}] AS r
+            RETURN r.id AS id, r.name AS displayName, r.age AS age
+        }
+    `);
+    const info = runner.metadata.info!;
+    expect(info.declared.nodes).toEqual({
+        MetaDeclInline: {
+            properties: ["age", "displayName", "id"],
+            sources: [],
+        },
+    });
+});
+
+test("Test metadata declared properties from registered virtuals", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDeclReg) AS {
+            LOAD JSON FROM "https://example.com/decl-reg" AS r
+            RETURN r.id AS id, r.name AS displayName, r.role AS role
+        }
+    `).run();
+
+    // A query that only references one declared property still surfaces
+    // the *full* declared shape via info.declared.
+    const runner = new Runner(`
+        MATCH (n:MetaDeclReg)
+        RETURN n.displayName AS dn
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaDeclReg.properties).toEqual(["displayName"]);
+    expect(info.declared.nodes).toEqual({
+        MetaDeclReg: {
+            properties: ["displayName", "id", "role"],
+            sources: ["https://example.com/decl-reg"],
+        },
+    });
+
+    await new Runner("DELETE VIRTUAL (:MetaDeclReg)").run();
+});
+
+test("Test metadata declared properties for relationships", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDeclLeft) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDeclRight) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaDeclLeft)-[:META_DECL_REL]-(:MetaDeclRight) AS {
+            LOAD JSON FROM "https://example.com/decl-rel" AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id, r.weight AS weight
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (a:MetaDeclLeft)-[r:META_DECL_REL]->(b:MetaDeclRight)
+        RETURN r.weight AS w
+    `);
+    const info = runner.metadata.info!;
+    expect(info.declared.relationships).toEqual({
+        META_DECL_REL: {
+            properties: ["left_id", "right_id", "weight"],
+            sources: ["https://example.com/decl-rel"],
+        },
+    });
+
+    await new Runner("DELETE VIRTUAL (:MetaDeclLeft)-[:META_DECL_REL]-(:MetaDeclRight)").run();
+    await new Runner("DELETE VIRTUAL (:MetaDeclLeft)").run();
+    await new Runner("DELETE VIRTUAL (:MetaDeclRight)").run();
+});
+
+test("Test metadata declared map omits labels that have no declaration", () => {
+    // A query that matches an unregistered label has no schema info to
+    // surface, so it should not appear in info.declared.
+    const runner = new Runner(`
+        MATCH (u:MetaDeclMissing)
+        RETURN u.name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.declared.nodes).toEqual({});
+    expect(info.declared.relationships).toEqual({});
+});
+
+test("Test metadata clone preserves declared and literal_values", () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:MetaCloneDecl) AS {
+            UNWIND [{id: 'x', name: 'X'}] AS r
+            RETURN r.id AS id, r.name AS displayName
+        }
+    `);
+    const info1 = runner.metadata.info!;
+    info1.declared.nodes["Mutated"] = { properties: ["m"], sources: [] };
+    if (info1.nodes.MetaCloneDecl.literal_values) {
+        info1.nodes.MetaCloneDecl.literal_values["mut"] = ["m"];
+    }
+    const info2 = runner.metadata.info!;
+    expect(info2.declared.nodes.MetaCloneDecl).toEqual({
+        properties: ["displayName", "id"],
+        sources: [],
+    });
+    expect(info2.declared.nodes.Mutated).toBeUndefined();
+    expect(info2.nodes.MetaCloneDecl.literal_values).toEqual({});
 });

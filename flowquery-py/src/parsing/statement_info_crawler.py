@@ -8,6 +8,7 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, U
 
 from ..graph.database import Database
 from ..graph.node import Node
+from ..graph.node_reference import NodeReference
 from ..graph.relationship import Relationship
 from .ast_node import ASTNode
 from .data_structures.lookup import Lookup
@@ -253,11 +254,22 @@ class StatementInfoCrawler:
             for pattern in op.patterns:
                 for element in pattern.chain:
                     if isinstance(element, Node):
-                        for lbl in element.labels:
+                        # For a WITH-rebound ``MATCH (u)``, the chain
+                        # element's own labels are empty; chase the
+                        # underlying binding so labels/properties land
+                        # on the original :User node.
+                        effective_labels = (
+                            list(element.labels)
+                            if element.labels
+                            else self._effective_labels_for(element)
+                        )
+                        for lbl in effective_labels:
                             self._node_labels.add(lbl)
                         for prop_key, expr in element.properties.items():
-                            self._add_node_prop(element.labels, prop_key)
-                            self._try_add_node_literal(element.labels, prop_key, expr)
+                            self._add_node_prop(effective_labels, prop_key)
+                            self._try_add_node_literal(
+                                effective_labels, prop_key, expr
+                            )
                     elif isinstance(element, Relationship):
                         for t in element.types:
                             self._rel_types.add(t)
@@ -405,12 +417,76 @@ class StatementInfoCrawler:
         prop_name = index.value()
         if not isinstance(prop_name, str) or not prop_name:
             return None
-        referred = variable.referred
+        referred = self._resolve_bound_entity(variable.referred)
         if isinstance(referred, Node):
             return ("node", list(referred.labels), prop_name)
         if isinstance(referred, Relationship):
             return ("rel", list(referred.types), prop_name)
         return None
+
+    def _resolve_bound_entity(
+        self, node: Optional[ASTNode]
+    ) -> Optional[Union[Node, Relationship]]:
+        """Unwrap a binding chain to the underlying graph entity that
+        carries the labels / types relevant for lineage. Handles the
+        common WITH-rebind pattern::
+
+            MATCH (u:User) ... WITH u MATCH (u) RETURN u.name
+
+        After ``WITH u``, the variable ``u`` is bound to the WITH's
+        ``Expression`` (a passthrough Reference to the original Node).
+        The second ``MATCH (u)`` then creates a ``NodeReference`` whose
+        own ``labels`` are empty. Without unwrapping, ``u.name`` in
+        ``RETURN`` resolves to that empty-labels rebind and the property
+        is silently dropped from lineage. Chasing through
+        ``Reference.referred``, single-child ``Expression`` nodes, and
+        ``NodeReference.reference`` (when the immediate labels are
+        empty) recovers the original ``Node(:User)`` binding.
+        """
+        seen: Set[int] = set()
+        current: Optional[ASTNode] = node
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            # NodeReference subclasses Node and copies its base's labels
+            # at construction. When those copied labels are empty
+            # (``MATCH (u)`` after a WITH-rebind), chase the underlying
+            # binding to recover the original labels.
+            if isinstance(current, NodeReference):
+                if current.labels:
+                    return current
+                nxt = current.reference
+                current = nxt if isinstance(nxt, ASTNode) else None
+                continue
+            if isinstance(current, Node):
+                return current
+            if isinstance(current, Relationship):
+                return current
+            if isinstance(current, Reference):
+                current = current.referred
+                continue
+            if isinstance(current, Expression):
+                # Pass-through projections (``WITH u``, ``RETURN u AS u``)
+                # wrap a single Reference; arbitrary computed expressions
+                # have no useful binding to attribute properties to.
+                children = current.get_children()
+                if len(children) == 1:
+                    current = children[0]
+                    continue
+                return None
+            return None
+        return None
+
+    def _effective_labels_for(self, element: Node) -> List[str]:
+        """Return the effective labels for a MATCH chain ``Node``
+        element. If the element itself is unlabeled (typical for a
+        WITH-rebound ``MATCH (u)``), unwrap its binding to inherit the
+        original labels.
+        """
+        if isinstance(element, NodeReference):
+            resolved = self._resolve_bound_entity(element)
+            if isinstance(resolved, Node):
+                return list(resolved.labels)
+        return list(element.labels)
 
     def _handle_equality_literal(self, op: Equals) -> None:
         lhs = op.lhs

@@ -6566,6 +6566,47 @@ class TestStatementInfo:
         assert "Mutated" not in info2.declared.nodes
         assert info2.nodes["PyCloneDecl"].literal_values == {}
 
+    def test_preserves_label_binding_through_with_rebind(self):
+        # After ``WITH u``, ``u`` is rebound to a passthrough Expression
+        # and a subsequent ``MATCH (u)`` produces a NodeReference with
+        # empty labels. Properties accessed on that re-bound ``u`` must
+        # still attribute to the original :PyWithRebUser label.
+        runner = Runner("""
+            MATCH (u:PyWithRebUser)-[:PY_WITH_REB_BASED_IN]->(o:PyWithRebOffice)
+            WHERE o.name CONTAINS 'Bergen'
+            WITH u
+            MATCH (u)<-[:PY_WITH_REB_REPORTS_TO]-(report:PyWithRebUser)
+            RETURN u.displayName, u.jobTitle
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_properties == {
+            "PyWithRebUser": ["displayName", "jobTitle"],
+            "PyWithRebOffice": ["name"],
+        }
+        assert sorted(info.node_labels) == [
+            "PyWithRebOffice",
+            "PyWithRebUser",
+        ]
+
+    def test_with_rebind_recovers_literal_values_via_where_equality(self):
+        runner = Runner("""
+            MATCH (u:PyWithRebLitUser)
+            WITH u
+            MATCH (u)
+            WHERE u.id = 'rick.o'
+            RETURN u.displayName
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes["PyWithRebLitUser"].properties == [
+            "displayName",
+            "id",
+        ]
+        assert info.nodes["PyWithRebLitUser"].literal_values == {
+            "id": ["rick.o"],
+        }
+
 
 class TestVirtualOrgChart:
     """Tests for the virtual org chart example from the README."""

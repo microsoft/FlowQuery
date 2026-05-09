@@ -7008,3 +7008,38 @@ test("Test metadata clone preserves declared and literal_values", () => {
     expect(info2.declared.nodes.Mutated).toBeUndefined();
     expect(info2.nodes.MetaCloneDecl.literal_values).toEqual({});
 });
+
+test("Test metadata preserves label binding through WITH-rebind", () => {
+    // After `WITH u`, `u` is rebound to a passthrough Expression and a
+    // subsequent `MATCH (u)` produces a NodeReference with empty labels.
+    // Properties accessed on that re-bound `u` must still attribute to
+    // the original `:MetaWithRebUser` label.
+    const runner = new Runner(`
+        MATCH (u:MetaWithRebUser)-[:META_WITH_REB_BASED_IN]->(o:MetaWithRebOffice)
+        WHERE o.name CONTAINS 'Bergen'
+        WITH u
+        MATCH (u)<-[:META_WITH_REB_REPORTS_TO]-(report:MetaWithRebUser)
+        RETURN u.displayName, u.jobTitle
+    `);
+    const info = runner.metadata.info!;
+    expect(info.node_properties).toEqual({
+        MetaWithRebUser: ["displayName", "jobTitle"],
+        MetaWithRebOffice: ["name"],
+    });
+    expect(info.node_labels.sort()).toEqual(["MetaWithRebOffice", "MetaWithRebUser"]);
+});
+
+test("Test metadata WITH-rebind also recovers literal values via WHERE equality", () => {
+    const runner = new Runner(`
+        MATCH (u:MetaWithRebLitUser)
+        WITH u
+        MATCH (u)
+        WHERE u.id = 'rick.o'
+        RETURN u.displayName
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes.MetaWithRebLitUser.properties).toEqual(["displayName", "id"]);
+    expect(info.nodes.MetaWithRebLitUser.literal_values).toEqual({
+        id: ["rick.o"],
+    });
+});

@@ -1,5 +1,6 @@
 import Database from "../graph/database";
 import Node from "../graph/node";
+import NodeReference from "../graph/node_reference";
 import Relationship from "../graph/relationship";
 import ASTNode from "./ast_node";
 import Lookup from "./data_structures/lookup";
@@ -261,10 +262,18 @@ class StatementInfoCrawler {
             for (const pattern of op.patterns) {
                 for (const element of pattern.chain) {
                     if (element instanceof Node) {
-                        for (const lbl of element.labels) this._nodeLabels.add(lbl);
+                        // For a WITH-rebound `MATCH (u)`, the chain
+                        // element's own labels are empty; chase the
+                        // underlying binding so labels/properties land
+                        // on the original :User node.
+                        const effectiveLabels =
+                            element.labels.length > 0
+                                ? element.labels
+                                : this.effectiveLabelsFor(element);
+                        for (const lbl of effectiveLabels) this._nodeLabels.add(lbl);
                         for (const [propKey, expr] of element.properties) {
-                            this.addNodeProp(element.labels, propKey);
-                            this.tryAddNodeLiteral(element.labels, propKey, expr);
+                            this.addNodeProp(effectiveLabels, propKey);
+                            this.tryAddNodeLiteral(effectiveLabels, propKey, expr);
                         }
                     } else if (element instanceof Relationship) {
                         for (const t of element.types) this._relTypes.add(t);
@@ -435,7 +444,7 @@ class StatementInfoCrawler {
         if (!(variable instanceof Reference) || !(index instanceof Identifier)) return null;
         const propName = index.value();
         if (typeof propName !== "string" || propName.length === 0) return null;
-        const referred = variable.referred;
+        const referred = this.resolveBoundEntity(variable.referred);
         if (referred instanceof Node) {
             return { kind: "node", labels: referred.labels, prop: propName };
         }
@@ -443,6 +452,78 @@ class StatementInfoCrawler {
             return { kind: "rel", types: referred.types, prop: propName };
         }
         return null;
+    }
+
+    /**
+     * Unwraps a binding chain to the underlying graph entity that
+     * carries the labels / types relevant for lineage. Handles the
+     * common WITH-rebind pattern:
+     *
+     * ```
+     * MATCH (u:User) ... WITH u MATCH (u) RETURN u.name
+     * ```
+     *
+     * After `WITH u`, the variable `u` is bound to the WITH's
+     * `Expression` (a passthrough Reference to the original Node). The
+     * second `MATCH (u)` then creates a `NodeReference` whose own
+     * `labels` are empty. Without unwrapping, `u.name` in `RETURN`
+     * resolves to that empty-labels rebind and the property is silently
+     * dropped from lineage. By chasing through `Reference.referred`,
+     * single-child `Expression` nodes, and `NodeReference.reference`
+     * (when the immediate labels are empty), we recover the original
+     * `Node(:User)` binding.
+     */
+    private resolveBoundEntity(node: ASTNode | undefined): Node | Relationship | null {
+        const seen = new Set<ASTNode>();
+        let current: ASTNode | undefined = node;
+        while (current !== undefined && !seen.has(current)) {
+            seen.add(current);
+            // NodeReference subclasses Node and copies its base's
+            // labels at construction. When those copied labels are
+            // empty (`MATCH (u)` after a WITH-rebind), chase the
+            // underlying binding to recover the original labels.
+            if (current instanceof NodeReference) {
+                if (current.labels.length > 0) return current;
+                const next = current.reference;
+                current = next === null ? undefined : next;
+                continue;
+            }
+            if (current instanceof Node) return current;
+            if (current instanceof Relationship) return current;
+            if (current instanceof Reference) {
+                current = current.referred;
+                continue;
+            }
+            if (current instanceof Expression) {
+                // Pass-through projections (`WITH u`, `RETURN u AS u`)
+                // wrap a single Reference; arbitrary computed
+                // expressions have no useful binding to attribute
+                // properties to.
+                const children = current.getChildren();
+                if (children.length === 1) {
+                    current = children[0];
+                    continue;
+                }
+                return null;
+            }
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Returns the effective labels for a MATCH chain `Node` element.
+     * If the element itself is unlabeled (typical for a WITH-rebound
+     * `MATCH (u)`), unwrap its binding to inherit the original labels.
+     */
+    private effectiveLabelsFor(element: Node): string[] {
+        if (element instanceof NodeReference) {
+            const resolved = this.resolveBoundEntity(element);
+            if (resolved instanceof Node) {
+                return resolved.labels;
+            }
+        }
+        return element.labels;
     }
 
     private handleEqualityLiteral(op: Equals): void {

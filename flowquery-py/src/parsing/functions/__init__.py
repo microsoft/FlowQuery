@@ -30,6 +30,7 @@ from .join import Join
 from .keys import Keys
 from .labels import Labels
 from .last import Last
+from .length import Length
 from .localdatetime import LocalDatetime
 from .localtime import LocalTime
 from .max_ import Max
@@ -100,6 +101,7 @@ __all__ = [
     "Join",
     "Labels",
     "Last",
+    "Length",
     "Keys",
     "Max",
     "Min",

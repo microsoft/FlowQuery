@@ -1345,3 +1345,44 @@ class TestParser:
         assert relationship.types == ["KNOWS", "FOLLOWS"]
         assert relationship.hops.min == 1
         assert relationship.hops.max == 3
+
+    def test_reserved_keyword_end_usable_as_node_variable(self):
+        """Reserved keyword 'end' should be usable as a node variable name.
+
+        Repro: MATCH (end:User) used to throw
+        "Expected closing parenthesis for node definition" because END is a
+        reserved keyword (CASE..WHEN..THEN..ELSE..END). In a node-definition
+        position the identifier slot is unambiguous, so any keyword should be
+        accepted.
+        """
+        parser = Parser()
+        ast = parser.parse("MATCH (end:User) RETURN end")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        node = match.patterns[0].chain[0]
+        assert isinstance(node, Node)
+        assert node.identifier == "end"
+        assert node.label == "User"
+
+    def test_reserved_keywords_usable_as_node_variables(self):
+        """All restricted keywords should be usable as node variable names."""
+        parser = Parser()
+        for name in ["end", "case", "when", "then", "else", "null"]:
+            ast = parser.parse(f"MATCH ({name}:User) RETURN {name}")
+            match = ast.first_child()
+            assert isinstance(match, Match)
+            node = match.patterns[0].chain[0]
+            assert isinstance(node, Node)
+            assert node.identifier == name
+            assert node.label == "User"
+
+    def test_reserved_keyword_end_usable_as_relationship_variable(self):
+        """Reserved keyword 'end' should be usable as a relationship variable name."""
+        parser = Parser()
+        ast = parser.parse("MATCH (a:User)-[end:KNOWS]->(b:User) RETURN end")
+        match = ast.first_child()
+        assert isinstance(match, Match)
+        rel = match.patterns[0].chain[1]
+        assert isinstance(rel, Relationship)
+        assert rel.identifier == "end"
+        assert rel.type == "KNOWS"

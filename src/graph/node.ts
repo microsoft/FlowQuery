@@ -110,10 +110,17 @@ class Node extends ASTNode {
         this._data?.reset();
         while (this._data?.find(id, hop)) {
             this.setValue(this._data?.current(hop) as NodeRecord);
+            // Always record this node as the endNode of the incoming relationship
+            // match. For variable-length patterns, the same target node instance is
+            // reused at every intermediate hop, so we must set the endNode of the
+            // current relationship match BEFORE filtering on this node's properties.
+            // Otherwise, intermediate matches keep endNode=null and pattern values
+            // collapse to [startNode, endNode] when the property filter only matches
+            // the final node in a *m..n traversal.
+            this._incoming?.setEndNode(this);
             if (!this._matchesProperties(hop)) {
                 continue;
             }
-            this._incoming?.setEndNode(this);
             if (this._outgoing) {
                 yield* this._outgoing.find(this._value!.id, hop);
             } else {

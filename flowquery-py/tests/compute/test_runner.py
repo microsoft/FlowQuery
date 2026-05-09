@@ -6679,3 +6679,143 @@ class TestPredicateFunctions:
         await Runner("DELETE VIRTUAL (:SchPerson)").run()
         await Runner("DELETE VIRTUAL (:SchMovie)").run()
         await Runner("DELETE VIRTUAL (:SchFood)").run()
+
+
+class TestQuirkFixes:
+    """Regression tests for FlowQuery quirks discovered along the way."""
+
+    @pytest.mark.asyncio
+    async def test_reserved_keyword_end_works_end_to_end_as_node_variable(self):
+        """Bug repro: prior to the parser fix, MATCH (end:KwUser) threw
+        "Expected closing parenthesis for node definition"."""
+        await Runner("""
+            CREATE VIRTUAL (:PyKwUser) AS {
+                UNWIND [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        match = Runner("""
+            MATCH (end:PyKwUser)
+            WHERE end.name = 'Alice'
+            RETURN end.name AS name
+        """)
+        await match.run()
+        assert len(match.results) == 1
+        assert match.results[0] == {"name": "Alice"}
+
+        # Cleanup
+        await Runner("DELETE VIRTUAL (:PyKwUser)").run()
+
+    @pytest.mark.asyncio
+    async def test_variable_length_path_with_end_node_filter_yields_intermediate_nodes(self):
+        """Bug repro: when a *m..n pattern had a property filter on the end node
+        (inline {name:'P4'} or WHERE t.name='P4'), the intermediate matches'
+        endNode was never populated, so nodes(p) collapsed to
+        [startNode, endNode] regardless of how many hops were traversed.
+        """
+        await Runner("""
+            CREATE VIRTUAL (:PyVlpPerson) AS {
+                UNWIND [
+                    {id: 1, name: 'P1'},
+                    {id: 2, name: 'P2'},
+                    {id: 3, name: 'P3'},
+                    {id: 4, name: 'P4'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyVlpPerson)-[:PY_VLP_KNOWS]-(:PyVlpPerson) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """).run()
+
+        # Inline property filter on end node — 3-hop path must include all 4 nodes.
+        inline_match = Runner("""
+            MATCH p=(s:PyVlpPerson {name: 'P1'})-[:PY_VLP_KNOWS*1..3]->(t:PyVlpPerson {name: 'P4'})
+            RETURN nodes(p) AS ns
+        """)
+        await inline_match.run()
+        assert len(inline_match.results) == 1
+        inline_names = [n["name"] for n in inline_match.results[0]["ns"]]
+        assert inline_names == ["P1", "P2", "P3", "P4"]
+
+        # Equivalent WHERE filter — same expectation.
+        where_match = Runner("""
+            MATCH p=(s:PyVlpPerson)-[:PY_VLP_KNOWS*1..3]->(t:PyVlpPerson)
+            WHERE s.name = 'P1' AND t.name = 'P4'
+            RETURN nodes(p) AS ns
+        """)
+        await where_match.run()
+        assert len(where_match.results) == 1
+        where_names = [n["name"] for n in where_match.results[0]["ns"]]
+        assert where_names == ["P1", "P2", "P3", "P4"]
+
+        # Cleanup
+        await Runner("DELETE VIRTUAL (:PyVlpPerson)-[:PY_VLP_KNOWS]-(:PyVlpPerson)").run()
+        await Runner("DELETE VIRTUAL (:PyVlpPerson)").run()
+
+    @pytest.mark.asyncio
+    async def test_length_returns_relationship_count_in_path(self):
+        """length(path) should return the number of relationships in the path."""
+        await Runner("""
+            CREATE VIRTUAL (:PyLenPerson) AS {
+                UNWIND [
+                    {id: 1, name: 'P1'},
+                    {id: 2, name: 'P2'},
+                    {id: 3, name: 'P3'},
+                    {id: 4, name: 'P4'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLenPerson)-[:PY_LEN_KNOWS]-(:PyLenPerson) AS {
+                UNWIND [
+                    {left_id: 1, right_id: 2},
+                    {left_id: 2, right_id: 3},
+                    {left_id: 3, right_id: 4}
+                ] AS record
+                RETURN record.left_id AS left_id, record.right_id AS right_id
+            }
+        """).run()
+
+        # Single-hop path -> length 1.
+        single = Runner("""
+            MATCH p=(:PyLenPerson {name: 'P1'})-[:PY_LEN_KNOWS]->(:PyLenPerson {name: 'P2'})
+            RETURN length(p) AS len
+        """)
+        await single.run()
+        assert len(single.results) == 1
+        assert single.results[0] == {"len": 1}
+
+        # 3-hop variable-length path -> length 3.
+        multi = Runner("""
+            MATCH p=(:PyLenPerson {name: 'P1'})-[:PY_LEN_KNOWS*1..3]->(:PyLenPerson {name: 'P4'})
+            RETURN length(p) AS len
+        """)
+        await multi.run()
+        assert len(multi.results) == 1
+        assert multi.results[0] == {"len": 3}
+
+        # length(null) -> 0.
+        null_case = Runner("RETURN length(null) AS len")
+        await null_case.run()
+        assert len(null_case.results) == 1
+        assert null_case.results[0] == {"len": 0}
+
+        # length() rejects non-array input.
+        with pytest.raises(ValueError, match=r"length\(\) expects a path"):
+            await Runner("RETURN length(42) AS len").run()
+
+        # Cleanup
+        await Runner("DELETE VIRTUAL (:PyLenPerson)-[:PY_LEN_KNOWS]-(:PyLenPerson)").run()
+        await Runner("DELETE VIRTUAL (:PyLenPerson)").run()

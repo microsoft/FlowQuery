@@ -1384,3 +1384,39 @@ test("Regular JSON array still parses correctly alongside list comprehension", (
     expect(ast.print()).toContain("JSONArray");
     expect(ast.print()).not.toContain("ListComprehension");
 });
+
+test("Test reserved keyword 'end' usable as node variable name", () => {
+    // Repro: MATCH (end:User) used to throw
+    // "Expected closing parenthesis for node definition" because END is a reserved
+    // keyword (CASE..WHEN..THEN..ELSE..END). In a node-definition position the
+    // identifier slot is unambiguous, so any keyword should be accepted.
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (end:User) RETURN end");
+    const match: Match = ast.firstChild() as Match;
+    const node = match.patterns[0].chain[0] as Node;
+    expect(node.identifier).toBe("end");
+    expect(node.label).toBe("User");
+});
+
+test("Test reserved keywords usable as node variable names", () => {
+    // All Cypher keywords that are restricted by isKeywordThatCannotBeIdentifier()
+    // should still be usable as node variable names inside ( ... ).
+    const parser = new Parser();
+    for (const name of ["end", "case", "when", "then", "else", "null"]) {
+        const ast = parser.parse(`MATCH (${name}:User) RETURN ${name}`);
+        const match: Match = ast.firstChild() as Match;
+        const node = match.patterns[0].chain[0] as Node;
+        expect(node.identifier).toBe(name);
+        expect(node.label).toBe("User");
+    }
+});
+
+test("Test reserved keyword 'end' usable as relationship variable name", () => {
+    // Symmetric to the node fix: [end:KNOWS] should also be allowed.
+    const parser = new Parser();
+    const ast = parser.parse("MATCH (a:User)-[end:KNOWS]->(b:User) RETURN end");
+    const match: Match = ast.firstChild() as Match;
+    const rel = match.patterns[0].chain[1] as Relationship;
+    expect(rel.identifier).toBe("end");
+    expect(rel.type).toBe("KNOWS");
+});

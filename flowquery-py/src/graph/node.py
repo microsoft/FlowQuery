@@ -133,10 +133,18 @@ class Node(ASTNode):
                 current = self._data.current(hop)
                 if current is not None:
                     self.set_value(current)
-                    if not self._matches_properties(hop):
-                        continue
+                    # Always record this node as the endNode of the incoming
+                    # relationship match. For variable-length patterns, the same
+                    # target node instance is reused at every intermediate hop, so
+                    # we must set end_node BEFORE filtering on this node's
+                    # properties. Otherwise, intermediate matches keep
+                    # endNode=None and pattern values collapse to
+                    # [startNode, endNode] when the property filter only matches
+                    # the final node in a *m..n traversal.
                     if self._incoming:
                         self._incoming.set_end_node(self)
+                    if not self._matches_properties(hop):
+                        continue
                     if self._outgoing and self._value:
                         async for _ in self._outgoing.find(self._value['id'], hop):
                             yield

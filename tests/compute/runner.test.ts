@@ -6321,3 +6321,138 @@ test("Test schema with same relationship type between different node labels", as
     await new Runner("DELETE VIRTUAL (:SchMovie)").run();
     await new Runner("DELETE VIRTUAL (:SchFood)").run();
 });
+
+test("Reserved keyword 'end' works end-to-end as a node variable name", async () => {
+    // Bug repro: prior to the parser fix, MATCH (end:KwUser) threw
+    // "Expected closing parenthesis for node definition".
+    await new Runner(`
+        CREATE VIRTUAL (:KwUser) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (end:KwUser)
+        WHERE end.name = 'Alice'
+        RETURN end.name AS name
+    `);
+    await match.run();
+    expect(match.results.length).toBe(1);
+    expect(match.results[0]).toEqual({ name: "Alice" });
+
+    // Cleanup
+    await new Runner("DELETE VIRTUAL (:KwUser)").run();
+});
+
+test("Variable-length path with property filter on end node still yields intermediate nodes", async () => {
+    // Bug repro: when a *m..n pattern had a property filter on the end node
+    // (e.g. (t:User {displayName: 'D'}) or WHERE t.x = 'y'), the intermediate
+    // matches' endNode was never populated, so nodes(p) collapsed to
+    // [startNode, endNode] regardless of how many hops were traversed.
+    await new Runner(`
+        CREATE VIRTUAL (:VlpPerson) AS {
+            UNWIND [
+                {id: 1, name: 'P1'},
+                {id: 2, name: 'P2'},
+                {id: 3, name: 'P3'},
+                {id: 4, name: 'P4'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:VlpPerson)-[:VLP_KNOWS]-(:VlpPerson) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+
+    // Inline property filter on end node — 3-hop path must include all 4 nodes.
+    const inlineMatch = new Runner(`
+        MATCH p=(s:VlpPerson {name: 'P1'})-[:VLP_KNOWS*1..3]->(t:VlpPerson {name: 'P4'})
+        RETURN nodes(p) AS ns
+    `);
+    await inlineMatch.run();
+    expect(inlineMatch.results.length).toBe(1);
+    const inlineNames = inlineMatch.results[0].ns.map((n: any) => n.name);
+    expect(inlineNames).toEqual(["P1", "P2", "P3", "P4"]);
+
+    // Equivalent WHERE filter — same expectation.
+    const whereMatch = new Runner(`
+        MATCH p=(s:VlpPerson)-[:VLP_KNOWS*1..3]->(t:VlpPerson)
+        WHERE s.name = 'P1' AND t.name = 'P4'
+        RETURN nodes(p) AS ns
+    `);
+    await whereMatch.run();
+    expect(whereMatch.results.length).toBe(1);
+    const whereNames = whereMatch.results[0].ns.map((n: any) => n.name);
+    expect(whereNames).toEqual(["P1", "P2", "P3", "P4"]);
+
+    // Cleanup
+    await new Runner("DELETE VIRTUAL (:VlpPerson)-[:VLP_KNOWS]-(:VlpPerson)").run();
+    await new Runner("DELETE VIRTUAL (:VlpPerson)").run();
+});
+
+test("length() returns number of relationships in a path", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:LenPerson) AS {
+            UNWIND [
+                {id: 1, name: 'P1'},
+                {id: 2, name: 'P2'},
+                {id: 3, name: 'P3'},
+                {id: 4, name: 'P4'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:LenPerson)-[:LEN_KNOWS]-(:LenPerson) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3},
+                {left_id: 3, right_id: 4}
+            ] AS record
+            RETURN record.left_id AS left_id, record.right_id AS right_id
+        }
+    `).run();
+
+    // Single-hop path -> length 1.
+    const single = new Runner(`
+        MATCH p=(:LenPerson {name: 'P1'})-[:LEN_KNOWS]->(:LenPerson {name: 'P2'})
+        RETURN length(p) AS len
+    `);
+    await single.run();
+    expect(single.results.length).toBe(1);
+    expect(single.results[0]).toEqual({ len: 1 });
+
+    // 3-hop variable-length path -> length 3.
+    const multi = new Runner(`
+        MATCH p=(:LenPerson {name: 'P1'})-[:LEN_KNOWS*1..3]->(:LenPerson {name: 'P4'})
+        RETURN length(p) AS len
+    `);
+    await multi.run();
+    expect(multi.results.length).toBe(1);
+    expect(multi.results[0]).toEqual({ len: 3 });
+
+    // length(null) -> 0.
+    const nullCase = new Runner("RETURN length(null) AS len");
+    await nullCase.run();
+    expect(nullCase.results.length).toBe(1);
+    expect(nullCase.results[0]).toEqual({ len: 0 });
+
+    // length() rejects non-array input.
+    await expect(new Runner("RETURN length(42) AS len").run()).rejects.toThrow(
+        "length() expects a path"
+    );
+
+    // Cleanup
+    await new Runner("DELETE VIRTUAL (:LenPerson)-[:LEN_KNOWS]-(:LenPerson)").run();
+    await new Runner("DELETE VIRTUAL (:LenPerson)").run();
+});

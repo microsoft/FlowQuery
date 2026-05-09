@@ -1,6 +1,6 @@
 """Executes a FlowQuery statement and retrieves the results."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..graph.data_cache import DataCache
@@ -13,16 +13,24 @@ from ..parsing.operations.delete_node import DeleteNode
 from ..parsing.operations.delete_relationship import DeleteRelationship
 from ..parsing.operations.operation import Operation
 from ..parsing.parser import Parser
+from ..parsing.statement_info_crawler import StatementInfo, StatementInfoCrawler
 
 
 @dataclass
 class RunnerMetadata:
-    """Metadata about the operations performed by a Runner execution."""
+    """Metadata about the operations performed by a Runner execution.
+
+    The four counters track CREATE/DELETE VIRTUAL operations. The optional
+    :attr:`info` field carries deeper structural information about the
+    statement(s) — labels, relationship types, sources, and properties —
+    produced by :class:`~..parsing.statement_info_crawler.StatementInfoCrawler`.
+    """
 
     virtual_nodes_created: int = 0
     virtual_relationships_created: int = 0
     virtual_nodes_deleted: int = 0
     virtual_relationships_deleted: int = 0
+    info: Optional[StatementInfo] = field(default=None)
 
 
 class _ParsedStatement:
@@ -91,7 +99,10 @@ class Runner:
         self._metadata = self._compute_metadata()
 
     def _compute_metadata(self) -> RunnerMetadata:
-        """Walks all statement ASTs to count CREATE/DELETE operations for metadata."""
+        """Walks all statement ASTs to count CREATE/DELETE operations and to
+        crawl the statements for richer structural info via
+        :class:`~..parsing.statement_info_crawler.StatementInfoCrawler`.
+        """
         metadata = RunnerMetadata()
         for stmt in self._statements:
             op: Optional[Operation] = stmt.first
@@ -105,6 +116,9 @@ class Runner:
                 elif isinstance(op, DeleteRelationship):
                     metadata.virtual_relationships_deleted += 1
                 op = op.next
+        metadata.info = StatementInfoCrawler().crawl(
+            [s.ast for s in self._statements]
+        )
         return metadata
 
     async def run(self) -> None:
@@ -150,12 +164,14 @@ class Runner:
     def metadata(self) -> RunnerMetadata:
         """Gets metadata about the operations in this query.
 
-        Returns:
-            Counts of virtual nodes/relationships created and deleted
+        Returns a deep copy so callers can mutate the result without affecting
+        subsequent reads.
         """
+        m = self._metadata
         return RunnerMetadata(
-            virtual_nodes_created=self._metadata.virtual_nodes_created,
-            virtual_relationships_created=self._metadata.virtual_relationships_created,
-            virtual_nodes_deleted=self._metadata.virtual_nodes_deleted,
-            virtual_relationships_deleted=self._metadata.virtual_relationships_deleted,
+            virtual_nodes_created=m.virtual_nodes_created,
+            virtual_relationships_created=m.virtual_relationships_created,
+            virtual_nodes_deleted=m.virtual_nodes_deleted,
+            virtual_relationships_deleted=m.virtual_relationships_deleted,
+            info=StatementInfoCrawler.clone(m.info) if m.info is not None else None,
         )

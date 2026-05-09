@@ -6,6 +6,12 @@ from .ast_node import ASTNode
 from .base_parser import BaseParser
 from .context import Context
 from .parser import Parser
+from .statement_info_crawler import (
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+    StatementInfoCrawler,
+)
 
 __all__ = [
     "ASTNode",
@@ -14,4 +20,8 @@ __all__ = [
     "AliasOption",
     "BaseParser",
     "Parser",
+    "StatementInfo",
+    "StatementInfoCrawler",
+    "NodeInfo",
+    "RelationshipInfo",
 ]

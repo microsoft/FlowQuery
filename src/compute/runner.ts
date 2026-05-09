@@ -8,15 +8,28 @@ import DeleteNode from "../parsing/operations/delete_node";
 import DeleteRelationship from "../parsing/operations/delete_relationship";
 import Operation from "../parsing/operations/operation";
 import Parser from "../parsing/parser";
+import StatementInfoCrawler, { StatementInfo } from "../parsing/statement_info_crawler";
+
+export type { StatementInfo } from "../parsing/statement_info_crawler";
 
 /**
  * Metadata about the operations performed by a Runner execution.
+ *
+ * The four counters track CREATE/DELETE VIRTUAL operations. The optional
+ * `info` field carries deeper structural information about the statement(s)
+ * — labels, relationship types, sources, and properties — produced by
+ * {@link StatementInfoCrawler}.
  */
 export interface RunnerMetadata {
     virtual_nodes_created: number;
     virtual_relationships_created: number;
     virtual_nodes_deleted: number;
     virtual_relationships_deleted: number;
+    /**
+     * Optional structural info produced by walking the parsed statement(s).
+     * Populated by the Runner whenever metadata is requested.
+     */
+    info?: StatementInfo;
 }
 
 interface ParsedStatement {
@@ -90,7 +103,9 @@ class Runner {
     }
 
     /**
-     * Walks all statement ASTs to count CREATE/DELETE operations for metadata.
+     * Walks all statement ASTs to count CREATE/DELETE operations and to
+     * crawl the statements for richer structural info via
+     * {@link StatementInfoCrawler}.
      */
     private computeMetadata(): RunnerMetadata {
         const metadata: RunnerMetadata = {
@@ -109,6 +124,7 @@ class Runner {
                 op = op.next;
             }
         }
+        metadata.info = new StatementInfoCrawler().crawl(this._statements.map((s) => s.ast));
         return metadata;
     }
 
@@ -170,10 +186,18 @@ class Runner {
     /**
      * Gets metadata about the operations in this query.
      *
-     * @returns Counts of virtual nodes/relationships created and deleted
+     * Returns a deep copy so callers can mutate the result without affecting
+     * subsequent reads.
      */
     public get metadata(): RunnerMetadata {
-        return { ...this._metadata };
+        const m = this._metadata;
+        return {
+            virtual_nodes_created: m.virtual_nodes_created,
+            virtual_relationships_created: m.virtual_relationships_created,
+            virtual_nodes_deleted: m.virtual_nodes_deleted,
+            virtual_relationships_deleted: m.virtual_relationships_deleted,
+            info: m.info ? StatementInfoCrawler.clone(m.info) : undefined,
+        };
     }
 }
 

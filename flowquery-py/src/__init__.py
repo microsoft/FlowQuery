@@ -20,11 +20,21 @@ from .parsing.functions.function_metadata import (
 from .parsing.functions.predicate_function import PredicateFunction
 from .parsing.functions.reducer_element import ReducerElement
 from .parsing.parser import Parser
+from .parsing.statement_info_crawler import (
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+    StatementInfoCrawler,
+)
 
 __all__ = [
     "FlowQuery",
     "Runner",
     "RunnerMetadata",
+    "StatementInfo",
+    "StatementInfoCrawler",
+    "NodeInfo",
+    "RelationshipInfo",
     "CommandLine",
     "Parser",
     "Function",

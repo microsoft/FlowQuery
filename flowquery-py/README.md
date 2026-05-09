@@ -46,12 +46,24 @@ implementation. It reports counts of virtual nodes and relationships
 created/deleted plus an optional `info: StatementInfo` describing the
 _structure_ the query touches — independent of execution.
 
-`StatementInfo` captures the node labels and relationship types referenced,
-the data sources backing the underlying virtual definitions, and the
-node/relationship properties accessed by the query (e.g. `n.name`, not the
-columns produced by the virtual definition's inner sub-query). The
-per-entity `nodes` and `relationships` maps give end-to-end lineage from a
-property to its data source:
+`StatementInfo` captures:
+
+- The node labels and relationship types referenced.
+- The data sources backing the underlying virtual definitions.
+- The node/relationship properties **consumed** by the query —
+  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
+  `ORDER BY`, or function arguments, plus inline pattern properties
+  like `(u:User {id: 'rick.o'})`.
+- The properties **declared** by each virtual's `RETURN` clause via
+  `info.declared`, so you can validate that a query references only
+  declared properties.
+- Literal values supplied for properties at the call site via
+  `info.nodes[label].literal_values` — collected from inline pattern
+  properties and from equality / `IN` predicates such as
+  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
+
+The per-entity `nodes` and `relationships` maps give end-to-end lineage
+from a property to its data source:
 
 ```python
 from flowquery import Runner
@@ -59,30 +71,47 @@ from flowquery import Runner
 runner = Runner("""
     CREATE VIRTUAL (:City) AS {
         LOAD JSON FROM "https://example.com/cities" AS c
-        RETURN c.id AS id, c.name AS name
+        RETURN c.id AS id, c.name AS name, c.country AS country
     };
     CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
         LOAD JSON FROM "https://example.com/flights" AS f
         RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
     };
-    MATCH (a:City)-[r:FLIGHT]->(b:City)
+    MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+    WHERE b.country IN ['US', 'CA']
     RETURN a.name AS origin, b.name AS destination, r.airline AS airline
 """)
 info = runner.metadata.info
+
 print(info.nodes)
-# {'City': NodeInfo(properties=['name'], sources=['https://example.com/cities'])}
+# {'City': NodeInfo(
+#     properties=['country', 'name'],
+#     sources=['https://example.com/cities'],
+#     literal_values={'country': ['US', 'CA'], 'name': ['NYC']},
+# )}
 print(info.relationships)
-# {'FLIGHT': RelationshipInfo(properties=['airline'], sources=['https://example.com/flights'])}
+# {'FLIGHT': RelationshipInfo(
+#     properties=['airline'],
+#     sources=['https://example.com/flights'],
+#     literal_values={},
+# )}
+print(info.declared.nodes['City'])
+# DeclaredEntityInfo(
+#     properties=['country', 'id', 'name'],
+#     sources=['https://example.com/cities'],
+# )
 print(info.sources)
 # ['https://example.com/cities', 'https://example.com/flights']
 ```
 
-`StatementInfo` resolves sources for **any** virtual the query touches —
-both inline `CREATE VIRTUAL` clauses and previously-registered virtuals
-reached via `MATCH` or `DELETE`. The flat `node_labels`,
-`relationship_types`, `sources`, `node_properties`, and
+`StatementInfo` resolves sources and declared schemas for **any** virtual
+the query touches — both inline `CREATE VIRTUAL` clauses and
+previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
+`node_labels`, `relationship_types`, `sources`, `node_properties`, and
 `relationship_properties` fields stay in sync with the per-entity `nodes`
-and `relationships` maps.
+and `relationships` maps. Only purely literal AST subtrees end up in
+`literal_values` — values that depend on parameters, references,
+f-strings, or subqueries are skipped.
 
 The same `StatementInfoCrawler` can be used directly on any parsed AST
 without going through a `Runner`:

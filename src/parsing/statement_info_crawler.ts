@@ -15,6 +15,27 @@ import Match from "./operations/match";
 import Operation from "./operations/operation";
 
 /**
+ * Per-entity lineage for a node label: which properties the query
+ * accesses on it, and which sources (URLs / file URIs / async-function
+ * names) back the virtual definition for that label.
+ */
+export interface NodeInfo {
+    properties: string[];
+    sources: string[];
+}
+
+/**
+ * Per-entity lineage for a relationship type: which properties the query
+ * accesses on it, and which sources back the virtual definitions for
+ * that type. A single type may have multiple sources when it spans
+ * several `(:From)-[:Type]-(:To)` definitions.
+ */
+export interface RelationshipInfo {
+    properties: string[];
+    sources: string[];
+}
+
+/**
  * Structural information extracted from a parsed FlowQuery statement.
  *
  * Captures the node labels, relationship types, data sources, and properties
@@ -22,6 +43,10 @@ import Operation from "./operations/operation";
  * The properties listed are those accessed by the *query itself* (e.g.
  * `n.name` in a MATCH/RETURN/WHERE), not the columns produced by the
  * underlying virtual node/relationship definitions.
+ *
+ * To trace the full lineage from a property to its source, use the
+ * {@link nodes} / {@link relationships} maps. Each entry there links a
+ * label/type to its accessed properties and the sources that back it.
  */
 export interface StatementInfo {
     /** Unique node labels referenced by MATCH/CREATE/DELETE in the statement(s). */
@@ -40,6 +65,16 @@ export interface StatementInfo {
     node_properties: Record<string, string[]>;
     /** Relationship properties accessed by the statement, grouped by type. */
     relationship_properties: Record<string, string[]>;
+    /**
+     * Per-label lineage: each accessed node label mapped to the
+     * properties accessed on it and the sources that back it.
+     */
+    nodes: Record<string, NodeInfo>;
+    /**
+     * Per-type lineage: each accessed relationship type mapped to the
+     * properties accessed on it and the sources that back it.
+     */
+    relationships: Record<string, RelationshipInfo>;
 }
 
 /**
@@ -61,12 +96,19 @@ export interface StatementInfo {
 class StatementInfoCrawler {
     private _nodeLabels: Set<string> = new Set();
     private _relTypes: Set<string> = new Set();
-    private _sources: Set<string> = new Set();
     private _nodeProps: Map<string, Set<string>> = new Map();
     private _relProps: Map<string, Set<string>> = new Map();
+    private _nodeSources: Map<string, Set<string>> = new Map();
+    private _relSources: Map<string, Set<string>> = new Map();
     private _ownCreatedNodeLabels: Set<string> = new Set();
     private _ownCreatedRelTypes: Set<string> = new Set();
-    private _ownCreateStatements: ASTNode[] = [];
+    /**
+     * For each inline CREATE VIRTUAL clause, the (label or type) it
+     * declares and its inner statement AST. The label key receives the
+     * sources collected from the statement during {@link resolveRegisteredSources}.
+     */
+    private _ownNodeCreates: Array<{ label: string; statement: ASTNode }> = [];
+    private _ownRelCreates: Array<{ type: string; statement: ASTNode }> = [];
 
     /**
      * Walks one or more statement ASTs and returns the merged structural info.
@@ -94,12 +136,14 @@ class StatementInfoCrawler {
     private reset(): void {
         this._nodeLabels = new Set();
         this._relTypes = new Set();
-        this._sources = new Set();
         this._nodeProps = new Map();
         this._relProps = new Map();
+        this._nodeSources = new Map();
+        this._relSources = new Map();
         this._ownCreatedNodeLabels = new Set();
         this._ownCreatedRelTypes = new Set();
-        this._ownCreateStatements = [];
+        this._ownNodeCreates = [];
+        this._ownRelCreates = [];
     }
 
     private crawlStatement(root: ASTNode): void {
@@ -121,17 +165,21 @@ class StatementInfoCrawler {
             if (node?.label) {
                 this._nodeLabels.add(node.label);
                 this._ownCreatedNodeLabels.add(node.label);
+                if (op.statement) {
+                    this._ownNodeCreates.push({ label: node.label, statement: op.statement });
+                }
             }
-            if (op.statement) this._ownCreateStatements.push(op.statement);
         } else if (op instanceof CreateRelationship) {
             const rel = op.relationship;
             if (rel?.type) {
                 this._relTypes.add(rel.type);
                 this._ownCreatedRelTypes.add(rel.type);
+                if (op.statement) {
+                    this._ownRelCreates.push({ type: rel.type, statement: op.statement });
+                }
             }
             if (rel?.source?.label) this._nodeLabels.add(rel.source.label);
             if (rel?.target?.label) this._nodeLabels.add(rel.target.label);
-            if (op.statement) this._ownCreateStatements.push(op.statement);
         } else if (op instanceof DeleteNode) {
             if (op.node?.label) this._nodeLabels.add(op.node.label);
         } else if (op instanceof DeleteRelationship) {
@@ -172,8 +220,11 @@ class StatementInfoCrawler {
 
     private resolveRegisteredSources(): void {
         // Sources from inline CREATE VIRTUAL clauses in the crawled statements.
-        for (const stmt of this._ownCreateStatements) {
-            this.collectSources(stmt);
+        for (const { label, statement } of this._ownNodeCreates) {
+            this.collectSources(statement, this.getOrCreate(this._nodeSources, label));
+        }
+        for (const { type, statement } of this._ownRelCreates) {
+            this.collectSources(statement, this.getOrCreate(this._relSources, type));
         }
 
         // Sources from already-registered virtuals that the crawled statements
@@ -182,16 +233,32 @@ class StatementInfoCrawler {
         for (const label of this._nodeLabels) {
             if (this._ownCreatedNodeLabels.has(label)) continue;
             const physical = db.nodes.get(label);
-            if (physical?.statement) this.collectSources(physical.statement);
+            if (physical?.statement) {
+                this.collectSources(physical.statement, this.getOrCreate(this._nodeSources, label));
+            }
         }
         for (const type of this._relTypes) {
             if (this._ownCreatedRelTypes.has(type)) continue;
             const typeMap = db.relationships.get(type);
             if (typeMap === undefined) continue;
             for (const physical of typeMap.values()) {
-                if (physical.statement) this.collectSources(physical.statement);
+                if (physical.statement) {
+                    this.collectSources(
+                        physical.statement,
+                        this.getOrCreate(this._relSources, type)
+                    );
+                }
             }
         }
+    }
+
+    private getOrCreate(map: Map<string, Set<string>>, key: string): Set<string> {
+        let set = map.get(key);
+        if (set === undefined) {
+            set = new Set();
+            map.set(key, set);
+        }
+        return set;
     }
 
     private collectPropertyAccesses(root: ASTNode): void {
@@ -230,7 +297,7 @@ class StatementInfoCrawler {
         }
     }
 
-    private collectSources(statement: ASTNode): void {
+    private collectSources(statement: ASTNode, target: Set<string>): void {
         let op: Operation | null = null;
         try {
             op = statement.firstChild() as Operation;
@@ -241,11 +308,11 @@ class StatementInfoCrawler {
             if (op instanceof Load) {
                 if (op.isAsyncFunction) {
                     const name = op.asyncFunction?.name;
-                    if (typeof name === "string" && name.length > 0) this._sources.add(name);
+                    if (typeof name === "string" && name.length > 0) target.add(name);
                 } else {
                     try {
                         const from = op.from;
-                        if (typeof from === "string" && from.length > 0) this._sources.add(from);
+                        if (typeof from === "string" && from.length > 0) target.add(from);
                     } catch {
                         // Dynamic source (e.g. f-string with unresolved refs);
                         // skip rather than fail metadata extraction.
@@ -281,12 +348,39 @@ class StatementInfoCrawler {
     }
 
     private snapshot(): StatementInfo {
+        const allSources = new Set<string>();
+        const nodes: Record<string, NodeInfo> = {};
+        for (const label of this._nodeLabels) {
+            const props = this._nodeProps.get(label);
+            const sources = this._nodeSources.get(label);
+            if (sources !== undefined) {
+                for (const s of sources) allSources.add(s);
+            }
+            nodes[label] = {
+                properties: props ? Array.from(props).sort() : [],
+                sources: sources ? Array.from(sources).sort() : [],
+            };
+        }
+        const relationships: Record<string, RelationshipInfo> = {};
+        for (const type of this._relTypes) {
+            const props = this._relProps.get(type);
+            const sources = this._relSources.get(type);
+            if (sources !== undefined) {
+                for (const s of sources) allSources.add(s);
+            }
+            relationships[type] = {
+                properties: props ? Array.from(props).sort() : [],
+                sources: sources ? Array.from(sources).sort() : [],
+            };
+        }
         const info: StatementInfo = {
             node_labels: Array.from(this._nodeLabels).sort(),
             relationship_types: Array.from(this._relTypes).sort(),
-            sources: Array.from(this._sources).sort(),
+            sources: Array.from(allSources).sort(),
             node_properties: {},
             relationship_properties: {},
+            nodes,
+            relationships,
         };
         for (const [label, props] of this._nodeProps) {
             info.node_properties[label] = Array.from(props).sort();
@@ -306,12 +400,26 @@ class StatementInfoCrawler {
             for (const [k, v] of Object.entries(props)) out[k] = [...v];
             return out;
         };
+        const cloneEntities = <T extends NodeInfo | RelationshipInfo>(
+            entities: Record<string, T>
+        ): Record<string, T> => {
+            const out: Record<string, T> = {};
+            for (const [k, v] of Object.entries(entities)) {
+                out[k] = {
+                    properties: [...v.properties],
+                    sources: [...v.sources],
+                } as T;
+            }
+            return out;
+        };
         return {
             node_labels: [...info.node_labels],
             relationship_types: [...info.relationship_types],
             sources: [...info.sources],
             node_properties: cloneProps(info.node_properties),
             relationship_properties: cloneProps(info.relationship_properties),
+            nodes: cloneEntities(info.nodes),
+            relationships: cloneEntities(info.relationships),
         };
     }
 }

@@ -5978,6 +5978,365 @@ class TestMetadata:
         assert meta.virtual_nodes_created == 1
 
 
+class TestStatementInfo:
+    """Tests for the structural ``info`` field on RunnerMetadata."""
+
+    def test_simple_return_has_empty_info(self):
+        runner = Runner("RETURN 1 AS x")
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == []
+        assert info.relationship_types == []
+        assert info.sources == []
+        assert info.node_properties == {}
+        assert info.relationship_properties == {}
+
+    @pytest.mark.asyncio
+    async def test_captures_node_labels_and_properties_from_match(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoLabelPerson) AS {
+                UNWIND [{id: 1, name: 'Alice', age: 30}] AS r
+                RETURN r.id AS id, r.name AS name, r.age AS age
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:PyInfoLabelPerson {name: 'Alice'})
+            WHERE p.age > 18
+            RETURN p.name AS name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoLabelPerson"]
+        assert info.relationship_types == []
+        assert info.node_properties == {
+            "PyInfoLabelPerson": ["age", "name"],
+        }
+        assert info.relationship_properties == {}
+        await Runner("DELETE VIRTUAL (:PyInfoLabelPerson)").run()
+
+    @pytest.mark.asyncio
+    async def test_captures_relationship_types_and_properties(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoCity) AS {
+                UNWIND [{id: 1, name: 'NYC'}, {id: 2, name: 'LA'}] AS r
+                RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoCity)-[:PY_INFO_FLIGHT]-(:PyInfoCity) AS {
+                UNWIND [{left_id: 1, right_id: 2, airline: 'X'}] AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id, r.airline AS airline
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:PyInfoCity)-[r:PY_INFO_FLIGHT]->(b:PyInfoCity)
+            RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoCity"]
+        assert info.relationship_types == ["PY_INFO_FLIGHT"]
+        assert info.node_properties == {"PyInfoCity": ["name"]}
+        assert info.relationship_properties == {"PY_INFO_FLIGHT": ["airline"]}
+        await Runner("DELETE VIRTUAL (:PyInfoCity)-[:PY_INFO_FLIGHT]-(:PyInfoCity)").run()
+        await Runner("DELETE VIRTUAL (:PyInfoCity)").run()
+
+    def test_captures_sources_from_create_virtual_definitions(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyInfoSrcTodo) AS {
+                LOAD JSON FROM "https://example.com/todos" AS todo
+                RETURN todo.id AS id, todo.title AS title
+            };
+            CREATE VIRTUAL (:PyInfoSrcUser) AS {
+                LOAD JSON FROM "https://example.com/users" AS user
+                RETURN user.id AS id, user.name AS name
+            }
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.sources == [
+            "https://example.com/todos",
+            "https://example.com/users",
+        ]
+        assert info.node_labels == ["PyInfoSrcTodo", "PyInfoSrcUser"]
+
+    @pytest.mark.asyncio
+    async def test_captures_sources_from_registered_virtuals_via_match(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoRegisteredTodo) AS {
+                LOAD JSON FROM "https://example.com/registered-todos" AS todo
+                RETURN todo.id AS id, todo.title AS title
+            }
+        """).run()
+        runner = Runner("MATCH (t:PyInfoRegisteredTodo) RETURN t.title AS title")
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoRegisteredTodo"]
+        assert info.sources == ["https://example.com/registered-todos"]
+        assert info.node_properties == {"PyInfoRegisteredTodo": ["title"]}
+        await Runner("DELETE VIRTUAL (:PyInfoRegisteredTodo)").run()
+
+    @pytest.mark.asyncio
+    async def test_captures_sources_from_registered_relationships_via_match(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoRegCity) AS {
+                LOAD JSON FROM "https://example.com/cities" AS city
+                RETURN city.id AS id, city.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoRegCity)-[:PY_INFO_REG_ROUTE]-(:PyInfoRegCity) AS {
+                LOAD JSON FROM "https://example.com/routes" AS route
+                RETURN route.left_id AS left_id, route.right_id AS right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (a:PyInfoRegCity)-[:PY_INFO_REG_ROUTE]->(b:PyInfoRegCity)
+            RETURN a.name AS origin, b.name AS destination
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoRegCity"]
+        assert info.relationship_types == ["PY_INFO_REG_ROUTE"]
+        assert info.sources == [
+            "https://example.com/cities",
+            "https://example.com/routes",
+        ]
+        await Runner(
+            "DELETE VIRTUAL (:PyInfoRegCity)-[:PY_INFO_REG_ROUTE]-(:PyInfoRegCity)"
+        ).run()
+        await Runner("DELETE VIRTUAL (:PyInfoRegCity)").run()
+
+    def test_captures_delete_virtual_labels_and_types(self):
+        runner = Runner("""
+            DELETE VIRTUAL (:PyInfoDelLabel);
+            DELETE VIRTUAL (:PyInfoDelLeft)-[:PY_INFO_DEL_TYPE]-(:PyInfoDelRight)
+        """)
+        meta = runner.metadata
+        assert meta.virtual_nodes_deleted == 1
+        assert meta.virtual_relationships_deleted == 1
+        info = meta.info
+        assert info is not None
+        assert sorted(info.node_labels) == [
+            "PyInfoDelLabel",
+            "PyInfoDelLeft",
+            "PyInfoDelRight",
+        ]
+        assert info.relationship_types == ["PY_INFO_DEL_TYPE"]
+
+    @pytest.mark.asyncio
+    async def test_captures_ored_labels_and_relationship_types(self):
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoOrCat) AS {
+                UNWIND [{id: 1, name: 'Tom'}] AS r RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoOrDog) AS {
+                UNWIND [{id: 2, name: 'Rex'}] AS r RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoOrCat)-[:PY_INFO_OR_CHASES]-(:PyInfoOrDog) AS {
+                UNWIND [] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyInfoOrCat)-[:PY_INFO_OR_PLAYS]-(:PyInfoOrDog) AS {
+                UNWIND [] AS r RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (a:PyInfoOrCat|PyInfoOrDog)-[r:PY_INFO_OR_CHASES|PY_INFO_OR_PLAYS]->(b:PyInfoOrCat|PyInfoOrDog)
+            RETURN a.name AS x
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoOrCat", "PyInfoOrDog"]
+        assert info.relationship_types == ["PY_INFO_OR_CHASES", "PY_INFO_OR_PLAYS"]
+        # Property `name` accessed on `a` (labels OrCat|OrDog) should be
+        # recorded under both labels.
+        assert info.node_properties == {
+            "PyInfoOrCat": ["name"],
+            "PyInfoOrDog": ["name"],
+        }
+        await Runner(
+            "DELETE VIRTUAL (:PyInfoOrCat)-[:PY_INFO_OR_CHASES]-(:PyInfoOrDog)"
+        ).run()
+        await Runner(
+            "DELETE VIRTUAL (:PyInfoOrCat)-[:PY_INFO_OR_PLAYS]-(:PyInfoOrDog)"
+        ).run()
+        await Runner("DELETE VIRTUAL (:PyInfoOrCat)").run()
+        await Runner("DELETE VIRTUAL (:PyInfoOrDog)").run()
+
+    def test_does_not_include_properties_from_inside_create_virtual(self):
+        # The properties in the inner `RETURN r.id AS id, r.name AS name`
+        # belong to the virtual definition, not the outer query, and must
+        # not surface in node_properties.
+        runner = Runner("""
+            CREATE VIRTUAL (:PyInfoInnerOnly) AS {
+                UNWIND [{id: 1, name: 'A'}] AS r
+                RETURN r.id AS id, r.name AS name
+            }
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.node_labels == ["PyInfoInnerOnly"]
+        assert info.node_properties == {}
+
+    def test_info_is_a_copy(self):
+        runner = Runner("""
+            CREATE VIRTUAL (:PyInfoCopyNode) AS { RETURN 1 AS id }
+        """)
+        info1 = runner.metadata.info
+        assert info1 is not None
+        info1.node_labels.append("Mutated")
+        info1.sources.append("http://mutated")
+        info1.node_properties["Mutated"] = ["x"]
+        from flowquery.parsing.statement_info_crawler import NodeInfo
+        info1.nodes["Mutated"] = NodeInfo(properties=["x"], sources=["http://mutated"])
+        info2 = runner.metadata.info
+        assert info2 is not None
+        assert info2.node_labels == ["PyInfoCopyNode"]
+        assert info2.sources == []
+        assert info2.node_properties == {}
+        assert list(info2.nodes.keys()) == ["PyInfoCopyNode"]
+
+    @pytest.mark.asyncio
+    async def test_lineage_links_node_label_to_properties_and_sources(self):
+        from flowquery.parsing.statement_info_crawler import NodeInfo
+
+        await Runner("""
+            CREATE VIRTUAL (:PyLinPerson) AS {
+                LOAD JSON FROM "https://example.com/persons" AS p
+                RETURN p.id AS id, p.name AS name, p.age AS age
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (p:PyLinPerson)
+            WHERE p.age > 18
+            RETURN p.name AS name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes == {
+            "PyLinPerson": NodeInfo(
+                properties=["age", "name"],
+                sources=["https://example.com/persons"],
+            ),
+        }
+        assert info.relationships == {}
+        # Flat fields stay consistent with the per-entity lineage.
+        assert info.sources == ["https://example.com/persons"]
+        assert info.node_properties == {"PyLinPerson": ["age", "name"]}
+
+        await Runner("DELETE VIRTUAL (:PyLinPerson)").run()
+
+    @pytest.mark.asyncio
+    async def test_lineage_links_relationship_type_to_properties_and_sources(self):
+        from flowquery.parsing.statement_info_crawler import (
+            NodeInfo,
+            RelationshipInfo,
+        )
+
+        await Runner("""
+            CREATE VIRTUAL (:PyLinCity) AS {
+                LOAD JSON FROM "https://example.com/cities" AS c
+                RETURN c.id AS id, c.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLinCity)-[:PY_LIN_FLIGHT]-(:PyLinCity) AS {
+                LOAD JSON FROM "https://example.com/flights" AS f
+                RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (a:PyLinCity)-[r:PY_LIN_FLIGHT]->(b:PyLinCity)
+            RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.nodes == {
+            "PyLinCity": NodeInfo(
+                properties=["name"],
+                sources=["https://example.com/cities"],
+            ),
+        }
+        assert info.relationships == {
+            "PY_LIN_FLIGHT": RelationshipInfo(
+                properties=["airline"],
+                sources=["https://example.com/flights"],
+            ),
+        }
+        assert info.sources == [
+            "https://example.com/cities",
+            "https://example.com/flights",
+        ]
+
+        await Runner(
+            "DELETE VIRTUAL (:PyLinCity)-[:PY_LIN_FLIGHT]-(:PyLinCity)"
+        ).run()
+        await Runner("DELETE VIRTUAL (:PyLinCity)").run()
+
+    @pytest.mark.asyncio
+    async def test_lineage_aggregates_multiple_sources_for_one_relationship_type(self):
+        # Same SR_LIKES type backed by two physical relationships with
+        # different endpoint labels and different source URLs. The lineage
+        # entry for the type should list both sources.
+        await Runner("""
+            CREATE VIRTUAL (:PyLinPerson2) AS {
+                UNWIND [{id: 1, name: 'Alice'}] AS r RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLinMovie) AS {
+                UNWIND [{id: 1, title: 'X'}] AS r RETURN r.id AS id, r.title AS title
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLinFood) AS {
+                UNWIND [{id: 1, name: 'Pizza'}] AS r RETURN r.id AS id, r.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLinPerson2)-[:PY_LIN_LIKES]-(:PyLinMovie) AS {
+                LOAD JSON FROM "https://example.com/likes-movies" AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:PyLinPerson2)-[:PY_LIN_LIKES]-(:PyLinFood) AS {
+                LOAD JSON FROM "https://example.com/likes-food" AS r
+                RETURN r.left_id AS left_id, r.right_id AS right_id
+            }
+        """).run()
+
+        runner = Runner("""
+            MATCH (p:PyLinPerson2)-[:PY_LIN_LIKES]->(x)
+            RETURN p.name AS name
+        """)
+        info = runner.metadata.info
+        assert info is not None
+        assert info.relationships["PY_LIN_LIKES"].sources == [
+            "https://example.com/likes-food",
+            "https://example.com/likes-movies",
+        ]
+
+        await Runner(
+            "DELETE VIRTUAL (:PyLinPerson2)-[:PY_LIN_LIKES]-(:PyLinMovie)"
+        ).run()
+        await Runner(
+            "DELETE VIRTUAL (:PyLinPerson2)-[:PY_LIN_LIKES]-(:PyLinFood)"
+        ).run()
+        await Runner("DELETE VIRTUAL (:PyLinPerson2)").run()
+        await Runner("DELETE VIRTUAL (:PyLinMovie)").run()
+        await Runner("DELETE VIRTUAL (:PyLinFood)").run()
+
+
 class TestVirtualOrgChart:
     """Tests for the virtual org chart example from the README."""
 

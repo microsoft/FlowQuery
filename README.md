@@ -249,8 +249,61 @@ const runner = new FlowQuery("CREATE VIRTUAL (:X) AS { RETURN 1 AS id }; MATCH (
 await runner.run();
 console.log(runner.metadata);
 // { virtual_nodes_created: 1, virtual_relationships_created: 0,
-//   virtual_nodes_deleted: 0, virtual_relationships_deleted: 0 }
+//   virtual_nodes_deleted: 0, virtual_relationships_deleted: 0,
+//   info: { node_labels: ["X"], relationship_types: [], sources: [], ... } }
 ```
+
+#### Statement Info: Labels, Properties, and Source Lineage
+
+`metadata.info` carries a `StatementInfo` describing the _structure_ the
+query touches — independent of execution. It captures the node labels and
+relationship types referenced, the data sources backing the underlying
+virtual definitions, and the node/relationship properties accessed by the
+query (i.e. `n.name`, not the columns produced by the virtual definition's
+inner sub-query). This is useful for governance, lineage UIs, query-cost
+estimation, or routing decisions before the query runs.
+
+The same `StatementInfoCrawler` can also be used directly on any parsed
+AST without going through a `Runner`:
+
+```javascript
+import { StatementInfoCrawler } from "flowquery";
+
+const crawler = new StatementInfoCrawler();
+const info = crawler.crawl(parsedAst);
+```
+
+For end-to-end lineage from a property to its data source, use the
+per-entity `nodes` and `relationships` maps:
+
+```javascript
+const runner = new FlowQuery(`
+  CREATE VIRTUAL (:City) AS {
+    LOAD JSON FROM "https://example.com/cities" AS c
+    RETURN c.id AS id, c.name AS name
+  };
+  CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+    LOAD JSON FROM "https://example.com/flights" AS f
+    RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+  };
+  MATCH (a:City)-[r:FLIGHT]->(b:City)
+  RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+`);
+const { info } = runner.metadata;
+console.log(info.nodes);
+// { City: { properties: ["name"], sources: ["https://example.com/cities"] } }
+console.log(info.relationships);
+// { FLIGHT: { properties: ["airline"], sources: ["https://example.com/flights"] } }
+console.log(info.sources);
+// ["https://example.com/cities", "https://example.com/flights"]
+```
+
+`StatementInfo` resolves sources for **any** virtual the query touches — both
+inline `CREATE VIRTUAL` clauses and previously-registered virtuals reached
+via `MATCH` or `DELETE`. The flat `node_labels`, `relationship_types`,
+`sources`, `node_properties`, and `relationship_properties` fields stay in
+sync with the per-entity `nodes` / `relationships` maps and are convenient
+for quick aggregate checks.
 
 ### WHERE Clause
 

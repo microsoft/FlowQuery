@@ -39,6 +39,60 @@ await runner.run()
 print(runner.results)  # [{'result': 2}]
 ```
 
+### Statement Info: Labels, Properties, and Source Lineage
+
+The `Runner` exposes a `metadata` property that mirrors the TypeScript
+implementation. It reports counts of virtual nodes and relationships
+created/deleted plus an optional `info: StatementInfo` describing the
+_structure_ the query touches — independent of execution.
+
+`StatementInfo` captures the node labels and relationship types referenced,
+the data sources backing the underlying virtual definitions, and the
+node/relationship properties accessed by the query (e.g. `n.name`, not the
+columns produced by the virtual definition's inner sub-query). The
+per-entity `nodes` and `relationships` maps give end-to-end lineage from a
+property to its data source:
+
+```python
+from flowquery import Runner
+
+runner = Runner("""
+    CREATE VIRTUAL (:City) AS {
+        LOAD JSON FROM "https://example.com/cities" AS c
+        RETURN c.id AS id, c.name AS name
+    };
+    CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+        LOAD JSON FROM "https://example.com/flights" AS f
+        RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+    };
+    MATCH (a:City)-[r:FLIGHT]->(b:City)
+    RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+""")
+info = runner.metadata.info
+print(info.nodes)
+# {'City': NodeInfo(properties=['name'], sources=['https://example.com/cities'])}
+print(info.relationships)
+# {'FLIGHT': RelationshipInfo(properties=['airline'], sources=['https://example.com/flights'])}
+print(info.sources)
+# ['https://example.com/cities', 'https://example.com/flights']
+```
+
+`StatementInfo` resolves sources for **any** virtual the query touches —
+both inline `CREATE VIRTUAL` clauses and previously-registered virtuals
+reached via `MATCH` or `DELETE`. The flat `node_labels`,
+`relationship_types`, `sources`, `node_properties`, and
+`relationship_properties` fields stay in sync with the per-entity `nodes`
+and `relationships` maps.
+
+The same `StatementInfoCrawler` can be used directly on any parsed AST
+without going through a `Runner`:
+
+```python
+from flowquery import StatementInfoCrawler
+crawler = StatementInfoCrawler()
+info = crawler.crawl(parsed_ast)
+```
+
 ## Documentation
 
 - [Language Reference](https://github.com/microsoft/FlowQuery#language-reference) (clauses, expressions, functions, graph operations, and more)

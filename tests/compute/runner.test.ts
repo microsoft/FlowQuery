@@ -6666,8 +6666,124 @@ test("Test metadata info is a copy", () => {
     info1.node_labels.push("Mutated");
     info1.sources.push("http://mutated");
     info1.node_properties["Mutated"] = ["x"];
+    info1.nodes["Mutated"] = { properties: ["x"], sources: ["http://mutated"] };
     const info2 = runner.metadata.info!;
     expect(info2.node_labels).toEqual(["MetaCopyNode"]);
     expect(info2.sources).toEqual([]);
     expect(info2.node_properties).toEqual({});
+    expect(Object.keys(info2.nodes)).toEqual(["MetaCopyNode"]);
+});
+
+test("Test metadata lineage links node label to properties and sources", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinPerson) AS {
+            LOAD JSON FROM "https://example.com/persons" AS p
+            RETURN p.id AS id, p.name AS name, p.age AS age
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:MetaLinPerson)
+        WHERE p.age > 18
+        RETURN p.name AS name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes).toEqual({
+        MetaLinPerson: {
+            properties: ["age", "name"],
+            sources: ["https://example.com/persons"],
+        },
+    });
+    expect(info.relationships).toEqual({});
+    // Flat fields stay consistent with the per-entity lineage.
+    expect(info.sources).toEqual(["https://example.com/persons"]);
+    expect(info.node_properties).toEqual({ MetaLinPerson: ["age", "name"] });
+
+    await new Runner("DELETE VIRTUAL (:MetaLinPerson)").run();
+});
+
+test("Test metadata lineage links relationship type to properties and sources", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinCity) AS {
+            LOAD JSON FROM "https://example.com/cities" AS c
+            RETURN c.id AS id, c.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinCity)-[:META_LIN_FLIGHT]-(:MetaLinCity) AS {
+            LOAD JSON FROM "https://example.com/flights" AS f
+            RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (a:MetaLinCity)-[r:META_LIN_FLIGHT]->(b:MetaLinCity)
+        RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+    `);
+    const info = runner.metadata.info!;
+    expect(info.nodes).toEqual({
+        MetaLinCity: {
+            properties: ["name"],
+            sources: ["https://example.com/cities"],
+        },
+    });
+    expect(info.relationships).toEqual({
+        META_LIN_FLIGHT: {
+            properties: ["airline"],
+            sources: ["https://example.com/flights"],
+        },
+    });
+    expect(info.sources).toEqual(["https://example.com/cities", "https://example.com/flights"]);
+
+    await new Runner("DELETE VIRTUAL (:MetaLinCity)-[:META_LIN_FLIGHT]-(:MetaLinCity)").run();
+    await new Runner("DELETE VIRTUAL (:MetaLinCity)").run();
+});
+
+test("Test metadata lineage aggregates multiple sources for one relationship type", async () => {
+    // Same SR_LIKES type backed by two physical relationships with different
+    // endpoint labels and different source URLs. The lineage entry for the
+    // type should list both sources.
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinPerson2) AS {
+            UNWIND [{id: 1, name: 'Alice'}] AS r RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinMovie) AS {
+            UNWIND [{id: 1, title: 'X'}] AS r RETURN r.id AS id, r.title AS title
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinFood) AS {
+            UNWIND [{id: 1, name: 'Pizza'}] AS r RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinPerson2)-[:META_LIN_LIKES]-(:MetaLinMovie) AS {
+            LOAD JSON FROM "https://example.com/likes-movies" AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:MetaLinPerson2)-[:META_LIN_LIKES]-(:MetaLinFood) AS {
+            LOAD JSON FROM "https://example.com/likes-food" AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:MetaLinPerson2)-[:META_LIN_LIKES]->(x)
+        RETURN p.name AS name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.relationships.META_LIN_LIKES.sources).toEqual([
+        "https://example.com/likes-food",
+        "https://example.com/likes-movies",
+    ]);
+
+    await new Runner("DELETE VIRTUAL (:MetaLinPerson2)-[:META_LIN_LIKES]-(:MetaLinMovie)").run();
+    await new Runner("DELETE VIRTUAL (:MetaLinPerson2)-[:META_LIN_LIKES]-(:MetaLinFood)").run();
+    await new Runner("DELETE VIRTUAL (:MetaLinPerson2)").run();
+    await new Runner("DELETE VIRTUAL (:MetaLinMovie)").run();
+    await new Runner("DELETE VIRTUAL (:MetaLinFood)").run();
 });

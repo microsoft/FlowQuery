@@ -14,7 +14,7 @@ import {
     OutputSchema,
     ParameterSchema,
 } from "./parsing/functions/function_metadata";
-import type { StatementInfo } from "./parsing/statement_info_crawler";
+import type { NodeInfo, RelationshipInfo, StatementInfo } from "./parsing/statement_info_crawler";
 
 /**
  * List all registered functions with their metadata.
@@ -46,4 +46,4 @@ FlowQuery.getFunctionMetadata = function (name: string): FunctionMetadata | unde
 FlowQuery.Function = Function;
 
 export default FlowQuery;
-export type { RunnerMetadata, StatementInfo };
+export type { NodeInfo, RelationshipInfo, RunnerMetadata, StatementInfo };

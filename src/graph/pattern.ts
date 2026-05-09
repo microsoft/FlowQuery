@@ -1,5 +1,5 @@
 import ASTNode from "../parsing/ast_node";
-import DataResolver from "./data_resolver";
+import type DataResolver from "./data_resolver";
 import Node from "./node";
 import NodeData from "./node_data";
 import NodeReference from "./node_reference";
@@ -90,7 +90,12 @@ class Pattern extends ASTNode {
         }
     }
     public async fetchData(): Promise<void> {
-        const resolver = DataResolver.getInstance();
+        // Lazy require to avoid a load-time cycle:
+        // pattern → data_resolver → database → physical_node → runner →
+        // (parsing) → pattern_expression (extends Pattern). DataResolver
+        // is only used here, so importing it on first call is safe.
+        const DataResolverCtor: typeof DataResolver = require("./data_resolver").default;
+        const resolver = DataResolverCtor.getInstance();
         for (const element of this._chain) {
             if (
                 element.constructor === NodeReference ||

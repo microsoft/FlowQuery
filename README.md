@@ -227,7 +227,7 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 
 #### Multi-Statement Queries
 
-Multiple statements can be separated by semicolons. Only `CREATE VIRTUAL` and `DELETE VIRTUAL` statements may appear before the last statement. The last statement can be any valid query.
+Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
 
 ```cypher
 CREATE VIRTUAL (:Person) AS {
@@ -390,6 +390,115 @@ Removes duplicate rows from `RETURN` or `WITH`.
 UNWIND [1, 1, 2, 2] AS i RETURN DISTINCT i
 // [{ i: 1 }, { i: 2 }]
 ```
+
+### Bindings (`LET` / `UPDATE` / `MERGE INTO`)
+
+A **binding** is a named, mutable value that persists across statements in a multi-statement query. Bindings live in a flat per-query namespace, are introduced with `LET`, wholesale-replaced with `UPDATE`, row-filtered with `UPDATE … AS x DELETE WHERE …`, and per-row upserted/merged with `MERGE INTO … USING … ON … WHEN …`. Once bound, the value can be referenced anywhere an expression is allowed (e.g. as the source of `LOAD JSON FROM`, `UNWIND`, `MERGE INTO`'s `USING`, or directly inside an expression).
+
+#### LET
+
+`LET name = <expression-or-subquery>` introduces a new binding. The right-hand side can be any expression or a braced sub-query whose final `RETURN` provides the value.
+
+```cypher
+LET data = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+LET threshold = 10;
+LET fresh = {
+    UNWIND [1, 2, 3] AS n
+    RETURN n AS n
+};
+LOAD JSON FROM data AS d
+WITH d WHERE d.id >= threshold OR d.id <= 2
+RETURN d.id AS id, d.name AS name
+```
+
+`LET` fails if the binding already exists — use `UPDATE` to overwrite.
+
+#### UPDATE
+
+`UPDATE name = <expression-or-subquery>` replaces the value of an existing binding wholesale. Works for any value (scalars, maps, arrays).
+
+```cypher
+LET counter = 0;
+UPDATE counter = counter + 1;
+RETURN counter AS counter
+// [{ counter: 1 }]
+```
+
+`UPDATE` fails if the binding doesn't exist — use `LET` first.
+
+#### UPDATE ... AS alias DELETE WHERE ...
+
+Filters rows out of an array binding in place. The alias names each row during predicate evaluation.
+
+```cypher
+LET users = [
+    {id: 1, name: 'Alice', expired: false},
+    {id: 2, name: 'Bob',   expired: true}
+];
+UPDATE users AS u DELETE WHERE u.expired;
+LOAD JSON FROM users AS u
+RETURN u.id AS id, u.name AS name
+// [{ id: 1, name: 'Alice' }]
+```
+
+#### MERGE INTO ... USING ... ON ... WHEN ...
+
+SQL-style keyed merge. For each row of the source, find matching rows in the target (by key or predicate) and apply per-row branches:
+
+```
+MERGE INTO target [AS t]
+    USING <source-expression-or-subquery> [AS s]
+    ON <key-or-key-list> | <predicate>
+    [WHEN MATCHED THEN UPDATE SET <field-list>]
+    [WHEN MATCHED THEN DELETE]
+    [WHEN NOT MATCHED THEN INSERT [<row-expression>]]
+```
+
+```cypher
+// Upsert by key: replace listed fields on matches; append unmatched source rows
+LET users = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+MERGE INTO users
+    USING [{id: 2, name: 'Bobby'}, {id: 3, name: 'Charlie'}]
+    ON id
+    WHEN MATCHED THEN UPDATE SET .id, .name
+    WHEN NOT MATCHED THEN INSERT;
+// users → [{id:1,name:'Alice'}, {id:2,name:'Bobby'}, {id:3,name:'Charlie'}]
+
+// Composite key
+MERGE INTO rows
+    USING incoming
+    ON (tenant, id)
+    WHEN MATCHED THEN UPDATE SET .v
+    WHEN NOT MATCHED THEN INSERT;
+
+// Per-row expressions across target (u) and source (s) aliases
+MERGE INTO users AS u
+    USING incoming AS s
+    ON id
+    WHEN MATCHED THEN UPDATE SET .name = s.name + ' (' + u.name + ')'
+    WHEN NOT MATCHED THEN INSERT {id: s.id, name: 'New: ' + s.name};
+
+// Predicate-based join
+MERGE INTO users AS u
+    USING incoming AS s
+    ON u.tenant = s.tenant AND u.email = s.email
+    WHEN MATCHED THEN UPDATE SET .v = s.v
+    WHEN NOT MATCHED THEN INSERT;
+
+// Tombstone delete: rows in target that also appear in source are removed
+MERGE INTO users
+    USING [{id: 2}, {id: 3}]
+    ON id
+    WHEN MATCHED THEN DELETE;
+```
+
+Notes:
+
+- The source may be any expression (array literal, binding name) or a braced sub-query. When the source is a bare binding name, give it an alias: `USING incoming AS s`.
+- `ON id` is shorthand for the equality predicate `t.id = s.id`; `ON (a, b)` requires equality on every listed key. Anything else is treated as a Boolean predicate evaluated per `(target, source)` pair.
+- `WHEN MATCHED THEN UPDATE SET .field` overwrites only the listed fields, preserving the rest from the existing row. `SET .field = expr` evaluates `expr` per matched pair, with target and source aliases in scope.
+- `WHEN NOT MATCHED THEN INSERT` (no row expression) appends the source row as-is. `INSERT { … }` appends an explicit row expression instead.
+- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent — omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
 
 ### Expressions
 
@@ -831,6 +940,18 @@ RETURN f.name, f.description, f.category
 │  query1 UNION [ALL] query2                                  │
 │  stmt1; stmt2; ... stmtN             -- multi-statement     │
 │  LIMIT n                                                    │
+├─────────────────────────────────────────────────────────────┤
+│  BINDINGS                                                   │
+├─────────────────────────────────────────────────────────────┤
+│  LET name = expr | { subquery }      -- new binding         │
+│  UPDATE name = expr | { subquery }   -- replace existing    │
+│  UPDATE name AS x DELETE WHERE cond  -- row-filter binding  │
+│  MERGE INTO target [AS t]                                   │
+│      USING <expr | subquery> [AS s]                         │
+│      ON key | (k1,k2,...) | predicate                       │
+│      [WHEN MATCHED THEN UPDATE SET .f [= expr], ...]        │
+│      [WHEN MATCHED THEN DELETE]                             │
+│      [WHEN NOT MATCHED THEN INSERT [ {row-expr} ]]          │
 ├─────────────────────────────────────────────────────────────┤
 │  GRAPH OPERATIONS                                           │
 ├─────────────────────────────────────────────────────────────┤

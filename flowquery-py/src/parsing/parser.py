@@ -62,6 +62,7 @@ from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
 from .operations.delete_relationship import DeleteRelationship
+from .operations.let_op import Let
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
@@ -71,6 +72,7 @@ from .operations.return_op import Return
 from .operations.union import Union
 from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
+from .operations.update_op import Update
 from .operations.where import Where
 from .operations.with_op import With
 from .parser_state import ParserState
@@ -158,12 +160,16 @@ class Parser(BaseParser):
             yield previous
 
     def _validate_is_create_or_delete(self, root: ASTNode) -> None:
-        """Validates that all operations in a statement are CREATE or DELETE."""
+        """Validates that all operations in a statement are CREATE, DELETE, LET, or UPDATE."""
         op = root.first_child()
         while op is not None:
-            if not isinstance(op, (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
+            if not isinstance(
+                op,
+                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update),
+            ):
                 raise ValueError(
-                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, LET, and UPDATE statements can appear "
+                    "before the last statement in a multi-statement query"
                 )
             op = op.next  # type: ignore[assignment]
 
@@ -261,8 +267,13 @@ class Parser(BaseParser):
             new_root.add_child(union)
             return new_root
 
-        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
-            raise ValueError("Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement")
+        if not isinstance(
+            operation,
+            (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update),
+        ):
+            raise ValueError(
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
+            )
 
         return root
 
@@ -275,7 +286,9 @@ class Parser(BaseParser):
             self._parse_call() or
             self._parse_match() or
             self._parse_create() or
-            self._parse_delete()
+            self._parse_delete() or
+            self._parse_let() or
+            self._parse_update()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -385,6 +398,17 @@ class Parser(BaseParser):
             expression = self._parse_expression()
             if expression is None:
                 raise ValueError("Expected expression or async function")
+            # A bare unresolved identifier in `LOAD JSON FROM <name>` is
+            # treated as a reference to a LET-bound value, resolved at
+            # execution time against the global Bindings store.
+            from .expressions.binding_reference import BindingReference
+            inner = expression.first_child()
+            if (
+                isinstance(inner, Reference)
+                and inner.referred is None
+                and not inner.identifier.startswith("$")
+            ):
+                expression.replace_child(inner, BindingReference(inner.identifier))
             from_node.add_child(expression)
 
         self._expect_and_skip_whitespace_and_comments()
@@ -563,6 +587,104 @@ class Parser(BaseParser):
             return DeleteRelationship(relationship)
         else:
             return DeleteNode(node)
+
+    def _looks_like_pipeline_start(self) -> bool:
+        """True if the current token opens a query pipeline (the right-
+        hand side of `LET name =` / `UPDATE name =`)."""
+        return (
+            self.token.is_with()
+            or self.token.is_unwind()
+            or self.token.is_load()
+            or self.token.is_call()
+            or self.token.is_match()
+            or self.token.is_optional()
+            or self.token.is_return()
+        )
+
+    def _brace_opens_sub_query(self) -> bool:
+        """Peek past `{` to disambiguate sub-query braces from map literals."""
+        if not self.token.is_opening_brace():
+            return False
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        result = (
+            self.token.is_with()
+            or self.token.is_unwind()
+            or self.token.is_load()
+            or self.token.is_call()
+            or self.token.is_match()
+            or self.token.is_optional()
+            or self.token.is_return()
+        )
+        self._token_index = saved_index
+        return result
+
+    def _parse_let_update_rhs(self) -> Tuple[Optional[Expression], Optional[ASTNode]]:
+        """Parses the right-hand side of a `LET` / `UPDATE`."""
+        self._expect_and_skip_whitespace_and_comments()
+        if self._brace_opens_sub_query():
+            sub_query = self._parse_sub_query()
+            if sub_query is None:
+                raise ValueError("Expected sub-query")
+            return None, sub_query
+        if self._looks_like_pipeline_start():
+            saved_state = self._state
+            self._state = ParserState()
+            sub_query = self._parse_tokenized(True)
+            self._state = saved_state
+            if sub_query.child_count() == 0:
+                raise ValueError("Expected expression or sub-query")
+            return None, sub_query
+        expression = self._parse_expression()
+        if expression is None:
+            raise ValueError("Expected expression or sub-query")
+        return expression, None
+
+    def _parse_let(self) -> Optional[Let]:
+        if not self.token.is_let():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected identifier after LET")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if not self.token.is_equals():
+            raise ValueError("Expected '=' after LET identifier")
+        self.set_next_token()
+        expression, sub_query = self._parse_let_update_rhs()
+        return Let(name, expression, sub_query)
+
+    def _parse_update(self) -> Optional[Update]:
+        if not self.token.is_update():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected identifier after UPDATE")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        merge_key: Optional[str] = None
+        if self.token.is_merge():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_on():
+                raise ValueError("Expected ON after MERGE")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected merge-key identifier after MERGE ON")
+            merge_key = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if not self.token.is_equals():
+            raise ValueError("Expected '=' in UPDATE")
+        self.set_next_token()
+        expression, sub_query = self._parse_let_update_rhs()
+        return Update(name, merge_key, expression, sub_query)
 
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""

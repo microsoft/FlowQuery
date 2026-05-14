@@ -86,16 +86,8 @@ class Load(Operation):
             return False
         return isinstance(self.from_, str) and self.from_.startswith("file://")
 
-    async def _load_from_file(self) -> None:
-        """Loads data from a local file (file:// protocol)."""
-        file_path = self.from_.removeprefix("file://")
-        content = Path(file_path).read_text(encoding="utf-8")
-        data: Any = None
-        if isinstance(self.type, JSONComponent):
-            data = json.loads(content)
-        else:
-            data = content
-
+    async def _emit(self, data: Any) -> None:
+        """Emits a value or each item of a list to downstream operations."""
         if isinstance(data, list):
             for item in data:
                 self._value = item
@@ -109,6 +101,24 @@ class Load(Operation):
             self._value = data
             if self.next:
                 await self.next.run()
+        elif data is not None:
+            self._value = data
+            if self.next:
+                await self.next.run()
+
+    async def _load_from_file(self) -> None:
+        """Loads data from a local file (file:// protocol)."""
+        file_path = self.from_.removeprefix("file://")
+        content = Path(file_path).read_text(encoding="utf-8")
+        if isinstance(self.type, JSONComponent):
+            data: Any = json.loads(content)
+        else:
+            data = content
+        await self._emit(data)
+
+    async def _load_from_value(self, data: Any) -> None:
+        """Loads data from an already-resolved value (e.g. a LET binding)."""
+        await self._emit(data)
 
     async def _load_from_function(self) -> None:
         """Loads data from an async function source."""
@@ -147,28 +157,20 @@ class Load(Operation):
                     data = await response.text()
                 else:
                     data = await response.text()
-
-                if isinstance(data, list):
-                    for item in data:
-                        self._value = item
-                        if self.next:
-                            await self.next.run()
-                elif isinstance(data, dict):
-                    self._value = data
-                    if self.next:
-                        await self.next.run()
-                elif isinstance(data, str):
-                    self._value = data
-                    if self.next:
-                        await self.next.run()
+                await self._emit(data)
 
     async def load(self) -> None:
         if self.is_async_function:
             await self._load_from_function()
-        elif self.is_file_uri:
-            await self._load_from_file()
+            return
+        source = self.from_
+        if isinstance(source, str):
+            if source.startswith("file://"):
+                await self._load_from_file()
+            else:
+                await self._load_from_url()
         else:
-            await self._load_from_url()
+            await self._load_from_value(source)
 
     async def run(self) -> None:
         try:

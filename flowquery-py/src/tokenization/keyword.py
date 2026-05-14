@@ -53,3 +53,6 @@ class Keyword(Enum):
     UNION = "UNION"
     ALL = "ALL"
     EXISTS = "EXISTS"
+    LET = "LET"
+    UPDATE = "UPDATE"
+    ON = "ON"

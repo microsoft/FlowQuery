@@ -749,6 +749,32 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.EXISTS;
     }
 
+    // LET / UPDATE bindings
+
+    public static get LET(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.LET);
+    }
+
+    public isLet(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.LET;
+    }
+
+    public static get UPDATE(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.UPDATE);
+    }
+
+    public isUpdate(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.UPDATE;
+    }
+
+    public static get ON(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ON);
+    }
+
+    public isOn(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ON;
+    }
+
     // End of file token
 
     public static get EOF(): Token {

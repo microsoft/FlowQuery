@@ -683,6 +683,29 @@ class Token:
     def is_exists(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.EXISTS.value
 
+    # LET / UPDATE bindings
+
+    @staticmethod
+    def LET() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.LET.value)
+
+    def is_let(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.LET.value
+
+    @staticmethod
+    def UPDATE() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.UPDATE.value)
+
+    def is_update(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.UPDATE.value
+
+    @staticmethod
+    def ON() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ON.value)
+
+    def is_on(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ON.value
+
     # Other utility methods
 
     def is_operand(self) -> bool:

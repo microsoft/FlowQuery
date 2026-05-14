@@ -30,6 +30,24 @@ class ASTNode:
         child._parent = self
         self.children.append(child)
 
+    def replace_child(self, old_child: ASTNode, new_child: ASTNode) -> bool:
+        """Replaces an existing child node with a new node in-place.
+
+        Args:
+            old_child: The existing child to replace
+            new_child: The replacement node
+
+        Returns:
+            True if the replacement was performed, False otherwise
+        """
+        try:
+            idx = self.children.index(old_child)
+        except ValueError:
+            return False
+        new_child._parent = self
+        self.children[idx] = new_child
+        return True
+
     def first_child(self) -> ASTNode:
         """Returns the first child node.
 

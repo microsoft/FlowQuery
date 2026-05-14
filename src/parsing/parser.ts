@@ -20,6 +20,7 @@ import KeyValuePair from "./data_structures/key_value_pair";
 import ListComprehension from "./data_structures/list_comprehension";
 import Lookup from "./data_structures/lookup";
 import RangeLookup from "./data_structures/range_lookup";
+import BindingReference from "./expressions/binding_reference";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
@@ -56,6 +57,7 @@ import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
 import DeleteNode from "./operations/delete_node";
 import DeleteRelationship from "./operations/delete_relationship";
+import Let from "./operations/let";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
@@ -65,6 +67,7 @@ import Return from "./operations/return";
 import Union from "./operations/union";
 import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
+import Update from "./operations/update";
 import Where from "./operations/where";
 import With from "./operations/with";
 import ParserState from "./parser_state";
@@ -157,7 +160,9 @@ class Parser extends BaseParser {
     }
 
     /**
-     * Validates that all operations in a statement are CREATE or DELETE.
+     * Validates that all operations in a statement are CREATE, DELETE,
+     * LET, or UPDATE — the four declaration kinds that may precede the
+     * terminal statement in a multi-statement query.
      */
     private validateIsCreateOrDelete(root: ASTNode): void {
         let op: Operation | null = root.firstChild() as Operation;
@@ -166,10 +171,12 @@ class Parser extends BaseParser {
                 !(op instanceof CreateNode) &&
                 !(op instanceof CreateRelationship) &&
                 !(op instanceof DeleteNode) &&
-                !(op instanceof DeleteRelationship)
+                !(op instanceof DeleteRelationship) &&
+                !(op instanceof Let) &&
+                !(op instanceof Update)
             ) {
                 throw new Error(
-                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, LET, and UPDATE statements can appear before the last statement in a multi-statement query"
                 );
             }
             op = op.next;
@@ -276,10 +283,12 @@ class Parser extends BaseParser {
             !(operation instanceof CreateNode) &&
             !(operation instanceof CreateRelationship) &&
             !(operation instanceof DeleteNode) &&
-            !(operation instanceof DeleteRelationship)
+            !(operation instanceof DeleteRelationship) &&
+            !(operation instanceof Let) &&
+            !(operation instanceof Update)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
             );
         }
         return root;
@@ -294,6 +303,8 @@ class Parser extends BaseParser {
             this.parseCall() ||
             this.parseCreate() ||
             this.parseDelete() ||
+            this.parseLet() ||
+            this.parseUpdate() ||
             this.parseMatch()
         );
     }
@@ -429,6 +440,17 @@ class Parser extends BaseParser {
             const expression = this.parseExpression();
             if (expression === null) {
                 throw new Error("Expected expression or async function");
+            }
+            // A bare unresolved identifier in `LOAD JSON FROM <name>` is
+            // treated as a reference to a LET-bound value, resolved at
+            // execution time against the global Bindings store.
+            const inner = expression.firstChild();
+            if (
+                inner instanceof Reference &&
+                inner.referred === undefined &&
+                !inner.identifier.startsWith("$")
+            ) {
+                expression.replaceChild(inner, new BindingReference(inner.identifier));
             }
             from.addChild(expression);
         }
@@ -612,6 +634,137 @@ class Parser extends BaseParser {
             result = new DeleteNode(node);
         }
         return result;
+    }
+
+    /**
+     * Returns true when the current token is a clause keyword that
+     * starts a query pipeline (the right-hand side of a `LET name =`
+     * or `UPDATE name =`).  Used to disambiguate between binding a
+     * plain expression and binding the rows produced by a sub-query.
+     */
+    private looksLikePipelineStart(): boolean {
+        return (
+            this.token.isWith() ||
+            this.token.isUnwind() ||
+            this.token.isLoad() ||
+            this.token.isCall() ||
+            this.token.isMatch() ||
+            this.token.isOptional() ||
+            this.token.isReturn()
+        );
+    }
+
+    /**
+     * Peeks past `{` to decide whether the brace opens a sub-query
+     * (first significant token is a clause keyword) or a map literal
+     * (anything else, e.g. identifier+colon or string key).
+     */
+    private braceOpensSubQuery(): boolean {
+        if (!this.token.isOpeningBrace()) {
+            return false;
+        }
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        const result =
+            this.token.isWith() ||
+            this.token.isUnwind() ||
+            this.token.isLoad() ||
+            this.token.isCall() ||
+            this.token.isMatch() ||
+            this.token.isOptional() ||
+            this.token.isReturn();
+        this.tokenIndex = savedIndex;
+        return result;
+    }
+
+    /**
+     * Parses the right-hand side of a `LET` / `UPDATE`.  Returns the
+     * expression *or* the sub-query AST that was parsed.
+     */
+    private parseLetUpdateRhs(): { expression: Expression | null; subQuery: ASTNode | null } {
+        this.expectAndSkipWhitespaceAndComments();
+        // Explicit braces wrap a sub-query only when followed by a
+        // clause keyword; otherwise `{ ... }` is a map literal.
+        if (this.braceOpensSubQuery()) {
+            const subQuery = this.parseSubQuery();
+            if (subQuery === null) {
+                throw new Error("Expected sub-query");
+            }
+            return { expression: null, subQuery };
+        }
+        if (this.looksLikePipelineStart()) {
+            // Inline sub-query: parse a pipeline up to ; / EOF.
+            const savedState = this._state;
+            this._state = new ParserState();
+            const subQuery = this._parseTokenized(true);
+            this._state = savedState;
+            if (subQuery.firstChild() === null) {
+                throw new Error("Expected expression or sub-query");
+            }
+            return { expression: null, subQuery };
+        }
+        const expression = this.parseExpression();
+        if (expression === null) {
+            throw new Error("Expected expression or sub-query");
+        }
+        return { expression, subQuery: null };
+    }
+
+    private parseLet(): Let | null {
+        if (!this.token.isLet()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected identifier after LET");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (!this.token.isEquals()) {
+            throw new Error("Expected '=' after LET identifier");
+        }
+        this.setNextToken();
+        const { expression, subQuery } = this.parseLetUpdateRhs();
+        return new Let(name, expression, subQuery);
+    }
+
+    private parseUpdate(): Update | null {
+        if (!this.token.isUpdate()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected identifier after UPDATE");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        let mergeKey: string | null = null;
+        if (this.token.isMerge()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isOn()) {
+                throw new Error("Expected ON after MERGE");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected merge-key identifier after MERGE ON");
+            }
+            mergeKey = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (!this.token.isEquals()) {
+            throw new Error("Expected '=' in UPDATE");
+        }
+        this.setNextToken();
+        const { expression, subQuery } = this.parseLetUpdateRhs();
+        return new Update(name, mergeKey, expression, subQuery);
     }
 
     private parseMatch(): Match | null {

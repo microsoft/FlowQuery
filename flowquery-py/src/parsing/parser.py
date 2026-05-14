@@ -196,6 +196,8 @@ class Parser(BaseParser):
             if root.child_count() > 0:
                 if self.token.is_semicolon():
                     break
+                if is_sub_query and self.token.is_closing_brace():
+                    return root
                 self._expect_and_skip_whitespace_and_comments()
             else:
                 self._skip_whitespace_and_comments()
@@ -999,7 +1001,7 @@ class Parser(BaseParser):
         if not self.token.is_opening_brace():
             return None
         self.set_next_token()
-        self._expect_and_skip_whitespace_and_comments()
+        self._skip_whitespace_and_comments()
         query = self._parse_tokenized(is_sub_query=True)
         self._skip_whitespace_and_comments()
         if not self.token.is_closing_brace():

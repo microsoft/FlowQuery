@@ -83,6 +83,21 @@ describe("LET — query bindings", () => {
         await runner.run();
         expect(runner.results).toEqual([{ v: 1 }, { v: 2 }]);
     });
+
+    test("tolerates absent whitespace immediately after sub-query braces", async () => {
+        const runner = new Runner(`
+            LET users = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+            CREATE VIRTUAL (:UserNoWs) AS {LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name};
+            MATCH (u:UserNoWs)
+            RETURN u.id AS id, u.name AS name
+            ORDER BY id
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([
+            { id: 1, name: "Alice" },
+            { id: 2, name: "Bob" },
+        ]);
+    });
 });
 
 describe("UPDATE — full replace", () => {

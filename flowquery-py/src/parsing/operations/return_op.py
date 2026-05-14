@@ -70,6 +70,11 @@ class Return(Projection):
             raw = expression.value()
             # Deep copy objects to preserve their state
             value = copy.deepcopy(raw) if isinstance(raw, (dict, list)) else raw
+            # `_label` is an internal property attached to node records by
+            # the data resolver (consumed by the labels() function).  Strip
+            # it from the projected value so it doesn't leak into results.
+            if isinstance(value, dict) and "_label" in value:
+                value.pop("_label", None)
             record[alias] = value
         # Capture sort-key values while expression bindings are still live.
         if self._order_by is not None:

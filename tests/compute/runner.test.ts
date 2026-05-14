@@ -1379,6 +1379,38 @@ test("Test relationships function", async () => {
     expect(results[0].rels[0].properties.distance).toBe(190);
 });
 
+test("RETURN of a whole node does not leak the internal _label key", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (c:City)
+        RETURN c
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    for (const row of results) {
+        expect(row.c).not.toHaveProperty("_label");
+        // The user-facing payload should still expose the data fields.
+        expect(row.c).toHaveProperty("id");
+        expect(row.c).toHaveProperty("name");
+    }
+    // `labels()` must still work even though `_label` is hidden from RETURN.
+    const labelsMatch = new Runner(`
+        MATCH (c:City)
+        RETURN labels(c) AS labels
+    `);
+    await labelsMatch.run();
+    expect(labelsMatch.results[0].labels).toEqual(["City"]);
+});
+
 test("Test nodes function with null", async () => {
     const runner = new Runner("RETURN nodes(null) as n");
     await runner.run();

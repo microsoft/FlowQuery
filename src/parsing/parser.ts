@@ -203,6 +203,9 @@ class Parser extends BaseParser {
                 if (this.token.isSemicolon()) {
                     break;
                 }
+                if (isSubQuery && this.token.isClosingBrace()) {
+                    return root;
+                }
                 this.expectAndSkipWhitespaceAndComments();
             } else {
                 this.skipWhitespaceAndComments();
@@ -1481,7 +1484,7 @@ class Parser extends BaseParser {
             return null;
         }
         this.setNextToken();
-        this.expectAndSkipWhitespaceAndComments();
+        this.skipWhitespaceAndComments();
         const query: ASTNode = this._parseTokenized(true);
         this.skipWhitespaceAndComments();
         if (!this.token.isClosingBrace()) {

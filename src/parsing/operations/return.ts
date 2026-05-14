@@ -49,7 +49,13 @@ class Return extends Projection {
                 await sq.evaluate();
             }
             const raw = expression.value();
-            const value: any = typeof raw === "object" && raw !== null ? structuredClone(raw) : raw;
+            let value: any = typeof raw === "object" && raw !== null ? structuredClone(raw) : raw;
+            // `_label` is an internal property attached to node records by
+            // the data resolver (consumed by the labels() function).  Strip
+            // it from the projected value so it doesn't leak into results.
+            if (value && typeof value === "object" && !Array.isArray(value) && "_label" in value) {
+                delete value._label;
+            }
             record.set(alias, value);
         }
         // Capture sort-key values while expression bindings are still live.

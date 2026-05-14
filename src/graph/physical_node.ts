@@ -14,10 +14,10 @@ class PhysicalNode extends Node {
         if (this._statement === null) {
             throw new Error("Statement is null");
         }
-        // Lazy require to avoid a load-time cycle:
+        // Lazy dynamic import to avoid a load-time cycle:
         // physical_node -> runner -> parsing -> graph (back to here).
         // Python uses the same idiom (function-local import).
-        const RunnerCtor: typeof Runner = require("../compute/runner").default;
+        const RunnerCtor: typeof Runner = (await import("../compute/runner")).default;
         const runner = new RunnerCtor(null, this._statement, args);
         await runner.run();
         return runner.results;

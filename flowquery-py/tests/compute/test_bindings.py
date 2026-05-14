@@ -127,6 +127,24 @@ async def test_let_binds_brace_wrapped_sub_query_rows():
     assert runner.results == [{"v": 1}, {"v": 2}]
 
 
+@pytest.mark.asyncio
+async def test_sub_query_tolerates_no_whitespace_after_opening_brace():
+    runner = Runner(
+        """
+        LET users = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+        CREATE VIRTUAL (:UserNoWs) AS {LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name};
+        MATCH (u:UserNoWs)
+        RETURN u.id AS id, u.name AS name
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"},
+    ]
+
+
 # ---------------------------------------------------------------------------
 # UPDATE — full replace
 # ---------------------------------------------------------------------------

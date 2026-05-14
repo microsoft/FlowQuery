@@ -1456,6 +1456,43 @@ class TestRunner:
         assert results[0]["rels"][0]["properties"]["distance"] == 190
 
     @pytest.mark.asyncio
+    async def test_return_whole_node_does_not_leak_internal_label_key(self):
+        """`RETURN n` should not surface the internal `_label` key."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (c:City)
+            RETURN c
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        for row in results:
+            assert "_label" not in row["c"]
+            assert "id" in row["c"]
+            assert "name" in row["c"]
+        # `labels()` must still work even though `_label` is hidden from RETURN.
+        labels_match = Runner(
+            """
+            MATCH (c:City)
+            RETURN labels(c) AS labels
+            """
+        )
+        await labels_match.run()
+        assert labels_match.results[0]["labels"] == ["City"]
+
+    @pytest.mark.asyncio
     async def test_nodes_function_with_null(self):
         """Test nodes function with null."""
         runner = Runner("RETURN nodes(null) as n")

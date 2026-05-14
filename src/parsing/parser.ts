@@ -61,6 +61,14 @@ import Let from "./operations/let";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
+import Merge, {
+    MergeMatchedAction,
+    MergeNotMatchedAction,
+    MergeOnClause,
+    MergeSetItem,
+    MergeSourceAlias,
+    MergeTargetAlias,
+} from "./operations/merge";
 import Operation from "./operations/operation";
 import OrderBy, { SortField } from "./operations/order_by";
 import Return from "./operations/return";
@@ -175,10 +183,11 @@ class Parser extends BaseParser {
                 !(op instanceof DeleteRelationship) &&
                 !(op instanceof Let) &&
                 !(op instanceof Update) &&
-                !(op instanceof UpdateDelete)
+                !(op instanceof UpdateDelete) &&
+                !(op instanceof Merge)
             ) {
                 throw new Error(
-                    "Only CREATE, DELETE, LET, and UPDATE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
                 );
             }
             op = op.next;
@@ -288,10 +297,11 @@ class Parser extends BaseParser {
             !(operation instanceof DeleteRelationship) &&
             !(operation instanceof Let) &&
             !(operation instanceof Update) &&
-            !(operation instanceof UpdateDelete)
+            !(operation instanceof UpdateDelete) &&
+            !(operation instanceof Merge)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, UPDATE, or MERGE statement"
             );
         }
         return root;
@@ -308,6 +318,7 @@ class Parser extends BaseParser {
             this.parseDelete() ||
             this.parseLet() ||
             this.parseUpdate() ||
+            this.parseMerge() ||
             this.parseMatch()
         );
     }
@@ -752,60 +763,179 @@ class Parser extends BaseParser {
             return this.parseUpdateDeleteTail(name);
         }
 
-        // `UPDATE name [MERGE ON …] = <rhs>` — assign or merge branch.
-        let mergeKeys: string[] | null = null;
-        let setFields: string[] | null = null;
-        let whenMatched = true;
-        let whenNotMatched = true;
-        if (this.token.isMerge()) {
-            this.setNextToken();
-            this.expectAndSkipWhitespaceAndComments();
-            if (!this.token.isOn()) {
-                throw new Error("Expected ON after MERGE");
-            }
-            this.setNextToken();
-            this.expectAndSkipWhitespaceAndComments();
-            mergeKeys = this.parseMergeKeys();
-            this.skipWhitespaceAndComments();
-            if (this.token.isSet()) {
-                this.setNextToken();
-                this.expectAndSkipWhitespaceAndComments();
-                setFields = this.parseMergeSetFields();
-                this.skipWhitespaceAndComments();
-            }
-            if (this.token.isWhen()) {
-                ({ whenMatched, whenNotMatched } = this.parseMergeWhenClause());
-                this.skipWhitespaceAndComments();
-            }
-        }
+        // `UPDATE name = <rhs>` — assign branch.
         if (!this.token.isEquals()) {
             throw new Error("Expected '=' in UPDATE");
         }
         this.setNextToken();
         const { expression, subQuery } = this.parseLetUpdateRhs();
-        return new Update(
-            name,
-            mergeKeys,
-            setFields,
-            whenMatched,
-            whenNotMatched,
-            expression,
-            subQuery
-        );
+        return new Update(name, expression, subQuery);
     }
 
     /**
-     * Parses `MERGE ON id` or `MERGE ON (a, b, c)` — accepts either a
-     * single identifier or a parenthesised, comma-separated list.
+     * Parses a `MERGE INTO <name> [AS <target>] USING <rhs>
+     * [AS <source>] ON <on-clause> <when-clauses>` statement.
      */
-    private parseMergeKeys(): string[] {
+    private parseMerge(): Merge | null {
+        if (!this.token.isMerge()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isInto()) {
+            throw new Error("Expected INTO after MERGE");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected binding name after MERGE INTO");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        // Optional `AS <target-alias>`.
+        let targetAlias: string | null = null;
+        if (this.token.isAs()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected alias after AS in MERGE INTO");
+            }
+            targetAlias = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (!this.token.isUsing()) {
+            throw new Error("Expected USING after MERGE INTO target");
+        }
+        this.setNextToken();
+        const { expression: sourceExpression, subQuery: sourceSubQuery } = this.parseLetUpdateRhs();
+        if (sourceExpression !== null) {
+            // The source RHS lives outside the LET / UPDATE binding-RHS
+            // scope, so a bare identifier here refers to an existing
+            // binding (e.g. `USING incoming AS s`) rather than a
+            // declaration-site name.  Convert unresolved references so
+            // they resolve against the global Bindings store at runtime.
+            this.convertUnresolvedReferencesToBindings(sourceExpression);
+        }
+        this.skipWhitespaceAndComments();
+        // Optional `AS <source-alias>`.
+        let sourceAlias: string | null = null;
+        if (this.token.isAs()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected alias after AS in MERGE INTO … USING");
+            }
+            sourceAlias = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (!this.token.isOn()) {
+            throw new Error("Expected ON in MERGE INTO");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Pre-create the Merge with placeholders so that aliases can
+        // resolve to the per-row context while we parse the ON clause
+        // and the WHEN expressions.  The proxy aliases delegate to
+        // `targetValue()` / `sourceValue()` on this instance.
+        const placeholderOn: MergeOnClause = { type: "keys", keys: [] };
+        const merge = new Merge(
+            name,
+            targetAlias,
+            sourceAlias,
+            sourceExpression,
+            sourceSubQuery,
+            placeholderOn,
+            null,
+            null
+        );
+        if (targetAlias !== null) {
+            this._state.variables.set(targetAlias, new MergeTargetAlias(merge));
+        }
+        if (sourceAlias !== null) {
+            this._state.variables.set(sourceAlias, new MergeSourceAlias(merge));
+        }
+        let onClause: MergeOnClause;
+        try {
+            onClause = this.parseMergeOn();
+            this.skipWhitespaceAndComments();
+            // Build the matched / not-matched actions from one or more
+            // WHEN clauses.  Track whether we've already seen each kind
+            // to forbid duplicates.
+            let matched: MergeMatchedAction | null = null;
+            let notMatched: MergeNotMatchedAction | null = null;
+            while (this.token.isWhen()) {
+                const parsed = this.parseMergeWhenClause();
+                if (parsed.kind === "matched") {
+                    if (matched !== null) {
+                        throw new Error("Duplicate WHEN MATCHED clause in MERGE INTO");
+                    }
+                    matched = parsed.action;
+                } else {
+                    if (notMatched !== null) {
+                        throw new Error("Duplicate WHEN NOT MATCHED clause in MERGE INTO");
+                    }
+                    notMatched = parsed.action;
+                }
+                this.skipWhitespaceAndComments();
+            }
+            if (matched === null && notMatched === null) {
+                throw new Error("MERGE INTO requires at least one WHEN clause");
+            }
+            merge.setClauses(onClause, matched, notMatched);
+        } finally {
+            if (targetAlias !== null) {
+                this._state.variables.delete(targetAlias);
+            }
+            if (sourceAlias !== null) {
+                this._state.variables.delete(sourceAlias);
+            }
+        }
+        return merge;
+    }
+
+    /**
+     * Parses the body of the `ON` clause.  Distinguishes a short-form
+     * key list (`ON id`, `ON (a, b, c)`) from a full predicate
+     * expression by looking ahead: a bare identifier (or parenthesised
+     * list of identifiers) followed by `WHEN` is the key form;
+     * anything else is parsed as an expression.
+     */
+    private parseMergeOn(): MergeOnClause {
+        // Snapshot tokenizer position so we can rewind after a failed
+        // key-list probe.
+        const savedIndex = this.tokenIndex;
+        const keys = this.tryParseMergeKeyList();
+        if (keys !== null) {
+            return { type: "keys", keys };
+        }
+        // Not a key list — rewind and parse as a predicate expression.
+        this.tokenIndex = savedIndex;
+        const predicate = this.parseExpression();
+        if (predicate === null) {
+            throw new Error("Expected predicate or key list after MERGE INTO … ON");
+        }
+        this.convertUnresolvedReferencesToBindings(predicate);
+        return { type: "predicate", predicate };
+    }
+
+    /**
+     * Speculatively parses `<id>` or `(<id> [, <id>]*)` followed by
+     * `WHEN`.  Returns the key list on success, or `null` if the
+     * lookahead doesn't match (leaving the caller to rewind and try
+     * an expression).
+     */
+    private tryParseMergeKeyList(): string[] | null {
+        const keys: string[] = [];
         if (this.token.isLeftParenthesis()) {
             this.setNextToken();
             this.skipWhitespaceAndComments();
-            const keys: string[] = [];
             while (!this.token.isRightParenthesis()) {
                 if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
-                    throw new Error("Expected merge-key identifier");
+                    return null;
                 }
                 keys.push(this.token.value);
                 this.setNextToken();
@@ -813,57 +943,37 @@ class Parser extends BaseParser {
                 if (this.token.isComma()) {
                     this.setNextToken();
                     this.skipWhitespaceAndComments();
+                } else if (!this.token.isRightParenthesis()) {
+                    return null;
                 }
             }
             this.setNextToken();
-            if (keys.length === 0) {
-                throw new Error("Expected at least one merge-key identifier");
-            }
-            return keys;
-        }
-        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
-            throw new Error("Expected merge-key identifier after MERGE ON");
-        }
-        const key = this.token.value;
-        this.setNextToken();
-        return [key];
-    }
-
-    /**
-     * Parses `SET .field, .field, …` — the list of fields that should
-     * be overwritten on a matched row in a partial merge.
-     */
-    private parseMergeSetFields(): string[] {
-        const fields: string[] = [];
-        while (true) {
-            if (!this.token.isDot()) {
-                throw new Error("Expected '.' before SET field name");
-            }
-            this.setNextToken();
+        } else {
             if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
-                throw new Error("Expected field name after '.'");
+                return null;
             }
-            fields.push(this.token.value);
+            keys.push(this.token.value);
             this.setNextToken();
-            this.skipWhitespaceAndComments();
-            if (!this.token.isComma()) {
-                break;
-            }
-            this.setNextToken();
-            this.skipWhitespaceAndComments();
         }
-        if (fields.length === 0) {
-            throw new Error("Expected at least one SET field");
+        // Must be followed by `WHEN` (with any whitespace) to be a key list.
+        this.skipWhitespaceAndComments();
+        if (!this.token.isWhen()) {
+            return null;
         }
-        return fields;
+        if (keys.length === 0) {
+            return null;
+        }
+        return keys;
     }
 
     /**
-     * Parses an optional `WHEN MATCHED` / `WHEN NOT MATCHED` clause.
-     * Returns a pair indicating whether each branch is active.
+     * Parses a single `WHEN [NOT] MATCHED THEN UPDATE SET … | DELETE
+     * | INSERT [<expr>]` clause.  Caller is positioned on `WHEN`.
      */
-    private parseMergeWhenClause(): { whenMatched: boolean; whenNotMatched: boolean } {
-        this.setNextToken();
+    private parseMergeWhenClause():
+        | { kind: "matched"; action: MergeMatchedAction }
+        | { kind: "notMatched"; action: MergeNotMatchedAction } {
+        this.setNextToken(); // consume WHEN
         this.expectAndSkipWhitespaceAndComments();
         let negated = false;
         if (this.token.isNot()) {
@@ -875,9 +985,95 @@ class Parser extends BaseParser {
             throw new Error("Expected MATCHED after WHEN" + (negated ? " NOT" : ""));
         }
         this.setNextToken();
-        return negated
-            ? { whenMatched: false, whenNotMatched: true }
-            : { whenMatched: true, whenNotMatched: false };
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isThen()) {
+            throw new Error("Expected THEN after WHEN" + (negated ? " NOT" : "") + " MATCHED");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (negated) {
+            // WHEN NOT MATCHED — only INSERT is meaningful.
+            if (!this.token.isInsert()) {
+                throw new Error("Expected INSERT after WHEN NOT MATCHED THEN");
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            // Optional expression: anything that isn't a WHEN / EOF /
+            // semicolon / closing brace is the row-builder expression.
+            let expression: Expression | null = null;
+            if (
+                !this.token.isWhen() &&
+                !this.token.isEOF() &&
+                !this.token.isSemicolon() &&
+                !this.token.isClosingBrace()
+            ) {
+                expression = this.parseExpression();
+                if (expression === null) {
+                    throw new Error("Expected expression after WHEN NOT MATCHED THEN INSERT");
+                }
+                this.convertUnresolvedReferencesToBindings(expression);
+            }
+            return { kind: "notMatched", action: { type: "insert", expression } };
+        }
+        // WHEN MATCHED — accepts UPDATE SET … or DELETE.
+        if (this.token.isUpdate()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isSet()) {
+                throw new Error("Expected SET after WHEN MATCHED THEN UPDATE");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            const setItems = this.parseMergeSetList();
+            return { kind: "matched", action: { type: "update", setItems } };
+        }
+        if (this.token.isDelete()) {
+            this.setNextToken();
+            return { kind: "matched", action: { type: "delete" } };
+        }
+        throw new Error("Expected UPDATE or DELETE after WHEN MATCHED THEN");
+    }
+
+    /**
+     * Parses `.field [= <expr>] [, .field [= <expr>]]*` — the body of a
+     * `WHEN MATCHED THEN UPDATE SET` clause.  An item without an
+     * explicit `= <expr>` defaults to `source.<field>` at run time.
+     */
+    private parseMergeSetList(): MergeSetItem[] {
+        const items: MergeSetItem[] = [];
+        while (true) {
+            if (!this.token.isDot()) {
+                throw new Error("Expected '.' before SET field name");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected field name after '.'");
+            }
+            const field = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            let expression: Expression | null = null;
+            if (this.token.isEquals()) {
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                expression = this.parseExpression();
+                if (expression === null) {
+                    throw new Error(`Expected expression after SET .${field} =`);
+                }
+                this.convertUnresolvedReferencesToBindings(expression);
+                this.skipWhitespaceAndComments();
+            }
+            items.push({ field, expression });
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (items.length === 0) {
+            throw new Error("Expected at least one SET field");
+        }
+        return items;
     }
 
     /**

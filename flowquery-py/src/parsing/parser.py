@@ -1,7 +1,7 @@
 """Main parser for FlowQuery statements."""
 
 import sys
-from typing import Dict, Generator, Iterator, List, Optional, Tuple, cast
+from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, cast
 
 from ..graph.hops import Hops
 from ..graph.node import Node
@@ -66,6 +66,19 @@ from .operations.let import Let
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
+from .operations.merge import (
+    Merge,
+    MergeMatchedAction,
+    MergeMatchedDelete,
+    MergeMatchedUpdate,
+    MergeNotMatchedInsert,
+    MergeOnClause,
+    MergeOnKeys,
+    MergeOnPredicate,
+    MergeSetItem,
+    MergeSourceAlias,
+    MergeTargetAlias,
+)
 from .operations.operation import Operation
 from .operations.order_by import OrderBy, SortField
 from .operations.return_op import Return
@@ -166,10 +179,10 @@ class Parser(BaseParser):
         while op is not None:
             if not isinstance(
                 op,
-                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete),
+                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete, Merge),
             ):
                 raise ValueError(
-                    "Only CREATE, DELETE, LET, and UPDATE statements can appear "
+                    "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear "
                     "before the last statement in a multi-statement query"
                 )
             op = op.next  # type: ignore[assignment]
@@ -270,10 +283,21 @@ class Parser(BaseParser):
 
         if not isinstance(
             operation,
-            (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete),
+            (
+                Return,
+                Call,
+                CreateNode,
+                CreateRelationship,
+                DeleteNode,
+                DeleteRelationship,
+                Let,
+                Update,
+                UpdateDelete,
+                Merge,
+            ),
         ):
             raise ValueError(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, UPDATE, or MERGE statement"
             )
 
         return root
@@ -289,7 +313,8 @@ class Parser(BaseParser):
             self._parse_create() or
             self._parse_delete() or
             self._parse_let() or
-            self._parse_update()
+            self._parse_update() or
+            self._parse_merge()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -673,93 +698,160 @@ class Parser(BaseParser):
         if self.token.is_as():
             return self._parse_update_delete_tail(name)
 
-        # `UPDATE name [MERGE ON …] = <rhs>` — assign or merge branch.
-        merge_keys: Optional[List[str]] = None
-        set_fields: Optional[List[str]] = None
-        when_matched = True
-        when_not_matched = True
-        if self.token.is_merge():
-            self.set_next_token()
-            self._expect_and_skip_whitespace_and_comments()
-            if not self.token.is_on():
-                raise ValueError("Expected ON after MERGE")
-            self.set_next_token()
-            self._expect_and_skip_whitespace_and_comments()
-            merge_keys = self._parse_merge_keys()
-            self._skip_whitespace_and_comments()
-            if self.token.is_set():
-                self.set_next_token()
-                self._expect_and_skip_whitespace_and_comments()
-                set_fields = self._parse_merge_set_fields()
-                self._skip_whitespace_and_comments()
-            if self.token.is_when():
-                when_matched, when_not_matched = self._parse_merge_when_clause()
-                self._skip_whitespace_and_comments()
+        # `UPDATE name = <rhs>` — assign branch.
         if not self.token.is_equals():
             raise ValueError("Expected '=' in UPDATE")
         self.set_next_token()
         expression, sub_query = self._parse_let_update_rhs()
-        return Update(
-            name,
-            merge_keys,
-            set_fields,
-            when_matched,
-            when_not_matched,
-            expression,
-            sub_query,
-        )
+        return Update(name, expression, sub_query)
 
-    def _parse_merge_keys(self) -> List[str]:
-        """Parses ``MERGE ON id`` or ``MERGE ON (a, b, c)``."""
+    def _parse_merge(self) -> Optional[Merge]:
+        """Parses a ``MERGE INTO <name> [AS <target>] USING <rhs>
+        [AS <source>] ON <on-clause> <when-clauses>`` statement."""
+        if not self.token.is_merge():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_into():
+            raise ValueError("Expected INTO after MERGE")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected binding name after MERGE INTO")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        target_alias: Optional[str] = None
+        if self.token.is_as():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected alias after AS in MERGE INTO")
+            target_alias = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if not self.token.is_using():
+            raise ValueError("Expected USING after MERGE INTO target")
+        self.set_next_token()
+        source_expression, source_sub_query = self._parse_let_update_rhs()
+        if source_expression is not None:
+            # The source RHS lives outside the LET / UPDATE binding-RHS
+            # scope, so a bare identifier here refers to an existing
+            # binding (e.g. ``USING incoming AS s``) rather than a
+            # declaration-site name.  Convert unresolved references so
+            # they resolve against the global Bindings store at runtime.
+            self._convert_unresolved_references_to_bindings(source_expression)
+        self._skip_whitespace_and_comments()
+        source_alias: Optional[str] = None
+        if self.token.is_as():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected alias after AS in MERGE INTO … USING")
+            source_alias = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if not self.token.is_on():
+            raise ValueError("Expected ON in MERGE INTO")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Pre-create the Merge with placeholders so that aliases can
+        # resolve to the per-row context while we parse the ON clause
+        # and the WHEN expressions.
+        placeholder_on: MergeOnClause = MergeOnKeys([])
+        merge = Merge(
+            name,
+            target_alias,
+            source_alias,
+            source_expression,
+            source_sub_query,
+            placeholder_on,
+            None,
+            None,
+        )
+        if target_alias is not None:
+            self._state.variables[target_alias] = MergeTargetAlias(merge)
+        if source_alias is not None:
+            self._state.variables[source_alias] = MergeSourceAlias(merge)
+        try:
+            on_clause = self._parse_merge_on()
+            self._skip_whitespace_and_comments()
+            matched: Optional[MergeMatchedAction] = None
+            not_matched: Optional[MergeNotMatchedInsert] = None
+            while self.token.is_when():
+                kind, action = self._parse_merge_when_clause()
+                if kind == "matched":
+                    if matched is not None:
+                        raise ValueError("Duplicate WHEN MATCHED clause in MERGE INTO")
+                    matched = cast(MergeMatchedAction, action)
+                else:
+                    if not_matched is not None:
+                        raise ValueError("Duplicate WHEN NOT MATCHED clause in MERGE INTO")
+                    not_matched = cast(MergeNotMatchedInsert, action)
+                self._skip_whitespace_and_comments()
+            if matched is None and not_matched is None:
+                raise ValueError("MERGE INTO requires at least one WHEN clause")
+            merge.set_clauses(on_clause, matched, not_matched)
+        finally:
+            if target_alias is not None:
+                self._state.variables.pop(target_alias, None)
+            if source_alias is not None:
+                self._state.variables.pop(source_alias, None)
+        return merge
+
+    def _parse_merge_on(self) -> MergeOnClause:
+        """Parses the body of the ``ON`` clause.  A bare identifier (or
+        parenthesised list of identifiers) followed by ``WHEN`` is the
+        key form; anything else is parsed as an expression."""
+        saved_index = self._token_index
+        keys = self._try_parse_merge_key_list()
+        if keys is not None:
+            return MergeOnKeys(keys)
+        self._token_index = saved_index
+        predicate = self._parse_expression()
+        if predicate is None:
+            raise ValueError("Expected predicate or key list after MERGE INTO … ON")
+        self._convert_unresolved_references_to_bindings(predicate)
+        return MergeOnPredicate(predicate)
+
+    def _try_parse_merge_key_list(self) -> Optional[List[str]]:
+        """Speculatively parses ``<id>`` or ``(<id> [, <id>]*)`` followed
+        by ``WHEN``.  Returns the key list on success or ``None``."""
+        keys: List[str] = []
         if self.token.is_left_parenthesis():
             self.set_next_token()
             self._skip_whitespace_and_comments()
-            keys: List[str] = []
             while not self.token.is_right_parenthesis():
                 if not self.token.is_identifier_or_keyword() or self.token.value is None:
-                    raise ValueError("Expected merge-key identifier")
+                    return None
                 keys.append(self.token.value)
                 self.set_next_token()
                 self._skip_whitespace_and_comments()
                 if self.token.is_comma():
                     self.set_next_token()
                     self._skip_whitespace_and_comments()
+                elif not self.token.is_right_parenthesis():
+                    return None
             self.set_next_token()
-            if len(keys) == 0:
-                raise ValueError("Expected at least one merge-key identifier")
-            return keys
-        if not self.token.is_identifier_or_keyword() or self.token.value is None:
-            raise ValueError("Expected merge-key identifier after MERGE ON")
-        key = self.token.value
-        self.set_next_token()
-        return [key]
-
-    def _parse_merge_set_fields(self) -> List[str]:
-        """Parses ``SET .field, .field, …``."""
-        fields: List[str] = []
-        while True:
-            if not self.token.is_dot():
-                raise ValueError("Expected '.' before SET field name")
-            self.set_next_token()
+        else:
             if not self.token.is_identifier_or_keyword() or self.token.value is None:
-                raise ValueError("Expected field name after '.'")
-            fields.append(self.token.value)
+                return None
+            keys.append(self.token.value)
             self.set_next_token()
-            self._skip_whitespace_and_comments()
-            if not self.token.is_comma():
-                break
-            self.set_next_token()
-            self._skip_whitespace_and_comments()
-        if len(fields) == 0:
-            raise ValueError("Expected at least one SET field")
-        return fields
+        self._skip_whitespace_and_comments()
+        if not self.token.is_when():
+            return None
+        if len(keys) == 0:
+            return None
+        return keys
 
-    def _parse_merge_when_clause(self) -> Tuple[bool, bool]:
-        """Parses optional ``WHEN MATCHED`` / ``WHEN NOT MATCHED``.
-
-        Returns ``(when_matched, when_not_matched)``.
-        """
-        self.set_next_token()
+    def _parse_merge_when_clause(self) -> Tuple[str, Any]:
+        """Parses a single ``WHEN [NOT] MATCHED THEN UPDATE SET … |
+        DELETE | INSERT [<expr>]`` clause.  Returns a tuple of
+        ``("matched" | "not_matched", action)``.  Caller is positioned
+        on ``WHEN``."""
+        self.set_next_token()  # consume WHEN
         self._expect_and_skip_whitespace_and_comments()
         negated = False
         if self.token.is_not():
@@ -771,9 +863,73 @@ class Parser(BaseParser):
                 "Expected MATCHED after WHEN" + (" NOT" if negated else "")
             )
         self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_then():
+            raise ValueError(
+                "Expected THEN after WHEN" + (" NOT" if negated else "") + " MATCHED"
+            )
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
         if negated:
-            return (False, True)
-        return (True, False)
+            if not self.token.is_insert():
+                raise ValueError("Expected INSERT after WHEN NOT MATCHED THEN")
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            expression: Optional[Expression] = None
+            if (
+                not self.token.is_when()
+                and not self.token.is_eof()
+                and not self.token.is_semicolon()
+                and not self.token.is_closing_brace()
+            ):
+                expression = self._parse_expression()
+                if expression is None:
+                    raise ValueError("Expected expression after WHEN NOT MATCHED THEN INSERT")
+                self._convert_unresolved_references_to_bindings(expression)
+            return ("not_matched", MergeNotMatchedInsert(expression))
+        if self.token.is_update():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_set():
+                raise ValueError("Expected SET after WHEN MATCHED THEN UPDATE")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            set_items = self._parse_merge_set_list()
+            return ("matched", MergeMatchedUpdate(set_items))
+        if self.token.is_delete():
+            self.set_next_token()
+            return ("matched", MergeMatchedDelete())
+        raise ValueError("Expected UPDATE or DELETE after WHEN MATCHED THEN")
+
+    def _parse_merge_set_list(self) -> List[MergeSetItem]:
+        """Parses ``.field [= <expr>] [, .field [= <expr>]]*``."""
+        items: List[MergeSetItem] = []
+        while True:
+            if not self.token.is_dot():
+                raise ValueError("Expected '.' before SET field name")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected field name after '.'")
+            field = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            expression: Optional[Expression] = None
+            if self.token.is_equals():
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                expression = self._parse_expression()
+                if expression is None:
+                    raise ValueError(f"Expected expression after SET .{field} =")
+                self._convert_unresolved_references_to_bindings(expression)
+                self._skip_whitespace_and_comments()
+            items.append(MergeSetItem(field, expression))
+            if not self.token.is_comma():
+                break
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if len(items) == 0:
+            raise ValueError("Expected at least one SET field")
+        return items
 
     def _parse_update_delete_tail(self, name: str) -> UpdateDelete:
         """Parses the tail of ``UPDATE name AS alias DELETE WHERE <pred>``,

@@ -5331,7 +5331,7 @@ test("Test multi-statement rejects retrieval before last", () => {
             }
         `);
     }).toThrow(
-        "Only CREATE, DELETE, LET, and UPDATE statements can appear before the last statement in a multi-statement query"
+        "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
     );
 });
 

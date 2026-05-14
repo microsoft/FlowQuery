@@ -713,6 +713,27 @@ class Token:
     def is_matched(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.MATCHED.value
 
+    @staticmethod
+    def INTO() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.INTO.value)
+
+    def is_into(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.INTO.value
+
+    @staticmethod
+    def USING() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.USING.value)
+
+    def is_using(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.USING.value
+
+    @staticmethod
+    def INSERT() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.INSERT.value)
+
+    def is_insert(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.INSERT.value
+
     # Other utility methods
 
     def is_operand(self) -> bool:

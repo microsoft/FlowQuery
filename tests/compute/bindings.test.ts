@@ -112,17 +112,21 @@ describe("UPDATE — full replace", () => {
     });
 });
 
-describe("UPDATE … MERGE ON — upsert", () => {
+describe("MERGE INTO … USING — upsert", () => {
     test("replaces matching rows and appends new ones", async () => {
         const runner = new Runner(`
             LET data = [
                 {id: 1, name: "Alice"},
                 {id: 2, name: "Bob"}
             ];
-            UPDATE data MERGE ON id = [
-                {id: 2, name: "Bobby"},
-                {id: 3, name: "Charlie"}
-            ];
+            MERGE INTO data
+                USING [
+                    {id: 2, name: "Bobby"},
+                    {id: 3, name: "Charlie"}
+                ]
+                ON id
+                WHEN MATCHED THEN UPDATE SET .id, .name
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM data AS d
             RETURN d.id AS id, d.name AS name
             ORDER BY id
@@ -135,9 +139,12 @@ describe("UPDATE … MERGE ON — upsert", () => {
         ]);
     });
 
-    test("MERGE on missing binding throws (use LET to create)", async () => {
+    test("MERGE INTO on missing binding throws (use LET to create)", async () => {
         const runner = new Runner(`
-            UPDATE fresh MERGE ON id = [{id: 1, v: "x"}, {id: 2, v: "y"}];
+            MERGE INTO fresh
+                USING [{id: 1, v: "x"}, {id: 2, v: "y"}]
+                ON id
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM fresh AS f
             RETURN f.id AS id, f.v AS v
         `);
@@ -146,12 +153,16 @@ describe("UPDATE … MERGE ON — upsert", () => {
         );
     });
 
-    test("MERGE supports query RHS", async () => {
+    test("supports a sub-query as the USING source", async () => {
         const runner = new Runner(`
             LET data = [{id: 1, n: 10}];
-            UPDATE data MERGE ON id =
-                UNWIND [{id: 1, n: 99}, {id: 2, n: 20}] AS r
-                RETURN r.id AS id, r.n AS n;
+            MERGE INTO data
+                USING
+                    UNWIND [{id: 1, n: 99}, {id: 2, n: 20}] AS r
+                    RETURN r.id AS id, r.n AS n
+                ON id
+                WHEN MATCHED THEN UPDATE SET .id, .n
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM data AS d
             RETURN d.id AS id, d.n AS n
             ORDER BY id
@@ -177,8 +188,10 @@ describe("Error cases", () => {
         expect(() => new Runner("LET foo 1; RETURN 1")).toThrow(/Expected '='/);
     });
 
-    test("UPDATE MERGE requires ON <key>", () => {
-        expect(() => new Runner("UPDATE foo MERGE = [1]; RETURN 1")).toThrow(/Expected ON/);
+    test("MERGE INTO requires at least one WHEN clause", () => {
+        expect(() => new Runner("LET d = [1]; MERGE INTO d USING [1] ON id; RETURN 1")).toThrow(
+            /MERGE INTO requires at least one WHEN clause/
+        );
     });
 
     test("plain UPDATE on missing binding throws", async () => {
@@ -192,7 +205,7 @@ describe("Error cases", () => {
     });
 });
 
-describe("UPDATE … MERGE ON — composite keys", () => {
+describe("MERGE INTO — composite keys", () => {
     test("matches rows on multiple keys", async () => {
         const runner = new Runner(`
             LET rows = [
@@ -200,11 +213,15 @@ describe("UPDATE … MERGE ON — composite keys", () => {
                 {tenant: "a", id: 2, v: "old-a2"},
                 {tenant: "b", id: 1, v: "old-b1"}
             ];
-            UPDATE rows MERGE ON (tenant, id) = [
-                {tenant: "a", id: 2, v: "new-a2"},
-                {tenant: "b", id: 1, v: "new-b1"},
-                {tenant: "c", id: 1, v: "new-c1"}
-            ];
+            MERGE INTO rows
+                USING [
+                    {tenant: "a", id: 2, v: "new-a2"},
+                    {tenant: "b", id: 1, v: "new-b1"},
+                    {tenant: "c", id: 1, v: "new-c1"}
+                ]
+                ON (tenant, id)
+                WHEN MATCHED THEN UPDATE SET .tenant, .id, .v
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM rows AS r
             RETURN r.tenant AS tenant, r.id AS id, r.v AS v
             ORDER BY tenant, id
@@ -218,10 +235,14 @@ describe("UPDATE … MERGE ON — composite keys", () => {
         ]);
     });
 
-    test("composite key with single element behaves like the simple form", async () => {
+    test("ON with single parenthesised key behaves like the bare form", async () => {
         const runner = new Runner(`
             LET data = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-            UPDATE data MERGE ON (id) = [{id: 2, v: "B"}, {id: 3, v: "c"}];
+            MERGE INTO data
+                USING [{id: 2, v: "B"}, {id: 3, v: "c"}]
+                ON (id)
+                WHEN MATCHED THEN UPDATE SET .id, .v
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM data AS d
             RETURN d.id AS id, d.v AS v
             ORDER BY id
@@ -235,17 +256,21 @@ describe("UPDATE … MERGE ON — composite keys", () => {
     });
 });
 
-describe("UPDATE … MERGE ON … SET — partial field merge", () => {
+describe("MERGE INTO … WHEN MATCHED THEN UPDATE SET — partial field merge", () => {
     test("only listed fields overwrite existing rows", async () => {
         const runner = new Runner(`
             LET users = [
                 {id: 1, name: "Alice", email: "a@x", age: 30},
                 {id: 2, name: "Bob",   email: "b@x", age: 40}
             ];
-            UPDATE users MERGE ON id SET .name, .email = [
-                {id: 1, name: "Alicia", email: "alicia@x", age: 999},
-                {id: 3, name: "Carol",  email: "c@x"}
-            ];
+            MERGE INTO users
+                USING [
+                    {id: 1, name: "Alicia", email: "alicia@x", age: 999},
+                    {id: 3, name: "Carol",  email: "c@x"}
+                ]
+                ON id
+                WHEN MATCHED THEN UPDATE SET .name, .email
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM users AS u
             RETURN u.id AS id, u.name AS name, u.email AS email, u.age AS age
             ORDER BY id
@@ -261,9 +286,11 @@ describe("UPDATE … MERGE ON … SET — partial field merge", () => {
     test("missing SET fields on incoming row leave existing fields untouched", async () => {
         const runner = new Runner(`
             LET users = [{id: 1, name: "Alice", email: "a@x"}];
-            UPDATE users MERGE ON id SET .name, .email = [
-                {id: 1, name: "Alicia"}
-            ];
+            MERGE INTO users
+                USING [{id: 1, name: "Alicia"}]
+                ON id
+                WHEN MATCHED THEN UPDATE SET .name, .email
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM users AS u
             RETURN u.id AS id, u.name AS name, u.email AS email
         `);
@@ -272,14 +299,14 @@ describe("UPDATE … MERGE ON … SET — partial field merge", () => {
     });
 });
 
-describe("UPDATE … MERGE ON … WHEN [NOT] MATCHED", () => {
-    test("WHEN MATCHED only updates existing rows; new rows are ignored", async () => {
+describe("MERGE INTO — selective branches", () => {
+    test("matched-only: omitting NOT MATCHED ignores new rows", async () => {
         const runner = new Runner(`
             LET data = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-            UPDATE data MERGE ON id WHEN MATCHED = [
-                {id: 1, v: "A"},
-                {id: 3, v: "C"}
-            ];
+            MERGE INTO data
+                USING [{id: 1, v: "A"}, {id: 3, v: "C"}]
+                ON id
+                WHEN MATCHED THEN UPDATE SET .id, .v;
             LOAD JSON FROM data AS d
             RETURN d.id AS id, d.v AS v
             ORDER BY id
@@ -291,13 +318,13 @@ describe("UPDATE … MERGE ON … WHEN [NOT] MATCHED", () => {
         ]);
     });
 
-    test("WHEN NOT MATCHED only inserts; existing rows are untouched", async () => {
+    test("not-matched-only: omitting MATCHED leaves existing rows untouched", async () => {
         const runner = new Runner(`
             LET data = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-            UPDATE data MERGE ON id WHEN NOT MATCHED = [
-                {id: 1, v: "A"},
-                {id: 3, v: "C"}
-            ];
+            MERGE INTO data
+                USING [{id: 1, v: "A"}, {id: 3, v: "C"}]
+                ON id
+                WHEN NOT MATCHED THEN INSERT;
             LOAD JSON FROM data AS d
             RETURN d.id AS id, d.v AS v
             ORDER BY id
@@ -310,18 +337,113 @@ describe("UPDATE … MERGE ON … WHEN [NOT] MATCHED", () => {
         ]);
     });
 
-    test("WHEN MATCHED composes with SET", async () => {
+    test("WHEN MATCHED THEN DELETE removes matched target rows", async () => {
         const runner = new Runner(`
-            LET users = [{id: 1, name: "Alice", age: 30}];
-            UPDATE users MERGE ON id SET .name WHEN MATCHED = [
-                {id: 1, name: "Alicia", age: 999},
-                {id: 2, name: "ignored", age: 1}
+            LET users = [
+                {id: 1, name: "Alice"},
+                {id: 2, name: "Bob"},
+                {id: 3, name: "Carol"}
             ];
+            MERGE INTO users
+                USING [{id: 2}, {id: 3}]
+                ON id
+                WHEN MATCHED THEN DELETE;
             LOAD JSON FROM users AS u
-            RETURN u.id AS id, u.name AS name, u.age AS age
+            RETURN u.id AS id, u.name AS name
+            ORDER BY id
         `);
         await runner.run();
-        expect(runner.results).toEqual([{ id: 1, name: "Alicia", age: 30 }]);
+        expect(runner.results).toEqual([{ id: 1, name: "Alice" }]);
+    });
+});
+
+describe("MERGE INTO — per-row expressions across aliases", () => {
+    test("SET expression references both target and source aliases", async () => {
+        const runner = new Runner(`
+            LET users = [
+                {id: 1, name: "Alice"},
+                {id: 2, name: "Bob"}
+            ];
+            MERGE INTO users AS u
+                USING [
+                    {id: 1, name: "Smith"},
+                    {id: 2, name: "Jones"}
+                ] AS s
+                ON id
+                WHEN MATCHED THEN UPDATE SET .name = s.name + " " + u.name;
+            LOAD JSON FROM users AS u
+            RETURN u.id AS id, u.name AS name
+            ORDER BY id
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([
+            { id: 1, name: "Smith Alice" },
+            { id: 2, name: "Jones Bob" },
+        ]);
+    });
+
+    test("ON predicate evaluates per (target, source) pair", async () => {
+        const runner = new Runner(`
+            LET users = [
+                {tenant: "a", email: "x@a", v: 1},
+                {tenant: "b", email: "x@b", v: 2}
+            ];
+            MERGE INTO users AS u
+                USING [
+                    {tenant: "a", email: "x@a", v: 99},
+                    {tenant: "b", email: "y@b", v: 100}
+                ] AS s
+                ON u.tenant = s.tenant AND u.email = s.email
+                WHEN MATCHED THEN UPDATE SET .v = s.v
+                WHEN NOT MATCHED THEN INSERT;
+            LOAD JSON FROM users AS u
+            RETURN u.tenant AS tenant, u.email AS email, u.v AS v
+            ORDER BY tenant, email
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([
+            { tenant: "a", email: "x@a", v: 99 },
+            { tenant: "b", email: "x@b", v: 2 },
+            { tenant: "b", email: "y@b", v: 100 },
+        ]);
+    });
+
+    test("WHEN NOT MATCHED THEN INSERT with explicit row expression", async () => {
+        const runner = new Runner(`
+            LET users = [{id: 1, name: "Alice"}];
+            MERGE INTO users AS u
+                USING [{id: 2, name: "Bob"}] AS s
+                ON id
+                WHEN NOT MATCHED THEN INSERT {id: s.id, name: "New: " + s.name};
+            LOAD JSON FROM users AS u
+            RETURN u.id AS id, u.name AS name
+            ORDER BY id
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([
+            { id: 1, name: "Alice" },
+            { id: 2, name: "New: Bob" },
+        ]);
+    });
+
+    test("bare-binding source via USING <name> AS <alias>", async () => {
+        const runner = new Runner(`
+            LET users = [{id: 1, v: "a"}];
+            LET incoming = [{id: 1, v: "A"}, {id: 2, v: "B"}];
+            MERGE INTO users
+                USING incoming AS s
+                ON id
+                WHEN MATCHED THEN UPDATE SET .v = s.v
+                WHEN NOT MATCHED THEN INSERT;
+            LOAD JSON FROM users AS u
+            RETURN u.id AS id, u.v AS v
+            ORDER BY id
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([
+            { id: 1, v: "A" },
+            { id: 2, v: "B" },
+        ]);
     });
 });
 

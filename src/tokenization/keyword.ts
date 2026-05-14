@@ -50,6 +50,9 @@ enum Keyword {
     UPDATE = "UPDATE",
     ON = "ON",
     MATCHED = "MATCHED",
+    INTO = "INTO",
+    USING = "USING",
+    INSERT = "INSERT",
 }
 
 export default Keyword;

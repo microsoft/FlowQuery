@@ -783,6 +783,30 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.MATCHED;
     }
 
+    public static get INTO(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.INTO);
+    }
+
+    public isInto(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.INTO;
+    }
+
+    public static get USING(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.USING);
+    }
+
+    public isUsing(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.USING;
+    }
+
+    public static get INSERT(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.INSERT);
+    }
+
+    public isInsert(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.INSERT;
+    }
+
     // End of file token
 
     public static get EOF(): Token {

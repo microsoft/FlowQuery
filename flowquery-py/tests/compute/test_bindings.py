@@ -174,10 +174,14 @@ async def test_update_merge_replaces_and_appends():
             {id: 1, name: "Alice"},
             {id: 2, name: "Bob"}
         ];
-        UPDATE data MERGE ON id = [
-            {id: 2, name: "Bobby"},
-            {id: 3, name: "Charlie"}
-        ];
+        MERGE INTO data
+            USING [
+                {id: 2, name: "Bobby"},
+                {id: 3, name: "Charlie"}
+            ]
+            ON id
+            WHEN MATCHED THEN UPDATE SET .id, .name
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM data AS d
         RETURN d.id AS id, d.name AS name
         ORDER BY id
@@ -195,7 +199,10 @@ async def test_update_merge_replaces_and_appends():
 async def test_update_merge_on_missing_binding_throws():
     runner = Runner(
         """
-        UPDATE fresh MERGE ON id = [{id: 1, v: "x"}];
+        MERGE INTO fresh
+            USING [{id: 1, v: "x"}]
+            ON id
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM fresh AS f
         RETURN f.id AS id, f.v AS v
         """
@@ -209,9 +216,13 @@ async def test_update_merge_supports_query_rhs():
     runner = Runner(
         """
         LET data = [{id: 1, n: 10}];
-        UPDATE data MERGE ON id =
-            UNWIND [{id: 1, n: 99}, {id: 2, n: 20}] AS r
-            RETURN r.id AS id, r.n AS n;
+        MERGE INTO data
+            USING
+                UNWIND [{id: 1, n: 99}, {id: 2, n: 20}] AS r
+                RETURN r.id AS id, r.n AS n
+            ON id
+            WHEN MATCHED THEN UPDATE SET .id, .n
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM data AS d
         RETURN d.id AS id, d.n AS n
         ORDER BY id
@@ -246,8 +257,8 @@ def test_let_requires_equals():
 
 
 def test_update_merge_requires_on():
-    with pytest.raises(ValueError, match="Expected ON"):
-        Runner("UPDATE foo MERGE = [1]; RETURN 1")
+    with pytest.raises(ValueError, match="MERGE INTO requires at least one WHEN clause"):
+        Runner("LET d = [1]; MERGE INTO d USING [1] ON id; RETURN 1")
 
 
 @pytest.mark.asyncio
@@ -264,7 +275,7 @@ async def test_plain_update_on_missing_binding_throws():
 
 
 # ---------------------------------------------------------------------------
-# UPDATE ... MERGE ON — composite keys
+# MERGE INTO — composite keys
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -276,11 +287,15 @@ async def test_update_merge_composite_keys_matches_on_multiple():
             {tenant: "a", id: 2, v: "old-a2"},
             {tenant: "b", id: 1, v: "old-b1"}
         ];
-        UPDATE rows MERGE ON (tenant, id) = [
-            {tenant: "a", id: 2, v: "new-a2"},
-            {tenant: "b", id: 1, v: "new-b1"},
-            {tenant: "c", id: 9, v: "new-c9"}
-        ];
+        MERGE INTO rows
+            USING [
+                {tenant: "a", id: 2, v: "new-a2"},
+                {tenant: "b", id: 1, v: "new-b1"},
+                {tenant: "c", id: 9, v: "new-c9"}
+            ]
+            ON (tenant, id)
+            WHEN MATCHED THEN UPDATE SET .tenant, .id, .v
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM rows AS r
         RETURN r.tenant AS tenant, r.id AS id, r.v AS v
         ORDER BY tenant, id
@@ -300,7 +315,11 @@ async def test_update_merge_composite_single_element_equals_simple_form():
     runner = Runner(
         """
         LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-        UPDATE rows MERGE ON (id) = [{id: 2, v: "B"}, {id: 3, v: "C"}];
+        MERGE INTO rows
+            USING [{id: 2, v: "B"}, {id: 3, v: "C"}]
+            ON (id)
+            WHEN MATCHED THEN UPDATE SET .id, .v
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.v AS v
         ORDER BY id
@@ -315,7 +334,7 @@ async def test_update_merge_composite_single_element_equals_simple_form():
 
 
 # ---------------------------------------------------------------------------
-# UPDATE ... MERGE ON ... SET — partial field merge
+# MERGE INTO ... WHEN MATCHED THEN UPDATE SET — partial field merge
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -326,10 +345,14 @@ async def test_update_merge_set_only_listed_fields_overwrite():
             {id: 1, name: "Alice",   email: "a@x", age: 30},
             {id: 2, name: "Bob",     email: "b@x", age: 40}
         ];
-        UPDATE rows MERGE ON id SET .name, .email = [
-            {id: 1, name: "Alicia",  email: "alicia@x", age: 999},
-            {id: 3, name: "Carol",   email: "c@x"}
-        ];
+        MERGE INTO rows
+            USING [
+                {id: 1, name: "Alicia",  email: "alicia@x", age: 999},
+                {id: 3, name: "Carol",   email: "c@x"}
+            ]
+            ON id
+            WHEN MATCHED THEN UPDATE SET .name, .email
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.name AS name, r.email AS email, r.age AS age
         ORDER BY id
@@ -351,9 +374,11 @@ async def test_update_merge_set_missing_field_on_incoming_leaves_existing():
     runner = Runner(
         """
         LET rows = [{id: 1, a: 1, b: 2}];
-        UPDATE rows MERGE ON id SET .a, .b = [
-            {id: 1, a: 10}
-        ];
+        MERGE INTO rows
+            USING [{id: 1, a: 10}]
+            ON id
+            WHEN MATCHED THEN UPDATE SET .a, .b
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.a AS a, r.b AS b
         """
@@ -364,7 +389,7 @@ async def test_update_merge_set_missing_field_on_incoming_leaves_existing():
 
 
 # ---------------------------------------------------------------------------
-# UPDATE ... MERGE ON ... WHEN [NOT] MATCHED
+# MERGE INTO — selective branches
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -372,17 +397,17 @@ async def test_update_merge_when_matched_only_updates():
     runner = Runner(
         """
         LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-        UPDATE rows MERGE ON id WHEN MATCHED = [
-            {id: 2, v: "B"},
-            {id: 3, v: "C"}
-        ];
+        MERGE INTO rows
+            USING [{id: 2, v: "B"}, {id: 3, v: "C"}]
+            ON id
+            WHEN MATCHED THEN UPDATE SET .id, .v;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.v AS v
         ORDER BY id
         """
     )
     await runner.run()
-    # id=3 is NOT inserted because WHEN MATCHED suppresses the insert branch.
+    # id=3 is NOT inserted because the WHEN NOT MATCHED branch is omitted.
     assert runner.results == [
         {"id": 1, "v": "a"},
         {"id": 2, "v": "B"},
@@ -394,10 +419,10 @@ async def test_update_merge_when_not_matched_only_inserts():
     runner = Runner(
         """
         LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
-        UPDATE rows MERGE ON id WHEN NOT MATCHED = [
-            {id: 2, v: "B-ignored"},
-            {id: 3, v: "C"}
-        ];
+        MERGE INTO rows
+            USING [{id: 2, v: "B-ignored"}, {id: 3, v: "C"}]
+            ON id
+            WHEN NOT MATCHED THEN INSERT;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.v AS v
         ORDER BY id
@@ -417,10 +442,13 @@ async def test_update_merge_when_matched_composes_with_set():
     runner = Runner(
         """
         LET rows = [{id: 1, name: "Alice", age: 30}];
-        UPDATE rows MERGE ON id SET .name WHEN MATCHED = [
-            {id: 1, name: "Alicia", age: 999},
-            {id: 2, name: "Bob",    age: 40}
-        ];
+        MERGE INTO rows
+            USING [
+                {id: 1, name: "Alicia", age: 999},
+                {id: 2, name: "Bob",    age: 40}
+            ]
+            ON id
+            WHEN MATCHED THEN UPDATE SET .name;
         LOAD JSON FROM rows AS r
         RETURN r.id AS id, r.name AS name, r.age AS age
         ORDER BY id
@@ -428,9 +456,135 @@ async def test_update_merge_when_matched_composes_with_set():
     )
     await runner.run()
     # Only the .name field updates on the matched row; age stays at 30.
-    # id=2 is NOT inserted because WHEN MATCHED suppresses the insert.
+    # id=2 is NOT inserted because the WHEN NOT MATCHED branch is omitted.
     assert runner.results == [
         {"id": 1, "name": "Alicia", "age": 30},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# MERGE INTO — per-row expressions across aliases
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_merge_when_matched_then_delete():
+    runner = Runner(
+        """
+        LET users = [
+            {id: 1, name: "Alice"},
+            {id: 2, name: "Bob"},
+            {id: 3, name: "Carol"}
+        ];
+        MERGE INTO users
+            USING [{id: 2}, {id: 3}]
+            ON id
+            WHEN MATCHED THEN DELETE;
+        LOAD JSON FROM users AS u
+        RETURN u.id AS id, u.name AS name
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"id": 1, "name": "Alice"}]
+
+
+@pytest.mark.asyncio
+async def test_merge_set_expression_references_target_and_source_aliases():
+    runner = Runner(
+        """
+        LET users = [
+            {id: 1, name: "Alice"},
+            {id: 2, name: "Bob"}
+        ];
+        MERGE INTO users AS u
+            USING [
+                {id: 1, name: "Smith"},
+                {id: 2, name: "Jones"}
+            ] AS s
+            ON id
+            WHEN MATCHED THEN UPDATE SET .name = s.name + " " + u.name;
+        LOAD JSON FROM users AS u
+        RETURN u.id AS id, u.name AS name
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "name": "Smith Alice"},
+        {"id": 2, "name": "Jones Bob"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_merge_on_predicate_evaluates_per_pair():
+    runner = Runner(
+        """
+        LET users = [
+            {tenant: "a", email: "x@a", v: 1},
+            {tenant: "b", email: "x@b", v: 2}
+        ];
+        MERGE INTO users AS u
+            USING [
+                {tenant: "a", email: "x@a", v: 99},
+                {tenant: "b", email: "y@b", v: 100}
+            ] AS s
+            ON u.tenant = s.tenant AND u.email = s.email
+            WHEN MATCHED THEN UPDATE SET .v = s.v
+            WHEN NOT MATCHED THEN INSERT;
+        LOAD JSON FROM users AS u
+        RETURN u.tenant AS tenant, u.email AS email, u.v AS v
+        ORDER BY tenant, email
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"tenant": "a", "email": "x@a", "v": 99},
+        {"tenant": "b", "email": "x@b", "v": 2},
+        {"tenant": "b", "email": "y@b", "v": 100},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_merge_insert_explicit_row_expression():
+    runner = Runner(
+        """
+        LET users = [{id: 1, name: "Alice"}];
+        MERGE INTO users AS u
+            USING [{id: 2, name: "Bob"}] AS s
+            ON id
+            WHEN NOT MATCHED THEN INSERT {id: s.id, name: "New: " + s.name};
+        LOAD JSON FROM users AS u
+        RETURN u.id AS id, u.name AS name
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "New: Bob"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_merge_bare_binding_source_via_using():
+    runner = Runner(
+        """
+        LET users = [{id: 1, v: "a"}];
+        LET incoming = [{id: 1, v: "A"}, {id: 2, v: "B"}];
+        MERGE INTO users
+            USING incoming AS s
+            ON id
+            WHEN MATCHED THEN UPDATE SET .v = s.v
+            WHEN NOT MATCHED THEN INSERT;
+        LOAD JSON FROM users AS u
+        RETURN u.id AS id, u.v AS v
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "v": "A"},
+        {"id": 2, "v": "B"},
     ]
 
 

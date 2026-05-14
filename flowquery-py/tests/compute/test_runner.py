@@ -5798,7 +5798,7 @@ class TestMultiStatement:
         assert match_b.results[0] == {"name": "B"}
 
     def test_multi_statement_rejects_retrieval_before_last(self):
-        with pytest.raises(ValueError, match="Only CREATE, DELETE, LET, and UPDATE"):
+        with pytest.raises(ValueError, match="Only CREATE, DELETE, LET, UPDATE, and MERGE"):
             Runner("""
                 RETURN 1 AS x;
                 CREATE VIRTUAL (:PyShouldFail) AS {

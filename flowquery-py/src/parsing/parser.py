@@ -62,7 +62,7 @@ from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
 from .operations.delete_relationship import DeleteRelationship
-from .operations.let_op import Let
+from .operations.let import Let
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
@@ -72,7 +72,7 @@ from .operations.return_op import Return
 from .operations.union import Union
 from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
-from .operations.update_op import Update
+from .operations.update import Update
 from .operations.where import Where
 from .operations.with_op import With
 from .parser_state import ParserState

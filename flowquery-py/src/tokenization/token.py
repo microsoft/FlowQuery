@@ -706,6 +706,13 @@ class Token:
     def is_on(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.ON.value
 
+    @staticmethod
+    def MATCHED() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.MATCHED.value)
+
+    def is_matched(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.MATCHED.value
+
     # Other utility methods
 
     def is_operand(self) -> bool:

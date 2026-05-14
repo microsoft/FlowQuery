@@ -192,20 +192,16 @@ async def test_update_merge_replaces_and_appends():
 
 
 @pytest.mark.asyncio
-async def test_update_merge_on_missing_binding_is_insert():
+async def test_update_merge_on_missing_binding_throws():
     runner = Runner(
         """
-        UPDATE fresh MERGE ON id = [{id: 1, v: "x"}, {id: 2, v: "y"}];
+        UPDATE fresh MERGE ON id = [{id: 1, v: "x"}];
         LOAD JSON FROM fresh AS f
         RETURN f.id AS id, f.v AS v
-        ORDER BY id
         """
     )
-    await runner.run()
-    assert runner.results == [
-        {"id": 1, "v": "x"},
-        {"id": 2, "v": "y"},
-    ]
+    with pytest.raises(RuntimeError, match="Binding 'fresh' is not defined"):
+        await runner.run()
 
 
 @pytest.mark.asyncio
@@ -252,3 +248,288 @@ def test_let_requires_equals():
 def test_update_merge_requires_on():
     with pytest.raises(ValueError, match="Expected ON"):
         Runner("UPDATE foo MERGE = [1]; RETURN 1")
+
+
+@pytest.mark.asyncio
+async def test_plain_update_on_missing_binding_throws():
+    runner = Runner(
+        """
+        UPDATE undeclared = [1, 2, 3];
+        LOAD JSON FROM undeclared AS x
+        RETURN x
+        """
+    )
+    with pytest.raises(RuntimeError, match="Binding 'undeclared' is not defined"):
+        await runner.run()
+
+
+# ---------------------------------------------------------------------------
+# UPDATE ... MERGE ON — composite keys
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_merge_composite_keys_matches_on_multiple():
+    runner = Runner(
+        """
+        LET rows = [
+            {tenant: "a", id: 1, v: "old-a1"},
+            {tenant: "a", id: 2, v: "old-a2"},
+            {tenant: "b", id: 1, v: "old-b1"}
+        ];
+        UPDATE rows MERGE ON (tenant, id) = [
+            {tenant: "a", id: 2, v: "new-a2"},
+            {tenant: "b", id: 1, v: "new-b1"},
+            {tenant: "c", id: 9, v: "new-c9"}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.tenant AS tenant, r.id AS id, r.v AS v
+        ORDER BY tenant, id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"tenant": "a", "id": 1, "v": "old-a1"},
+        {"tenant": "a", "id": 2, "v": "new-a2"},
+        {"tenant": "b", "id": 1, "v": "new-b1"},
+        {"tenant": "c", "id": 9, "v": "new-c9"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_merge_composite_single_element_equals_simple_form():
+    runner = Runner(
+        """
+        LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
+        UPDATE rows MERGE ON (id) = [{id: 2, v: "B"}, {id: 3, v: "C"}];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.v AS v
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "v": "a"},
+        {"id": 2, "v": "B"},
+        {"id": 3, "v": "C"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# UPDATE ... MERGE ON ... SET — partial field merge
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_merge_set_only_listed_fields_overwrite():
+    runner = Runner(
+        """
+        LET rows = [
+            {id: 1, name: "Alice",   email: "a@x", age: 30},
+            {id: 2, name: "Bob",     email: "b@x", age: 40}
+        ];
+        UPDATE rows MERGE ON id SET .name, .email = [
+            {id: 1, name: "Alicia",  email: "alicia@x", age: 999},
+            {id: 3, name: "Carol",   email: "c@x"}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.name AS name, r.email AS email, r.age AS age
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    # row 1: only name+email overwritten, age preserved at 30 (NOT 999)
+    # row 2: untouched
+    # row 3: appended; age missing on incoming row → projection yields None
+    assert runner.results == [
+        {"id": 1, "name": "Alicia", "email": "alicia@x", "age": 30},
+        {"id": 2, "name": "Bob",    "email": "b@x",      "age": 40},
+        {"id": 3, "name": "Carol",  "email": "c@x",      "age": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_merge_set_missing_field_on_incoming_leaves_existing():
+    runner = Runner(
+        """
+        LET rows = [{id: 1, a: 1, b: 2}];
+        UPDATE rows MERGE ON id SET .a, .b = [
+            {id: 1, a: 10}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.a AS a, r.b AS b
+        """
+    )
+    await runner.run()
+    # `b` not present in incoming row → existing `b: 2` is preserved
+    assert runner.results == [{"id": 1, "a": 10, "b": 2}]
+
+
+# ---------------------------------------------------------------------------
+# UPDATE ... MERGE ON ... WHEN [NOT] MATCHED
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_merge_when_matched_only_updates():
+    runner = Runner(
+        """
+        LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
+        UPDATE rows MERGE ON id WHEN MATCHED = [
+            {id: 2, v: "B"},
+            {id: 3, v: "C"}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.v AS v
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    # id=3 is NOT inserted because WHEN MATCHED suppresses the insert branch.
+    assert runner.results == [
+        {"id": 1, "v": "a"},
+        {"id": 2, "v": "B"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_merge_when_not_matched_only_inserts():
+    runner = Runner(
+        """
+        LET rows = [{id: 1, v: "a"}, {id: 2, v: "b"}];
+        UPDATE rows MERGE ON id WHEN NOT MATCHED = [
+            {id: 2, v: "B-ignored"},
+            {id: 3, v: "C"}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.v AS v
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    # id=2 is NOT updated; id=3 is inserted.
+    assert runner.results == [
+        {"id": 1, "v": "a"},
+        {"id": 2, "v": "b"},
+        {"id": 3, "v": "C"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_merge_when_matched_composes_with_set():
+    runner = Runner(
+        """
+        LET rows = [{id: 1, name: "Alice", age: 30}];
+        UPDATE rows MERGE ON id SET .name WHEN MATCHED = [
+            {id: 1, name: "Alicia", age: 999},
+            {id: 2, name: "Bob",    age: 40}
+        ];
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.name AS name, r.age AS age
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    # Only the .name field updates on the matched row; age stays at 30.
+    # id=2 is NOT inserted because WHEN MATCHED suppresses the insert.
+    assert runner.results == [
+        {"id": 1, "name": "Alicia", "age": 30},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# UPDATE ... AS u DELETE WHERE — row filtering
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_delete_removes_rows_matching_predicate():
+    runner = Runner(
+        """
+        LET rows = [
+            {id: 1, name: "Alice", age: 30},
+            {id: 2, name: "Bob",   age: 17},
+            {id: 3, name: "Carol", age: 22}
+        ];
+        UPDATE rows AS u DELETE WHERE u.age < 21;
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id, r.name AS name
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [
+        {"id": 1, "name": "Alice"},
+        {"id": 3, "name": "Carol"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_delete_scalar_list_bare_alias_predicate():
+    runner = Runner(
+        """
+        LET nums = [1, 2, 3, 4, 5];
+        UPDATE nums AS n DELETE WHERE n % 2 = 0;
+        LOAD JSON FROM nums AS x
+        RETURN x
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"x": 1}, {"x": 3}, {"x": 5}]
+
+
+@pytest.mark.asyncio
+async def test_update_delete_can_reference_other_bindings_in_predicate():
+    runner = Runner(
+        """
+        LET banned = [2, 4];
+        LET rows = [{id: 1}, {id: 2}, {id: 3}, {id: 4}, {id: 5}];
+        UPDATE rows AS u DELETE WHERE u.id IN banned;
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id
+        ORDER BY id
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"id": 1}, {"id": 3}, {"id": 5}]
+
+
+@pytest.mark.asyncio
+async def test_update_delete_preserves_relative_order():
+    runner = Runner(
+        """
+        LET rows = [
+            {id: 10, drop: false},
+            {id: 20, drop: true},
+            {id: 30, drop: false},
+            {id: 40, drop: true},
+            {id: 50, drop: false}
+        ];
+        UPDATE rows AS u DELETE WHERE u.drop;
+        LOAD JSON FROM rows AS r
+        RETURN r.id AS id
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"id": 10}, {"id": 30}, {"id": 50}]
+
+
+@pytest.mark.asyncio
+async def test_update_delete_throws_when_binding_missing():
+    runner = Runner(
+        """
+        UPDATE no_such AS u DELETE WHERE u.x = 1;
+        RETURN 1 AS done
+        """
+    )
+    with pytest.raises(RuntimeError, match="Binding 'no_such' is not defined"):
+        await runner.run()
+
+
+@pytest.mark.asyncio
+async def test_update_delete_throws_when_binding_not_a_list():
+    runner = Runner(
+        """
+        LET scalar = 42;
+        UPDATE scalar AS u DELETE WHERE u = 42;
+        RETURN 1 AS done
+        """
+    )
+    with pytest.raises(RuntimeError, match="requires 'scalar' to be a list"):
+        await runner.run()

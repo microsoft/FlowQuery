@@ -73,6 +73,7 @@ from .operations.union import Union
 from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
 from .operations.update import Update
+from .operations.update_delete import UpdateDelete
 from .operations.where import Where
 from .operations.with_op import With
 from .parser_state import ParserState
@@ -165,7 +166,7 @@ class Parser(BaseParser):
         while op is not None:
             if not isinstance(
                 op,
-                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update),
+                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete),
             ):
                 raise ValueError(
                     "Only CREATE, DELETE, LET, and UPDATE statements can appear "
@@ -269,7 +270,7 @@ class Parser(BaseParser):
 
         if not isinstance(
             operation,
-            (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update),
+            (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete),
         ):
             raise ValueError(
                 "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
@@ -657,7 +658,7 @@ class Parser(BaseParser):
         expression, sub_query = self._parse_let_update_rhs()
         return Let(name, expression, sub_query)
 
-    def _parse_update(self) -> Optional[Update]:
+    def _parse_update(self) -> Optional[Operation]:
         if not self.token.is_update():
             return None
         self.set_next_token()
@@ -667,7 +668,16 @@ class Parser(BaseParser):
         name = self.token.value
         self.set_next_token()
         self._skip_whitespace_and_comments()
-        merge_key: Optional[str] = None
+
+        # `UPDATE name AS alias DELETE WHERE <pred>` — row-filter branch.
+        if self.token.is_as():
+            return self._parse_update_delete_tail(name)
+
+        # `UPDATE name [MERGE ON …] = <rhs>` — assign or merge branch.
+        merge_keys: Optional[List[str]] = None
+        set_fields: Optional[List[str]] = None
+        when_matched = True
+        when_not_matched = True
         if self.token.is_merge():
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
@@ -675,16 +685,145 @@ class Parser(BaseParser):
                 raise ValueError("Expected ON after MERGE")
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
-            if not self.token.is_identifier_or_keyword() or self.token.value is None:
-                raise ValueError("Expected merge-key identifier after MERGE ON")
-            merge_key = self.token.value
-            self.set_next_token()
+            merge_keys = self._parse_merge_keys()
             self._skip_whitespace_and_comments()
+            if self.token.is_set():
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                set_fields = self._parse_merge_set_fields()
+                self._skip_whitespace_and_comments()
+            if self.token.is_when():
+                when_matched, when_not_matched = self._parse_merge_when_clause()
+                self._skip_whitespace_and_comments()
         if not self.token.is_equals():
             raise ValueError("Expected '=' in UPDATE")
         self.set_next_token()
         expression, sub_query = self._parse_let_update_rhs()
-        return Update(name, merge_key, expression, sub_query)
+        return Update(
+            name,
+            merge_keys,
+            set_fields,
+            when_matched,
+            when_not_matched,
+            expression,
+            sub_query,
+        )
+
+    def _parse_merge_keys(self) -> List[str]:
+        """Parses ``MERGE ON id`` or ``MERGE ON (a, b, c)``."""
+        if self.token.is_left_parenthesis():
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            keys: List[str] = []
+            while not self.token.is_right_parenthesis():
+                if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                    raise ValueError("Expected merge-key identifier")
+                keys.append(self.token.value)
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+                if self.token.is_comma():
+                    self.set_next_token()
+                    self._skip_whitespace_and_comments()
+            self.set_next_token()
+            if len(keys) == 0:
+                raise ValueError("Expected at least one merge-key identifier")
+            return keys
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected merge-key identifier after MERGE ON")
+        key = self.token.value
+        self.set_next_token()
+        return [key]
+
+    def _parse_merge_set_fields(self) -> List[str]:
+        """Parses ``SET .field, .field, …``."""
+        fields: List[str] = []
+        while True:
+            if not self.token.is_dot():
+                raise ValueError("Expected '.' before SET field name")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected field name after '.'")
+            fields.append(self.token.value)
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if not self.token.is_comma():
+                break
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if len(fields) == 0:
+            raise ValueError("Expected at least one SET field")
+        return fields
+
+    def _parse_merge_when_clause(self) -> Tuple[bool, bool]:
+        """Parses optional ``WHEN MATCHED`` / ``WHEN NOT MATCHED``.
+
+        Returns ``(when_matched, when_not_matched)``.
+        """
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        negated = False
+        if self.token.is_not():
+            negated = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_matched():
+            raise ValueError(
+                "Expected MATCHED after WHEN" + (" NOT" if negated else "")
+            )
+        self.set_next_token()
+        if negated:
+            return (False, True)
+        return (True, False)
+
+    def _parse_update_delete_tail(self, name: str) -> UpdateDelete:
+        """Parses the tail of ``UPDATE name AS alias DELETE WHERE <pred>``,
+        with ``AS`` already consumed by the caller's lookahead."""
+        self.set_next_token()  # consume AS
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected alias after AS")
+        alias = self.token.value
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_delete():
+            raise ValueError("Expected DELETE after UPDATE alias")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_where():
+            raise ValueError("Expected WHERE after UPDATE … DELETE")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Inject the alias into the parser's variable scope while we
+        # parse the predicate so that `<alias>` / `<alias>.field`
+        # references resolve to the UpdateDelete's per-row value.
+        update_delete = UpdateDelete(name, alias, Expression())
+        self._state.variables[alias] = update_delete
+        predicate = self._parse_expression()
+        self._state.variables.pop(alias, None)
+        if predicate is None:
+            raise ValueError("Expected predicate expression after WHERE")
+        # Any other unresolved bare identifiers (e.g. `IN banned`) refer
+        # to LET-bound bindings, which are resolved at run-time against
+        # the global Bindings store.
+        self._convert_unresolved_references_to_bindings(predicate)
+        update_delete.set_predicate(predicate)
+        return update_delete
+
+    def _convert_unresolved_references_to_bindings(self, node: ASTNode) -> None:
+        """Recursively replaces unresolved ``Reference`` nodes with
+        ``BindingReference``, used to support cross-binding references
+        inside ``UPDATE … AS u DELETE WHERE …`` predicates."""
+        from .expressions.binding_reference import BindingReference
+        for child in list(node.get_children()):
+            if (
+                isinstance(child, Reference)
+                and child.referred is None
+                and not child.identifier.startswith("$")
+            ):
+                node.replace_child(child, BindingReference(child.identifier))
+            else:
+                self._convert_unresolved_references_to_bindings(child)
 
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""

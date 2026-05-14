@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import json
+from typing import Any, Dict, List, Optional
 
 
 class Bindings:
@@ -42,34 +43,82 @@ class Bindings:
     def clear(self) -> None:
         Bindings._values.clear()
 
-    def merge(self, name: str, key: str, incoming: List[Any]) -> None:
-        """Merge incoming rows into an existing array-binding keyed by ``key``.
+    def merge(
+        self,
+        name: str,
+        incoming: List[Any],
+        keys: List[str],
+        set_fields: Optional[List[str]] = None,
+        when_matched: bool = True,
+        when_not_matched: bool = True,
+    ) -> None:
+        """Merge incoming rows into an existing array-binding using one
+        or more keys.
 
-        Rows in the existing binding with a matching key value are
-        replaced entirely; rows whose key is not present are appended.
+        For every incoming row whose key tuple matches an existing row,
+        the existing row is replaced (or partially updated when
+        ``set_fields`` is provided).  Incoming rows with no match are
+        appended to the end (preserving the existing order of matched
+        rows).  Rows that aren't dicts or are missing one of the keys
+        are appended unconditionally.
+
+        The ``when_matched`` / ``when_not_matched`` flags suppress the
+        corresponding branch, mirroring SQL ``MERGE``'s
+        ``WHEN MATCHED`` / ``WHEN NOT MATCHED`` clauses.
         """
+        if len(keys) == 0:
+            raise ValueError("UPDATE ... MERGE requires at least one key")
+        key_label = keys[0] if len(keys) == 1 else f"({', '.join(keys)})"
         if not isinstance(incoming, list):
             raise ValueError(
-                f"UPDATE ... MERGE ON {key} requires the right-hand side "
-                "to evaluate to a list of rows"
+                f"UPDATE ... MERGE ON {key_label} requires the right-hand "
+                "side to evaluate to a list of rows"
             )
         existing = Bindings._values.get(name)
         if not isinstance(existing, list):
-            Bindings._values[name] = list(incoming)
+            # First-ever MERGE on a missing / non-list binding inserts the
+            # incoming rows wholesale (filtered by when_not_matched).
+            Bindings._values[name] = list(incoming) if when_not_matched else []
             return
-        index_by_key: Dict[Any, int] = {}
+
+        def row_key(row: Any) -> Optional[str]:
+            if not isinstance(row, dict):
+                return None
+            parts: List[Any] = []
+            for k in keys:
+                if k not in row:
+                    return None
+                parts.append(row[k])
+            return json.dumps(parts, sort_keys=False, default=str)
+
+        index_by_key: Dict[str, int] = {}
         for i, row in enumerate(existing):
-            if isinstance(row, dict) and key in row:
-                index_by_key[row[key]] = i
+            k = row_key(row)
+            if k is not None:
+                index_by_key[k] = i
         result = list(existing)
         for row in incoming:
-            if isinstance(row, dict) and key in row:
-                matched = index_by_key.get(row[key])
-                if matched is not None:
-                    result[matched] = row
-                else:
-                    index_by_key[row[key]] = len(result)
+            k = row_key(row)
+            if k is None:
+                if when_not_matched:
                     result.append(row)
+                continue
+            matched = index_by_key.get(k)
+            if matched is not None:
+                if not when_matched:
+                    continue
+                if set_fields is not None:
+                    updated = dict(result[matched])
+                    for f in set_fields:
+                        if f in row:
+                            updated[f] = row[f]
+                    result[matched] = updated
+                else:
+                    result[matched] = row
             else:
+                if not when_not_matched:
+                    continue
+                index_by_key[k] = len(result)
                 result.append(row)
         Bindings._values[name] = result
+

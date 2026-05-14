@@ -68,6 +68,7 @@ import Union from "./operations/union";
 import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
 import Update from "./operations/update";
+import UpdateDelete from "./operations/update_delete";
 import Where from "./operations/where";
 import With from "./operations/with";
 import ParserState from "./parser_state";
@@ -173,7 +174,8 @@ class Parser extends BaseParser {
                 !(op instanceof DeleteNode) &&
                 !(op instanceof DeleteRelationship) &&
                 !(op instanceof Let) &&
-                !(op instanceof Update)
+                !(op instanceof Update) &&
+                !(op instanceof UpdateDelete)
             ) {
                 throw new Error(
                     "Only CREATE, DELETE, LET, and UPDATE statements can appear before the last statement in a multi-statement query"
@@ -285,7 +287,8 @@ class Parser extends BaseParser {
             !(operation instanceof DeleteNode) &&
             !(operation instanceof DeleteRelationship) &&
             !(operation instanceof Let) &&
-            !(operation instanceof Update)
+            !(operation instanceof Update) &&
+            !(operation instanceof UpdateDelete)
         ) {
             throw new Error(
                 "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, or UPDATE statement"
@@ -731,7 +734,7 @@ class Parser extends BaseParser {
         return new Let(name, expression, subQuery);
     }
 
-    private parseUpdate(): Update | null {
+    private parseUpdate(): Update | UpdateDelete | null {
         if (!this.token.isUpdate()) {
             return null;
         }
@@ -743,7 +746,17 @@ class Parser extends BaseParser {
         const name = this.token.value;
         this.setNextToken();
         this.skipWhitespaceAndComments();
-        let mergeKey: string | null = null;
+
+        // `UPDATE name AS alias DELETE WHERE <pred>` — row-filtering branch.
+        if (this.token.isAs()) {
+            return this.parseUpdateDeleteTail(name);
+        }
+
+        // `UPDATE name [MERGE ON …] = <rhs>` — assign or merge branch.
+        let mergeKeys: string[] | null = null;
+        let setFields: string[] | null = null;
+        let whenMatched = true;
+        let whenNotMatched = true;
         if (this.token.isMerge()) {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
@@ -752,19 +765,184 @@ class Parser extends BaseParser {
             }
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
-            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
-                throw new Error("Expected merge-key identifier after MERGE ON");
-            }
-            mergeKey = this.token.value;
-            this.setNextToken();
+            mergeKeys = this.parseMergeKeys();
             this.skipWhitespaceAndComments();
+            if (this.token.isSet()) {
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                setFields = this.parseMergeSetFields();
+                this.skipWhitespaceAndComments();
+            }
+            if (this.token.isWhen()) {
+                ({ whenMatched, whenNotMatched } = this.parseMergeWhenClause());
+                this.skipWhitespaceAndComments();
+            }
         }
         if (!this.token.isEquals()) {
             throw new Error("Expected '=' in UPDATE");
         }
         this.setNextToken();
         const { expression, subQuery } = this.parseLetUpdateRhs();
-        return new Update(name, mergeKey, expression, subQuery);
+        return new Update(
+            name,
+            mergeKeys,
+            setFields,
+            whenMatched,
+            whenNotMatched,
+            expression,
+            subQuery
+        );
+    }
+
+    /**
+     * Parses `MERGE ON id` or `MERGE ON (a, b, c)` — accepts either a
+     * single identifier or a parenthesised, comma-separated list.
+     */
+    private parseMergeKeys(): string[] {
+        if (this.token.isLeftParenthesis()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            const keys: string[] = [];
+            while (!this.token.isRightParenthesis()) {
+                if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                    throw new Error("Expected merge-key identifier");
+                }
+                keys.push(this.token.value);
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+                if (this.token.isComma()) {
+                    this.setNextToken();
+                    this.skipWhitespaceAndComments();
+                }
+            }
+            this.setNextToken();
+            if (keys.length === 0) {
+                throw new Error("Expected at least one merge-key identifier");
+            }
+            return keys;
+        }
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected merge-key identifier after MERGE ON");
+        }
+        const key = this.token.value;
+        this.setNextToken();
+        return [key];
+    }
+
+    /**
+     * Parses `SET .field, .field, …` — the list of fields that should
+     * be overwritten on a matched row in a partial merge.
+     */
+    private parseMergeSetFields(): string[] {
+        const fields: string[] = [];
+        while (true) {
+            if (!this.token.isDot()) {
+                throw new Error("Expected '.' before SET field name");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected field name after '.'");
+            }
+            fields.push(this.token.value);
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (fields.length === 0) {
+            throw new Error("Expected at least one SET field");
+        }
+        return fields;
+    }
+
+    /**
+     * Parses an optional `WHEN MATCHED` / `WHEN NOT MATCHED` clause.
+     * Returns a pair indicating whether each branch is active.
+     */
+    private parseMergeWhenClause(): { whenMatched: boolean; whenNotMatched: boolean } {
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        let negated = false;
+        if (this.token.isNot()) {
+            negated = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
+        if (!this.token.isMatched()) {
+            throw new Error("Expected MATCHED after WHEN" + (negated ? " NOT" : ""));
+        }
+        this.setNextToken();
+        return negated
+            ? { whenMatched: false, whenNotMatched: true }
+            : { whenMatched: true, whenNotMatched: false };
+    }
+
+    /**
+     * Parses the tail of `UPDATE name AS alias DELETE WHERE <pred>`,
+     * with `AS` already consumed by the caller's lookahead.
+     */
+    private parseUpdateDeleteTail(name: string): UpdateDelete {
+        this.setNextToken(); // consume AS
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected alias after AS");
+        }
+        const alias = this.token.value;
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isDelete()) {
+            throw new Error("Expected DELETE after UPDATE alias");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isWhere()) {
+            throw new Error("Expected WHERE after UPDATE … DELETE");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Inject the alias into the parser's variable scope while we
+        // parse the predicate so that `<alias>` / `<alias>.field`
+        // references resolve to the UpdateDelete's per-row value.
+        const updateDelete = new UpdateDelete(name, alias, new Expression());
+        this._state.variables.set(alias, updateDelete);
+        const predicate = this.parseExpression();
+        this._state.variables.delete(alias);
+        if (predicate === null) {
+            throw new Error("Expected predicate expression after WHERE");
+        }
+        // Any other unresolved bare identifiers (e.g. `IN banned`) refer
+        // to LET-bound bindings, which are resolved at run-time against
+        // the global Bindings store.
+        this.convertUnresolvedReferencesToBindings(predicate);
+        updateDelete.setPredicate(predicate);
+        return updateDelete;
+    }
+
+    /**
+     * Recursively replaces any unresolved {@link Reference} node in
+     * the given subtree with a {@link BindingReference}, which looks up
+     * the value from the global {@link Bindings} store at run-time.
+     *
+     * Used by `UPDATE … AS u DELETE WHERE …` so that predicates can
+     * reference other bindings by name, and to keep `LOAD JSON FROM …`
+     * behaviour consistent at arbitrary depth.
+     */
+    private convertUnresolvedReferencesToBindings(node: ASTNode): void {
+        for (const child of node.getChildren().slice()) {
+            if (
+                child instanceof Reference &&
+                child.referred === undefined &&
+                !child.identifier.startsWith("$")
+            ) {
+                node.replaceChild(child, new BindingReference(child.identifier));
+            } else {
+                this.convertUnresolvedReferencesToBindings(child);
+            }
+        }
     }
 
     private parseMatch(): Match | null {

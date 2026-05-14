@@ -775,6 +775,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.ON;
     }
 
+    public static get MATCHED(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.MATCHED);
+    }
+
+    public isMatched(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.MATCHED;
+    }
+
     // End of file token
 
     public static get EOF(): Token {

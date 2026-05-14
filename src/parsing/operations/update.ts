@@ -6,27 +6,41 @@ import Operation from "./operation";
 /**
  * `UPDATE name = <rhs>`  — replace the value bound to `name`.
  *
- * `UPDATE name MERGE ON <key> = <rhs>` — key-based upsert: rows in the
- * existing binding whose `<key>` matches a row in the new value are
- * replaced entirely; unmatched new rows are appended.  Both sides must
- * be lists of objects carrying `<key>`.
+ * `UPDATE name MERGE ON <key(s)> [SET .field, …] [WHEN [NOT] MATCHED] = <rhs>`
+ * — key-based upsert.  Rows in the existing binding whose key(s)
+ * match a row in the new value are replaced (or partially updated if
+ * `SET .field, …` is given); unmatched new rows are appended.  The
+ * optional `WHEN MATCHED` / `WHEN NOT MATCHED` clauses suppress the
+ * other branch (mirroring SQL `MERGE`).
+ *
+ * `UPDATE name` always requires `name` to already be bound — use `LET`
+ * to introduce a new binding.
  */
 class Update extends Operation {
     private _name: string;
-    private _mergeKey: string | null;
+    private _mergeKeys: string[] | null;
+    private _setFields: string[] | null;
+    private _whenMatched: boolean;
+    private _whenNotMatched: boolean;
     private _expression: Expression | null;
     private _subQuery: ASTNode | null;
     private _value: any = undefined;
 
     constructor(
         name: string,
-        mergeKey: string | null,
+        mergeKeys: string[] | null,
+        setFields: string[] | null,
+        whenMatched: boolean,
+        whenNotMatched: boolean,
         expression: Expression | null,
         subQuery: ASTNode | null
     ) {
         super();
         this._name = name;
-        this._mergeKey = mergeKey;
+        this._mergeKeys = mergeKeys;
+        this._setFields = setFields;
+        this._whenMatched = whenMatched;
+        this._whenNotMatched = whenNotMatched;
         this._expression = expression;
         this._subQuery = subQuery;
         if (expression !== null) {
@@ -41,8 +55,20 @@ class Update extends Operation {
         return this._name;
     }
 
-    public get mergeKey(): string | null {
-        return this._mergeKey;
+    public get mergeKeys(): string[] | null {
+        return this._mergeKeys;
+    }
+
+    public get setFields(): string[] | null {
+        return this._setFields;
+    }
+
+    public get whenMatched(): boolean {
+        return this._whenMatched;
+    }
+
+    public get whenNotMatched(): boolean {
+        return this._whenNotMatched;
     }
 
     public get expression(): Expression | null {
@@ -54,6 +80,10 @@ class Update extends Operation {
     }
 
     public async run(): Promise<void> {
+        const bindings = Bindings.getInstance();
+        if (!bindings.has(this._name)) {
+            throw new Error(`Binding '${this._name}' is not defined; use LET to create it`);
+        }
         let value: any;
         if (this._subQuery !== null) {
             const first = this._subQuery.firstChild() as Operation;
@@ -67,9 +97,13 @@ class Update extends Operation {
         } else {
             value = null;
         }
-        const bindings = Bindings.getInstance();
-        if (this._mergeKey !== null) {
-            bindings.merge(this._name, this._mergeKey, value);
+        if (this._mergeKeys !== null) {
+            bindings.merge(this._name, value, {
+                keys: this._mergeKeys,
+                setFields: this._setFields,
+                whenMatched: this._whenMatched,
+                whenNotMatched: this._whenNotMatched,
+            });
             this._value = bindings.get(this._name);
         } else {
             bindings.set(this._name, value);

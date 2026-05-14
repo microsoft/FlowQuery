@@ -5835,7 +5835,7 @@ class TestMultiStatement:
         assert match_b.results[0] == {"name": "B"}
 
     def test_multi_statement_rejects_retrieval_before_last(self):
-        with pytest.raises(ValueError, match="Only CREATE, DELETE, LET, UPDATE, and MERGE"):
+        with pytest.raises(ValueError, match="Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE"):
             Runner("""
                 RETURN 1 AS x;
                 CREATE VIRTUAL (:PyShouldFail) AS {
@@ -7486,3 +7486,104 @@ class TestQuirkFixes:
         # Cleanup
         await Runner("DELETE VIRTUAL (:PyLenPerson)-[:PY_LEN_KNOWS]-(:PyLenPerson)").run()
         await Runner("DELETE VIRTUAL (:PyLenPerson)").run()
+
+
+# ===== STATIC virtual / REFRESH EVERY / DROP VIRTUAL / REFRESH VIRTUAL =====
+
+_py_cache_counter = {"count": 0}
+_py_refresh_counter = {"count": 0}
+
+
+@FunctionDef({
+    "description": "Counter generator for STATIC cache test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyStaticCacheCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pystaticcachecountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_cache_counter["count"] += 1
+        yield {"id": _py_cache_counter["count"], "name": f"v{_py_cache_counter['count']}"}
+
+
+@FunctionDef({
+    "description": "Counter generator for REFRESH VIRTUAL test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyRefreshCacheCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pyrefreshcachecountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_refresh_counter["count"] += 1
+        yield {"id": _py_refresh_counter["count"]}
+
+
+class TestStaticVirtualCache:
+    @pytest.mark.asyncio
+    async def test_static_virtual_node_caches_across_queries(self):
+        _py_cache_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyCacheTestA) AS "
+            "{ CALL pystaticcachecountergen() YIELD id, name RETURN id, name }"
+        ).run()
+        r1 = Runner("MATCH (n:PyCacheTestA) RETURN n.id AS id")
+        await r1.run()
+        r2 = Runner("MATCH (n:PyCacheTestA) RETURN n.id AS id")
+        await r2.run()
+        assert r1.results == r2.results
+        assert _py_cache_counter["count"] == 1
+        await Runner("DROP VIRTUAL (:PyCacheTestA)").run()
+
+    @pytest.mark.asyncio
+    async def test_static_re_create_without_drop_throws(self):
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyStaticDup) AS "
+            "{ UNWIND [{id:1}] AS r RETURN r.id AS id }"
+        ).run()
+        with pytest.raises(ValueError, match="already exists"):
+            await Runner(
+                "CREATE STATIC VIRTUAL (:PyStaticDup) AS "
+                "{ UNWIND [{id:2}] AS r RETURN r.id AS id }"
+            ).run()
+        await Runner("DROP VIRTUAL (:PyStaticDup)").run()
+
+    def test_refresh_every_without_static_throws(self):
+        with pytest.raises(ValueError, match="REFRESH EVERY requires STATIC"):
+            Runner(
+                "CREATE VIRTUAL (:PyNoStatic) AS "
+                "{ UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE"
+            )
+
+    @pytest.mark.asyncio
+    async def test_refresh_virtual_invalidates_cache(self):
+        _py_refresh_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyRefreshTest) AS "
+            "{ CALL pyrefreshcachecountergen() YIELD id RETURN id }"
+        ).run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 1
+        await Runner("REFRESH VIRTUAL (:PyRefreshTest)").run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 2
+        await Runner("DROP VIRTUAL (:PyRefreshTest)").run()
+
+    @pytest.mark.asyncio
+    async def test_drop_virtual_works_as_alias_for_delete_virtual(self):
+        db = Database.get_instance()
+        await Runner(
+            "CREATE VIRTUAL (:PyDropAlias) AS "
+            "{ UNWIND [{id:1}] AS r RETURN r.id AS id }"
+        ).run()
+        assert db.get_node(Node(None, "PyDropAlias")) is not None
+        await Runner("DROP VIRTUAL (:PyDropAlias)").run()
+        assert db.get_node(Node(None, "PyDropAlias")) is None

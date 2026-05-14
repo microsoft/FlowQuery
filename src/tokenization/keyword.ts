@@ -53,6 +53,18 @@ enum Keyword {
     INTO = "INTO",
     USING = "USING",
     INSERT = "INSERT",
+    STATIC = "STATIC",
+    REFRESH = "REFRESH",
+    EVERY = "EVERY",
+    DROP = "DROP",
+    SECOND = "SECOND",
+    SECONDS = "SECONDS",
+    MINUTE = "MINUTE",
+    MINUTES = "MINUTES",
+    HOUR = "HOUR",
+    HOURS = "HOURS",
+    DAY = "DAY",
+    DAYS = "DAYS",
 }
 
 export default Keyword;

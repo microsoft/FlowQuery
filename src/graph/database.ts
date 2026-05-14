@@ -23,12 +23,25 @@ class Database {
     public get relationships(): Map<string, Map<string, PhysicalRelationship>> {
         return Database._relationships;
     }
-    public addNode(node: Node, statement: ASTNode): void {
+    public addNode(
+        node: Node,
+        statement: ASTNode,
+        isStatic: boolean = false,
+        refreshEveryMs: number | null = null
+    ): void {
         if (node.label === null) {
             throw new Error("Node label is null");
         }
+        const existing = Database._nodes.get(node.label);
+        if (existing !== undefined && (existing.isStatic || isStatic)) {
+            throw new Error(
+                `Virtual node (:${node.label}) already exists; DROP VIRTUAL (:${node.label}) first`
+            );
+        }
         const physical = new PhysicalNode(null, node.label);
         physical.statement = statement;
+        physical.isStatic = isStatic;
+        physical.refreshEveryMs = refreshEveryMs;
         Database._nodes.set(node.label, physical);
     }
     public removeNode(node: Node): void {
@@ -37,6 +50,16 @@ class Database {
         }
         Database._nodes.delete(node.label);
     }
+    public refreshNode(node: Node): void {
+        if (node.label === null) {
+            throw new Error("Node label is null");
+        }
+        const physical = Database._nodes.get(node.label);
+        if (physical === undefined) {
+            throw new Error(`Virtual node (:${node.label}) does not exist`);
+        }
+        physical.invalidateCache();
+    }
     public getNode(node: Node): PhysicalNode | null {
         return Database._nodes.get(node.label!) || null;
     }
@@ -44,24 +67,38 @@ class Database {
     private static endpointKey(sourceLabel: string | null, targetLabel: string | null): string {
         return `${sourceLabel ?? ""}:${targetLabel ?? ""}`;
     }
-    public addRelationship(relationship: Relationship, statement: ASTNode): void {
+    public addRelationship(
+        relationship: Relationship,
+        statement: ASTNode,
+        isStatic: boolean = false,
+        refreshEveryMs: number | null = null
+    ): void {
         if (relationship.type === null) {
             throw new Error("Relationship type is null");
+        }
+        const key = Database.endpointKey(
+            relationship.source?.label ?? null,
+            relationship.target?.label ?? null
+        );
+        const typeMap = Database._relationships.get(relationship.type);
+        const existing = typeMap?.get(key);
+        if (existing !== undefined && (existing.isStatic || isStatic)) {
+            throw new Error(
+                `Virtual relationship [:${relationship.type}] between (:${relationship.source?.label ?? ""}) and (:${relationship.target?.label ?? ""}) already exists; DROP VIRTUAL ...-[:${relationship.type}]-... first`
+            );
         }
         const physical = new PhysicalRelationship(null, relationship.type);
         physical.statement = statement;
         physical.source = relationship.source;
         physical.target = relationship.target;
-        const key = Database.endpointKey(
-            relationship.source?.label ?? null,
-            relationship.target?.label ?? null
-        );
-        let typeMap = Database._relationships.get(relationship.type);
-        if (!typeMap) {
-            typeMap = new Map();
-            Database._relationships.set(relationship.type, typeMap);
+        physical.isStatic = isStatic;
+        physical.refreshEveryMs = refreshEveryMs;
+        let map = typeMap;
+        if (!map) {
+            map = new Map();
+            Database._relationships.set(relationship.type, map);
         }
-        typeMap.set(key, physical);
+        map.set(key, physical);
     }
     public removeRelationship(relationship: Relationship): void {
         if (relationship.type === null) {
@@ -77,6 +114,23 @@ class Database {
         if (typeMap.size === 0) {
             Database._relationships.delete(relationship.type);
         }
+    }
+    public refreshRelationship(relationship: Relationship): void {
+        if (relationship.type === null) {
+            throw new Error("Relationship type is null");
+        }
+        const typeMap = Database._relationships.get(relationship.type);
+        const key = Database.endpointKey(
+            relationship.source?.label ?? null,
+            relationship.target?.label ?? null
+        );
+        const physical = typeMap?.get(key);
+        if (physical === undefined) {
+            throw new Error(
+                `Virtual relationship [:${relationship.type}] between (:${relationship.source?.label ?? ""}) and (:${relationship.target?.label ?? ""}) does not exist`
+            );
+        }
+        physical.invalidateCache();
     }
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         const typeMap = Database._relationships.get(relationship.type!);

@@ -81,6 +81,8 @@ from .operations.merge import (
 )
 from .operations.operation import Operation
 from .operations.order_by import OrderBy, SortField
+from .operations.refresh_node import RefreshNode
+from .operations.refresh_relationship import RefreshRelationship
 from .operations.return_op import Return
 from .operations.union import Union
 from .operations.union_all import UnionAll
@@ -174,15 +176,26 @@ class Parser(BaseParser):
             yield previous
 
     def _validate_is_create_or_delete(self, root: ASTNode) -> None:
-        """Validates that all operations in a statement are CREATE, DELETE, LET, or UPDATE."""
+        """Validates that all operations in a statement are CREATE, DELETE, REFRESH, LET, or UPDATE."""
         op = root.first_child()
         while op is not None:
             if not isinstance(
                 op,
-                (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship, Let, Update, UpdateDelete, Merge),
+                (
+                    CreateNode,
+                    CreateRelationship,
+                    DeleteNode,
+                    DeleteRelationship,
+                    RefreshNode,
+                    RefreshRelationship,
+                    Let,
+                    Update,
+                    UpdateDelete,
+                    Merge,
+                ),
             ):
                 raise ValueError(
-                    "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear "
+                    "Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE statements can appear "
                     "before the last statement in a multi-statement query"
                 )
             op = op.next  # type: ignore[assignment]
@@ -292,6 +305,8 @@ class Parser(BaseParser):
                 CreateRelationship,
                 DeleteNode,
                 DeleteRelationship,
+                RefreshNode,
+                RefreshRelationship,
                 Let,
                 Update,
                 UpdateDelete,
@@ -299,7 +314,7 @@ class Parser(BaseParser):
             ),
         ):
             raise ValueError(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, UPDATE, or MERGE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, REFRESH, LET, UPDATE, or MERGE statement"
             )
 
         return root
@@ -314,6 +329,7 @@ class Parser(BaseParser):
             self._parse_match() or
             self._parse_create() or
             self._parse_delete() or
+            self._parse_refresh() or
             self._parse_let() or
             self._parse_update() or
             self._parse_merge()
@@ -509,11 +525,16 @@ class Parser(BaseParser):
         return Match(patterns, optional)
 
     def _parse_create(self) -> Optional[Operation]:
-        """Parse CREATE VIRTUAL statement for nodes and relationships."""
+        """Parse CREATE [STATIC] VIRTUAL statement with optional REFRESH EVERY clause."""
         if not self.token.is_create():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        is_static = False
+        if self.token.is_static():
+            is_static = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_virtual():
             raise ValueError("Expected VIRTUAL")
         self.set_next_token()
@@ -563,14 +584,68 @@ class Parser(BaseParser):
         if query is None:
             raise ValueError("Expected sub-query")
 
+        # Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
+        # for STATIC virtual entities (caching must be enabled to refresh).
+        # We deliberately peek past REFRESH to confirm EVERY follows: a bare
+        # REFRESH VIRTUAL ... is a separate top-level statement.
+        refresh_every_ms: Optional[int] = None
+        saved_index = self._token_index
+        self._skip_whitespace_and_comments()
+        consumed_refresh_clause = False
+        if self.token.is_refresh():
+            after_refresh_index = self._token_index
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_every():
+                if not is_static:
+                    raise ValueError(
+                        "REFRESH EVERY requires STATIC (caching must be enabled)"
+                    )
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                if not self.token.is_number():
+                    raise ValueError("Expected number after REFRESH EVERY")
+                try:
+                    amount = float(self.token.value or "0")
+                except ValueError as e:
+                    raise ValueError("Expected number after REFRESH EVERY") from e
+                if amount <= 0:
+                    raise ValueError("REFRESH EVERY interval must be a positive number")
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                unit = (self.token.value or "").upper()
+                unit_ms = {
+                    "SECOND": 1000,
+                    "SECONDS": 1000,
+                    "MINUTE": 60_000,
+                    "MINUTES": 60_000,
+                    "HOUR": 3_600_000,
+                    "HOURS": 3_600_000,
+                    "DAY": 86_400_000,
+                    "DAYS": 86_400_000,
+                }
+                if unit not in unit_ms:
+                    raise ValueError(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    )
+                refresh_every_ms = int(amount * unit_ms[unit])
+                self.set_next_token()
+                consumed_refresh_clause = True
+            else:
+                # Not REFRESH EVERY — must be the start of a separate
+                # REFRESH VIRTUAL statement.  Rewind to before REFRESH.
+                self._token_index = after_refresh_index
+        if not consumed_refresh_clause:
+            self._token_index = saved_index
+
         if relationship is not None:
-            return CreateRelationship(relationship, query)
+            return CreateRelationship(relationship, query, is_static, refresh_every_ms)
         else:
-            return CreateNode(node, query)
+            return CreateNode(node, query, is_static, refresh_every_ms)
 
     def _parse_delete(self) -> Optional[Operation]:
-        """Parse DELETE VIRTUAL statement for nodes and relationships."""
-        if not self.token.is_delete():
+        """Parse DELETE/DROP VIRTUAL statement for nodes and relationships."""
+        if not self.token.is_delete() and not self.token.is_drop():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
@@ -615,6 +690,52 @@ class Parser(BaseParser):
             return DeleteRelationship(relationship)
         else:
             return DeleteNode(node)
+
+    def _parse_refresh(self) -> Optional[Operation]:
+        """Parse REFRESH VIRTUAL statement for nodes and relationships."""
+        if not self.token.is_refresh():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_virtual():
+            raise ValueError("Expected VIRTUAL")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        node = self._parse_node()
+        if node is None:
+            raise ValueError("Expected node definition")
+
+        relationship: Optional[Relationship] = None
+        if self.token.is_subtract() and self.peek() and self.peek().is_opening_bracket():
+            self.set_next_token()  # skip -
+            self.set_next_token()  # skip [
+            if not self.token.is_colon():
+                raise ValueError("Expected ':' for relationship type")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected relationship type identifier")
+            rel_type = self.token.value or ""
+            self.set_next_token()
+            if not self.token.is_closing_bracket():
+                raise ValueError("Expected closing bracket for relationship definition")
+            self.set_next_token()
+            if not self.token.is_subtract():
+                raise ValueError("Expected '-' for relationship definition")
+            self.set_next_token()
+            if self.token.is_greater_than():
+                self.set_next_token()
+            target = self._parse_node()
+            if target is None:
+                raise ValueError("Expected target node definition")
+            relationship = Relationship()
+            relationship.type = rel_type
+            relationship.source = node
+            relationship.target = target
+
+        if relationship is not None:
+            return RefreshRelationship(relationship)
+        return RefreshNode(node)
 
     def _looks_like_pipeline_start(self) -> bool:
         """True if the current token opens a query pipeline (the right-

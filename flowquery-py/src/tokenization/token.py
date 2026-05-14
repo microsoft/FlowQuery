@@ -519,6 +519,34 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.DELETE.value
 
     @staticmethod
+    def STATIC() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.STATIC.value)
+
+    def is_static(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.STATIC.value
+
+    @staticmethod
+    def REFRESH() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.REFRESH.value)
+
+    def is_refresh(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.REFRESH.value
+
+    @staticmethod
+    def EVERY() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.EVERY.value)
+
+    def is_every(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.EVERY.value
+
+    @staticmethod
+    def DROP() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.DROP.value)
+
+    def is_drop(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.DROP.value
+
+    @staticmethod
     def SET() -> Token:
         return Token(TokenType.KEYWORD, Keyword.SET.value)
 

@@ -571,6 +571,38 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.DELETE;
     }
 
+    public static get STATIC(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.STATIC);
+    }
+
+    public isStatic(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.STATIC;
+    }
+
+    public static get REFRESH(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.REFRESH);
+    }
+
+    public isRefresh(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.REFRESH;
+    }
+
+    public static get EVERY(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.EVERY);
+    }
+
+    public isEvery(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.EVERY;
+    }
+
+    public static get DROP(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.DROP);
+    }
+
+    public isDrop(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.DROP;
+    }
+
     public static get SET(): Token {
         return new Token(TokenType.KEYWORD, Keyword.SET);
     }

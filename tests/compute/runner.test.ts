@@ -5363,7 +5363,7 @@ test("Test multi-statement rejects retrieval before last", () => {
             }
         `);
     }).toThrow(
-        "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
+        "Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
     );
 });
 
@@ -7074,4 +7074,102 @@ test("Test metadata WITH-rebind also recovers literal values via WHERE equality"
     expect(info.nodes.MetaWithRebLitUser.literal_values).toEqual({
         id: ["rick.o"],
     });
+});
+
+// ===== STATIC virtual / REFRESH EVERY / DROP VIRTUAL / REFRESH VIRTUAL =====
+
+const _cacheCounter = { count: 0 };
+const _refreshCounter = { count: 0 };
+
+@FunctionDef({
+    description: "Counter generator for STATIC cache test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class StaticCacheCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _cacheCounter.count++;
+        yield { id: _cacheCounter.count, name: "v" + _cacheCounter.count };
+    }
+}
+
+@FunctionDef({
+    description: "Counter generator for REFRESH VIRTUAL test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class RefreshCacheCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _refreshCounter.count++;
+        yield { id: _refreshCounter.count };
+    }
+}
+
+test("Test STATIC virtual node caches across queries", async () => {
+    _cacheCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:CacheTestA) AS { CALL staticcachecountergen() YIELD id, name RETURN id, name }`
+    ).run();
+    const r1 = new Runner("MATCH (n:CacheTestA) RETURN n.id AS id");
+    await r1.run();
+    const r2 = new Runner("MATCH (n:CacheTestA) RETURN n.id AS id");
+    await r2.run();
+    expect(r1.results).toEqual(r2.results);
+    expect(_cacheCounter.count).toBe(1);
+    await new Runner("DROP VIRTUAL (:CacheTestA)").run();
+});
+
+test("Test STATIC re-CREATE without DROP throws", async () => {
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:StaticDup) AS { UNWIND [{id:1}] AS r RETURN r.id AS id }`
+    ).run();
+    await expect(
+        new Runner(
+            `CREATE STATIC VIRTUAL (:StaticDup) AS { UNWIND [{id:2}] AS r RETURN r.id AS id }`
+        ).run()
+    ).rejects.toThrow(/already exists/);
+    await new Runner("DROP VIRTUAL (:StaticDup)").run();
+});
+
+test("Test REFRESH EVERY without STATIC throws", () => {
+    expect(
+        () =>
+            new Runner(
+                `CREATE VIRTUAL (:NoStatic) AS { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+            )
+    ).toThrow(/REFRESH EVERY requires STATIC/);
+});
+
+test("Test REFRESH VIRTUAL invalidates cache", async () => {
+    _refreshCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:RefreshTest) AS { CALL refreshcachecountergen() YIELD id RETURN id }`
+    ).run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(1);
+    await new Runner("REFRESH VIRTUAL (:RefreshTest)").run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(2);
+    await new Runner("DROP VIRTUAL (:RefreshTest)").run();
+});
+
+test("Test DROP VIRTUAL works as alias for DELETE VIRTUAL", async () => {
+    const db = Database.getInstance();
+    await new Runner(
+        `CREATE VIRTUAL (:DropAlias) AS { UNWIND [{id:1}] AS r RETURN r.id AS id }`
+    ).run();
+    expect(db.getNode(new Node(null, "DropAlias"))).not.toBeNull();
+    await new Runner("DROP VIRTUAL (:DropAlias)").run();
+    expect(db.getNode(new Node(null, "DropAlias"))).toBeNull();
 });

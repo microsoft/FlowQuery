@@ -71,6 +71,8 @@ import Merge, {
 } from "./operations/merge";
 import Operation from "./operations/operation";
 import OrderBy, { SortField } from "./operations/order_by";
+import RefreshNode from "./operations/refresh_node";
+import RefreshRelationship from "./operations/refresh_relationship";
 import Return from "./operations/return";
 import Union from "./operations/union";
 import UnionAll from "./operations/union_all";
@@ -170,7 +172,7 @@ class Parser extends BaseParser {
 
     /**
      * Validates that all operations in a statement are CREATE, DELETE,
-     * LET, or UPDATE — the four declaration kinds that may precede the
+     * REFRESH, LET, or UPDATE — the declaration kinds that may precede the
      * terminal statement in a multi-statement query.
      */
     private validateIsCreateOrDelete(root: ASTNode): void {
@@ -181,13 +183,15 @@ class Parser extends BaseParser {
                 !(op instanceof CreateRelationship) &&
                 !(op instanceof DeleteNode) &&
                 !(op instanceof DeleteRelationship) &&
+                !(op instanceof RefreshNode) &&
+                !(op instanceof RefreshRelationship) &&
                 !(op instanceof Let) &&
                 !(op instanceof Update) &&
                 !(op instanceof UpdateDelete) &&
                 !(op instanceof Merge)
             ) {
                 throw new Error(
-                    "Only CREATE, DELETE, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
                 );
             }
             op = op.next;
@@ -298,13 +302,15 @@ class Parser extends BaseParser {
             !(operation instanceof CreateRelationship) &&
             !(operation instanceof DeleteNode) &&
             !(operation instanceof DeleteRelationship) &&
+            !(operation instanceof RefreshNode) &&
+            !(operation instanceof RefreshRelationship) &&
             !(operation instanceof Let) &&
             !(operation instanceof Update) &&
             !(operation instanceof UpdateDelete) &&
             !(operation instanceof Merge)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, LET, UPDATE, or MERGE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, REFRESH, LET, UPDATE, or MERGE statement"
             );
         }
         return root;
@@ -319,6 +325,7 @@ class Parser extends BaseParser {
             this.parseCall() ||
             this.parseCreate() ||
             this.parseDelete() ||
+            this.parseRefresh() ||
             this.parseLet() ||
             this.parseUpdate() ||
             this.parseMerge() ||
@@ -539,6 +546,12 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let isStatic = false;
+        if (this.token.isStatic()) {
+            isStatic = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         if (!this.token.isVirtual()) {
             throw new Error("Expected VIRTUAL");
         }
@@ -590,17 +603,75 @@ class Parser extends BaseParser {
         if (query === null) {
             throw new Error("Expected sub-query");
         }
+        // Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
+        // for STATIC virtual entities (caching must be enabled to refresh).
+        // We deliberately peek past REFRESH to confirm EVERY follows: a bare
+        // `REFRESH VIRTUAL ...` is a separate top-level statement.
+        let refreshEveryMs: number | null = null;
+        const savedIndex = this.tokenIndex;
+        this.skipWhitespaceAndComments();
+        let consumedRefreshClause = false;
+        if (this.token.isRefresh()) {
+            // Look ahead past whitespace for EVERY.
+            const afterRefreshIndex = this.tokenIndex;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isEvery()) {
+                if (!isStatic) {
+                    throw new Error("REFRESH EVERY requires STATIC (caching must be enabled)");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number after REFRESH EVERY");
+                }
+                const amount = Number(this.token.value);
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    throw new Error("REFRESH EVERY interval must be a positive number");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                const unit = (this.token.value || "").toUpperCase();
+                const unitMs: Record<string, number> = {
+                    SECOND: 1000,
+                    SECONDS: 1000,
+                    MINUTE: 60_000,
+                    MINUTES: 60_000,
+                    HOUR: 3_600_000,
+                    HOURS: 3_600_000,
+                    DAY: 86_400_000,
+                    DAYS: 86_400_000,
+                };
+                if (!(unit in unitMs)) {
+                    throw new Error(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    );
+                }
+                refreshEveryMs = amount * unitMs[unit];
+                this.setNextToken();
+                consumedRefreshClause = true;
+            } else {
+                // Not REFRESH EVERY — must be the start of a separate
+                // REFRESH VIRTUAL statement.  Rewind to before REFRESH.
+                this.tokenIndex = afterRefreshIndex;
+            }
+        }
+        if (!consumedRefreshClause) {
+            // No REFRESH clause present; restore token position so the
+            // outer loop sees the original whitespace/next-clause boundary.
+            this.tokenIndex = savedIndex;
+        }
         let create: CreateNode | CreateRelationship;
         if (relationship !== null) {
-            create = new CreateRelationship(relationship, query);
+            create = new CreateRelationship(relationship, query, isStatic, refreshEveryMs);
         } else {
-            create = new CreateNode(node, query);
+            create = new CreateNode(node, query, isStatic, refreshEveryMs);
         }
         return create;
     }
 
     private parseDelete(): DeleteNode | DeleteRelationship | null {
-        if (!this.token.isDelete()) {
+        if (!this.token.isDelete() && !this.token.isDrop()) {
             return null;
         }
         this.setNextToken();
@@ -651,6 +722,57 @@ class Parser extends BaseParser {
             result = new DeleteNode(node);
         }
         return result;
+    }
+
+    private parseRefresh(): RefreshNode | RefreshRelationship | null {
+        if (!this.token.isRefresh()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: Node | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+            relationship.source = node;
+            relationship.target = target;
+        }
+        if (relationship !== null) {
+            return new RefreshRelationship(relationship);
+        }
+        return new RefreshNode(node);
     }
 
     /**

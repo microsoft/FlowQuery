@@ -227,7 +227,7 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 
 #### Multi-Statement Queries
 
-Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
+Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
 
 ```cypher
 CREATE VIRTUAL (:Person) AS {
@@ -252,6 +252,50 @@ console.log(runner.metadata);
 //   virtual_nodes_deleted: 0, virtual_relationships_deleted: 0,
 //   info: { node_labels: ["X"], relationship_types: [], sources: [], ... } }
 ```
+
+#### Caching Virtual Entities: `STATIC` and `REFRESH`
+
+By default, every `MATCH` against a virtual node or relationship re-executes
+its backing sub-query. For expensive sources (HTTP endpoints, large CSV files)
+you can opt in to persistent caching with the `STATIC` keyword:
+
+```cypher
+CREATE STATIC VIRTUAL (:Country) AS {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all' AS c
+    RETURN c.cca2 AS code, c.name.common AS name
+};
+```
+
+The sub-query runs once on first access and the result is reused for every
+subsequent query in the same process — across `Runner` instances. STATIC
+virtual entities are protected: re-running `CREATE STATIC VIRTUAL (:Country)`
+without first dropping the existing entry raises an error. Use
+`DROP VIRTUAL (:Country)` (an alias for `DELETE VIRTUAL`) to remove it.
+
+To refresh on a schedule, add a `REFRESH EVERY <n> <unit>` clause. Supported
+units are `SECOND[S]`, `MINUTE[S]`, `HOUR[S]`, and `DAY[S]`:
+
+```cypher
+CREATE STATIC VIRTUAL (:Country) AS {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all' AS c
+    RETURN c.cca2 AS code, c.name.common AS name
+} REFRESH EVERY 1 HOUR;
+```
+
+Refresh is lazy: the cache is re-populated on the first access after the TTL
+elapses; no background timers are scheduled. `REFRESH EVERY` requires
+`STATIC` (caching must be enabled to refresh).
+
+To force an immediate refresh from anywhere in a query, use
+`REFRESH VIRTUAL (...)`:
+
+```cypher
+REFRESH VIRTUAL (:Country);
+MATCH (c:Country) RETURN c.name
+```
+
+`REFRESH VIRTUAL` works on both nodes and relationships and clears the cache
+so that the next access re-executes the backing sub-query.
 
 #### Statement Info: Labels, Properties, and Source Lineage
 

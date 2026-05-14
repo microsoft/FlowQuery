@@ -297,6 +297,51 @@ MATCH (c:Country) RETURN c.name
 `REFRESH VIRTUAL` works on both nodes and relationships and clears the cache
 so that the next access re-executes the backing sub-query.
 
+#### Caching `LET` Bindings: `STATIC LET`, `REFRESH BINDING`, `DROP BINDING`
+
+`LET` bindings live for the lifetime of the process, just like virtual
+nodes and relationships, and the same caching primitives apply. A regular
+`LET name = { ... }` evaluates the sub-query eagerly each time the
+statement runs. `LET STATIC name = { ... }` instead registers a deferred
+provider: the sub-query is stored, and is (re)evaluated lazily on the
+first read or after the TTL elapses.
+
+```cypher
+LET STATIC users = {
+    LOAD JSON FROM 'https://example.com/users.json' AS u
+    RETURN u.id AS id, u.name AS name
+};
+LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name
+```
+
+STATIC bindings are protected the same way STATIC virtual entities are:
+re-running `LET STATIC users = { ... }` without first dropping the existing
+binding raises an error. `LET STATIC` requires a sub-query right-hand side
+(an expression like `42` is rejected). Use `DROP BINDING users` to remove
+the binding so it can be redefined.
+
+To refresh on a schedule, add a `REFRESH EVERY <n> <unit>` clause:
+
+```cypher
+LET STATIC users = {
+    LOAD JSON FROM 'https://example.com/users.json' AS u
+    RETURN u.id AS id, u.name AS name
+} REFRESH EVERY 5 MINUTES;
+```
+
+`REFRESH EVERY` requires `STATIC`. To force an immediate refresh, use
+`REFRESH BINDING name`:
+
+```cypher
+REFRESH BINDING users;
+LOAD JSON FROM users AS u RETURN u.id AS id
+```
+
+`UPDATE` and `MERGE INTO` are not allowed against a STATIC binding;
+mutation would be invisibly overwritten by the next refresh. Use
+`REFRESH BINDING name` to re-evaluate the source, or `DROP BINDING name`
+and redefine the binding eagerly.
+
 #### Statement Info: Labels, Properties, and Source Lineage
 
 `metadata.info` carries a `StatementInfo` describing the _structure_ the

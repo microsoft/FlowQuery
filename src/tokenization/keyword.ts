@@ -65,6 +65,7 @@ enum Keyword {
     HOURS = "HOURS",
     DAY = "DAY",
     DAYS = "DAYS",
+    BINDING = "BINDING",
 }
 
 export default Keyword;

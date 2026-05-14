@@ -62,6 +62,7 @@ from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
 from .operations.delete_relationship import DeleteRelationship
+from .operations.drop_binding import DropBinding
 from .operations.let import Let
 from .operations.limit import Limit
 from .operations.load import Load
@@ -81,6 +82,7 @@ from .operations.merge import (
 )
 from .operations.operation import Operation
 from .operations.order_by import OrderBy, SortField
+from .operations.refresh_binding import RefreshBinding
 from .operations.refresh_node import RefreshNode
 from .operations.refresh_relationship import RefreshRelationship
 from .operations.return_op import Return
@@ -186,8 +188,10 @@ class Parser(BaseParser):
                     CreateRelationship,
                     DeleteNode,
                     DeleteRelationship,
+                    DropBinding,
                     RefreshNode,
                     RefreshRelationship,
+                    RefreshBinding,
                     Let,
                     Update,
                     UpdateDelete,
@@ -195,7 +199,7 @@ class Parser(BaseParser):
                 ),
             ):
                 raise ValueError(
-                    "Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE statements can appear "
+                    "Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE statements can appear "
                     "before the last statement in a multi-statement query"
                 )
             op = op.next  # type: ignore[assignment]
@@ -305,8 +309,10 @@ class Parser(BaseParser):
                 CreateRelationship,
                 DeleteNode,
                 DeleteRelationship,
+                DropBinding,
                 RefreshNode,
                 RefreshRelationship,
+                RefreshBinding,
                 Let,
                 Update,
                 UpdateDelete,
@@ -314,7 +320,8 @@ class Parser(BaseParser):
             ),
         ):
             raise ValueError(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, REFRESH, LET, UPDATE, or MERGE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, "
+                "DROP, REFRESH, LET, UPDATE, or MERGE statement"
             )
 
         return root
@@ -644,13 +651,21 @@ class Parser(BaseParser):
             return CreateNode(node, query, is_static, refresh_every_ms)
 
     def _parse_delete(self) -> Optional[Operation]:
-        """Parse DELETE/DROP VIRTUAL statement for nodes and relationships."""
+        """Parse DELETE/DROP VIRTUAL or DROP BINDING statement."""
         if not self.token.is_delete() and not self.token.is_drop():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_binding():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected binding name")
+            name = self.token.value or ""
+            self.set_next_token()
+            return DropBinding(name)
         if not self.token.is_virtual():
-            raise ValueError("Expected VIRTUAL")
+            raise ValueError("Expected VIRTUAL or BINDING")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
 
@@ -692,13 +707,21 @@ class Parser(BaseParser):
             return DeleteNode(node)
 
     def _parse_refresh(self) -> Optional[Operation]:
-        """Parse REFRESH VIRTUAL statement for nodes and relationships."""
+        """Parse REFRESH VIRTUAL or REFRESH BINDING statement."""
         if not self.token.is_refresh():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_binding():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected binding name")
+            name = self.token.value or ""
+            self.set_next_token()
+            return RefreshBinding(name)
         if not self.token.is_virtual():
-            raise ValueError("Expected VIRTUAL")
+            raise ValueError("Expected VIRTUAL or BINDING")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
 
@@ -795,6 +818,11 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        is_static = False
+        if self.token.is_static():
+            is_static = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_identifier_or_keyword() or self.token.value is None:
             raise ValueError("Expected identifier after LET")
         name = self.token.value
@@ -804,7 +832,60 @@ class Parser(BaseParser):
             raise ValueError("Expected '=' after LET identifier")
         self.set_next_token()
         expression, sub_query = self._parse_let_update_rhs()
-        return Let(name, expression, sub_query)
+        if is_static and sub_query is None:
+            raise ValueError("LET STATIC requires a sub-query right-hand side")
+
+        # Optional trailing REFRESH EVERY <n> <unit> clause.  Requires STATIC.
+        refresh_every_ms: Optional[int] = None
+        saved_index = self._token_index
+        self._skip_whitespace_and_comments()
+        consumed_refresh_clause = False
+        if self.token.is_refresh():
+            after_refresh_index = self._token_index
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_every():
+                if not is_static:
+                    raise ValueError(
+                        "REFRESH EVERY requires STATIC (caching must be enabled)"
+                    )
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                if not self.token.is_number():
+                    raise ValueError("Expected number after REFRESH EVERY")
+                try:
+                    amount = float(self.token.value or "0")
+                except ValueError as e:
+                    raise ValueError("Expected number after REFRESH EVERY") from e
+                if amount <= 0:
+                    raise ValueError("REFRESH EVERY interval must be a positive number")
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                unit = (self.token.value or "").upper()
+                unit_ms = {
+                    "SECOND": 1000,
+                    "SECONDS": 1000,
+                    "MINUTE": 60_000,
+                    "MINUTES": 60_000,
+                    "HOUR": 3_600_000,
+                    "HOURS": 3_600_000,
+                    "DAY": 86_400_000,
+                    "DAYS": 86_400_000,
+                }
+                if unit not in unit_ms:
+                    raise ValueError(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    )
+                refresh_every_ms = int(amount * unit_ms[unit])
+                self.set_next_token()
+                consumed_refresh_clause = True
+            else:
+                # Not REFRESH EVERY; rewind so the outer loop sees REFRESH.
+                self._token_index = after_refresh_index
+        if not consumed_refresh_clause:
+            self._token_index = saved_index
+
+        return Let(name, expression, sub_query, is_static, refresh_every_ms)
 
     def _parse_update(self) -> Optional[Operation]:
         if not self.token.is_update():

@@ -72,3 +72,4 @@ class Keyword(Enum):
     HOURS = "HOURS"
     DAY = "DAY"
     DAYS = "DAYS"
+    BINDING = "BINDING"

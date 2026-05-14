@@ -1,6 +1,8 @@
+import Bindings from "../graph/bindings";
 import DataCache from "../graph/data_cache";
 import DataResolver from "../graph/data_resolver";
 import ASTNode from "../parsing/ast_node";
+import BindingReference from "../parsing/expressions/binding_reference";
 import ParameterReference from "../parsing/expressions/parameter_reference";
 import CreateNode from "../parsing/operations/create_node";
 import CreateRelationship from "../parsing/operations/create_relationship";
@@ -142,6 +144,16 @@ class Runner {
                 }
                 for (const stmt of this._statements) {
                     this.bindParameters(stmt.ast);
+                    // Pre-materialise any STATIC bindings referenced by this
+                    // statement.  Sub-query evaluation is async, but
+                    // BindingReference.value() is sync; populating the
+                    // cache up-front keeps reads cheap and synchronous.
+                    const bindingNames = new Set<string>();
+                    this.collectBindingNames(stmt.ast, bindingNames);
+                    const bindings = Bindings.getInstance();
+                    for (const name of bindingNames) {
+                        await bindings.materialize(name);
+                    }
                     await stmt.first.initialize();
                     await stmt.first.run();
                     await stmt.first.finish();
@@ -171,6 +183,20 @@ class Runner {
         }
         for (const child of node.getChildren()) {
             this.bindParameters(child);
+        }
+    }
+
+    /**
+     * Recursively walks the AST to collect the names of all
+     * `BindingReference`s.  Used to pre-materialise STATIC bindings
+     * before statement execution begins.
+     */
+    private collectBindingNames(node: ASTNode, names: Set<string>): void {
+        if (node instanceof BindingReference) {
+            names.add(node.name);
+        }
+        for (const child of node.getChildren()) {
+            this.collectBindingNames(child, names);
         }
     }
 

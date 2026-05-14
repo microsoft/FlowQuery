@@ -547,6 +547,13 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.DROP.value
 
     @staticmethod
+    def BINDING() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.BINDING.value)
+
+    def is_binding(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.BINDING.value
+
+    @staticmethod
     def SET() -> Token:
         return Token(TokenType.KEYWORD, Keyword.SET.value)
 

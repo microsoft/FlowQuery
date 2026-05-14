@@ -57,6 +57,7 @@ import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
 import DeleteNode from "./operations/delete_node";
 import DeleteRelationship from "./operations/delete_relationship";
+import DropBinding from "./operations/drop_binding";
 import Let from "./operations/let";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
@@ -71,6 +72,7 @@ import Merge, {
 } from "./operations/merge";
 import Operation from "./operations/operation";
 import OrderBy, { SortField } from "./operations/order_by";
+import RefreshBinding from "./operations/refresh_binding";
 import RefreshNode from "./operations/refresh_node";
 import RefreshRelationship from "./operations/refresh_relationship";
 import Return from "./operations/return";
@@ -183,15 +185,17 @@ class Parser extends BaseParser {
                 !(op instanceof CreateRelationship) &&
                 !(op instanceof DeleteNode) &&
                 !(op instanceof DeleteRelationship) &&
+                !(op instanceof DropBinding) &&
                 !(op instanceof RefreshNode) &&
                 !(op instanceof RefreshRelationship) &&
+                !(op instanceof RefreshBinding) &&
                 !(op instanceof Let) &&
                 !(op instanceof Update) &&
                 !(op instanceof UpdateDelete) &&
                 !(op instanceof Merge)
             ) {
                 throw new Error(
-                    "Only CREATE, DELETE, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
                 );
             }
             op = op.next;
@@ -302,15 +306,17 @@ class Parser extends BaseParser {
             !(operation instanceof CreateRelationship) &&
             !(operation instanceof DeleteNode) &&
             !(operation instanceof DeleteRelationship) &&
+            !(operation instanceof DropBinding) &&
             !(operation instanceof RefreshNode) &&
             !(operation instanceof RefreshRelationship) &&
+            !(operation instanceof RefreshBinding) &&
             !(operation instanceof Let) &&
             !(operation instanceof Update) &&
             !(operation instanceof UpdateDelete) &&
             !(operation instanceof Merge)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, REFRESH, LET, UPDATE, or MERGE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, DROP, REFRESH, LET, UPDATE, or MERGE statement"
             );
         }
         return root;
@@ -670,14 +676,24 @@ class Parser extends BaseParser {
         return create;
     }
 
-    private parseDelete(): DeleteNode | DeleteRelationship | null {
+    private parseDelete(): DeleteNode | DeleteRelationship | DropBinding | null {
         if (!this.token.isDelete() && !this.token.isDrop()) {
             return null;
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isBinding()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected binding name");
+            }
+            const name: string = this.token.value || "";
+            this.setNextToken();
+            return new DropBinding(name);
+        }
         if (!this.token.isVirtual()) {
-            throw new Error("Expected VIRTUAL");
+            throw new Error("Expected VIRTUAL or BINDING");
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
@@ -724,14 +740,24 @@ class Parser extends BaseParser {
         return result;
     }
 
-    private parseRefresh(): RefreshNode | RefreshRelationship | null {
+    private parseRefresh(): RefreshNode | RefreshRelationship | RefreshBinding | null {
         if (!this.token.isRefresh()) {
             return null;
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isBinding()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected binding name");
+            }
+            const name: string = this.token.value || "";
+            this.setNextToken();
+            return new RefreshBinding(name);
+        }
         if (!this.token.isVirtual()) {
-            throw new Error("Expected VIRTUAL");
+            throw new Error("Expected VIRTUAL or BINDING");
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
@@ -856,6 +882,12 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let isStatic = false;
+        if (this.token.isStatic()) {
+            isStatic = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
             throw new Error("Expected identifier after LET");
         }
@@ -867,7 +899,65 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         const { expression, subQuery } = this.parseLetUpdateRhs();
-        return new Let(name, expression, subQuery);
+        if (isStatic && subQuery === null) {
+            throw new Error("LET STATIC requires a sub-query right-hand side");
+        }
+        // Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
+        // for STATIC bindings (caching must be enabled to refresh).  Peek
+        // past REFRESH to confirm EVERY follows: a bare `REFRESH BINDING`
+        // is a separate top-level statement.
+        let refreshEveryMs: number | null = null;
+        const savedIndex = this.tokenIndex;
+        this.skipWhitespaceAndComments();
+        let consumedRefreshClause = false;
+        if (this.token.isRefresh()) {
+            const afterRefreshIndex = this.tokenIndex;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isEvery()) {
+                if (!isStatic) {
+                    throw new Error("REFRESH EVERY requires STATIC (caching must be enabled)");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number after REFRESH EVERY");
+                }
+                const amount = Number(this.token.value);
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    throw new Error("REFRESH EVERY interval must be a positive number");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                const unit = (this.token.value || "").toUpperCase();
+                const unitMs: Record<string, number> = {
+                    SECOND: 1000,
+                    SECONDS: 1000,
+                    MINUTE: 60_000,
+                    MINUTES: 60_000,
+                    HOUR: 3_600_000,
+                    HOURS: 3_600_000,
+                    DAY: 86_400_000,
+                    DAYS: 86_400_000,
+                };
+                if (!(unit in unitMs)) {
+                    throw new Error(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    );
+                }
+                refreshEveryMs = amount * unitMs[unit];
+                this.setNextToken();
+                consumedRefreshClause = true;
+            } else {
+                // Not REFRESH EVERY; must be the start of a separate
+                // REFRESH statement.  Rewind to before REFRESH.
+                this.tokenIndex = afterRefreshIndex;
+            }
+        }
+        if (!consumedRefreshClause) {
+            this.tokenIndex = savedIndex;
+        }
+        return new Let(name, expression, subQuery, isStatic, refreshEveryMs);
     }
 
     private parseUpdate(): Update | UpdateDelete | null {

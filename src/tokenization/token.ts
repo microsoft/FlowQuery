@@ -603,6 +603,14 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.DROP;
     }
 
+    public static get BINDING(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.BINDING);
+    }
+
+    public isBinding(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.BINDING;
+    }
+
     public static get SET(): Token {
         return new Token(TokenType.KEYWORD, Keyword.SET);
     }

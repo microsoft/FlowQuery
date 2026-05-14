@@ -53,6 +53,11 @@ class Update(Operation):
             raise RuntimeError(
                 f"Binding '{self._name}' is not defined; use LET to create it"
             )
+        if bindings.is_static(self._name):
+            raise RuntimeError(
+                f"Binding '{self._name}' is STATIC; use REFRESH BINDING "
+                f"{self._name} to re-evaluate or DROP BINDING {self._name} first"
+            )
         value: Any
         if self._sub_query is not None:
             first = cast(Operation, self._sub_query.first_child())

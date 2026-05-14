@@ -3,9 +3,11 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..graph.bindings import Bindings
 from ..graph.data_cache import DataCache
 from ..graph.data_resolver import DataResolver
 from ..parsing.ast_node import ASTNode
+from ..parsing.expressions.binding_reference import BindingReference
 from ..parsing.expressions.parameter_reference import ParameterReference
 from ..parsing.operations.create_node import CreateNode
 from ..parsing.operations.create_relationship import CreateRelationship
@@ -129,11 +131,26 @@ class Runner:
         """
         if self._is_top_level:
             DataResolver.get_instance().data_cache = DataCache()
+        bindings_singleton = Bindings.get_instance()
         for stmt in self._statements:
             self._bind_parameters(stmt.ast)
+            # Pre-materialise STATIC bindings referenced by this statement.
+            # Sub-query evaluation is async but BindingReference.value() is
+            # sync, so the cache must be populated up-front.
+            names: set[str] = set()
+            self._collect_binding_names(stmt.ast, names)
+            for name in names:
+                await bindings_singleton.materialize(name)
             await stmt.first.initialize()
             await stmt.first.run()
             await stmt.first.finish()
+
+    def _collect_binding_names(self, node: ASTNode, names: "set[str]") -> None:
+        """Recursively walk the AST collecting BindingReference names."""
+        if isinstance(node, BindingReference):
+            names.add(node.name)
+        for child in node.get_children():
+            self._collect_binding_names(child, names)
 
     def _bind_parameters(self, node: ASTNode) -> None:
         """Recursively walks the AST to bind ParameterReference nodes

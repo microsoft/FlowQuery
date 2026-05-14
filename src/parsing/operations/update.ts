@@ -49,6 +49,11 @@ class Update extends Operation {
         if (!bindings.has(this._name)) {
             throw new Error(`Binding '${this._name}' is not defined; use LET to create it`);
         }
+        if (bindings.isStatic(this._name)) {
+            throw new Error(
+                `Binding '${this._name}' is STATIC; use REFRESH BINDING ${this._name} to re-evaluate or DROP BINDING ${this._name} first`
+            );
+        }
         let value: any;
         if (this._subQuery !== null) {
             const first = this._subQuery.firstChild() as Operation;

@@ -7587,3 +7587,51 @@ class TestStaticVirtualCache:
         assert db.get_node(Node(None, "PyDropAlias")) is not None
         await Runner("DROP VIRTUAL (:PyDropAlias)").run()
         assert db.get_node(Node(None, "PyDropAlias")) is None
+
+    @pytest.mark.asyncio
+    async def test_refresh_every_parses_all_supported_units(self):
+        db = Database.get_instance()
+        cases = [
+            ("SECOND", 1, 1_000),
+            ("SECONDS", 30, 30_000),
+            ("MINUTE", 1, 60_000),
+            ("MINUTES", 5, 300_000),
+            ("HOUR", 1, 3_600_000),
+            ("HOURS", 2, 7_200_000),
+            ("DAY", 1, 86_400_000),
+            ("DAYS", 3, 259_200_000),
+        ]
+        for unit, amount, expected in cases:
+            label = f"PyRefreshUnit_{unit}_{amount}"
+            await Runner(
+                f"CREATE STATIC VIRTUAL (:{label}) AS "
+                "{ UNWIND [{id:1}] AS r RETURN r.id AS id } "
+                f"REFRESH EVERY {amount} {unit}"
+            ).run()
+            physical = db.get_node(Node(None, label))
+            assert physical is not None
+            assert physical.refresh_every_ms == expected
+            assert physical.is_static is True
+            await Runner(f"DROP VIRTUAL (:{label})").run()
+
+    @pytest.mark.asyncio
+    async def test_refresh_every_re_executes_sub_query_after_ttl(self):
+        import asyncio
+
+        _py_refresh_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyTtlRefresh) AS "
+            "{ CALL pyrefreshcachecountergen() YIELD id RETURN id } "
+            "REFRESH EVERY 1 SECOND"
+        ).run()
+
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 1
+
+        await asyncio.sleep(1.1)
+
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 2
+
+        await Runner("DROP VIRTUAL (:PyTtlRefresh)").run()

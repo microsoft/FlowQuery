@@ -7173,3 +7173,49 @@ test("Test DROP VIRTUAL works as alias for DELETE VIRTUAL", async () => {
     await new Runner("DROP VIRTUAL (:DropAlias)").run();
     expect(db.getNode(new Node(null, "DropAlias"))).toBeNull();
 });
+
+test("Test REFRESH EVERY parses all supported units to milliseconds", async () => {
+    const db = Database.getInstance();
+    const cases: { unit: string; amount: number; expected: number }[] = [
+        { unit: "SECOND", amount: 1, expected: 1_000 },
+        { unit: "SECONDS", amount: 30, expected: 30_000 },
+        { unit: "MINUTE", amount: 1, expected: 60_000 },
+        { unit: "MINUTES", amount: 5, expected: 300_000 },
+        { unit: "HOUR", amount: 1, expected: 3_600_000 },
+        { unit: "HOURS", amount: 2, expected: 7_200_000 },
+        { unit: "DAY", amount: 1, expected: 86_400_000 },
+        { unit: "DAYS", amount: 3, expected: 259_200_000 },
+    ];
+    for (const { unit, amount, expected } of cases) {
+        const label = `RefreshUnit_${unit}_${amount}`;
+        await new Runner(
+            `CREATE STATIC VIRTUAL (:${label}) AS { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY ${amount} ${unit}`
+        ).run();
+        const physical = db.getNode(new Node(null, label));
+        expect(physical).not.toBeNull();
+        expect(physical!.refreshEveryMs).toBe(expected);
+        expect(physical!.isStatic).toBe(true);
+        await new Runner(`DROP VIRTUAL (:${label})`).run();
+    }
+});
+
+test("Test REFRESH EVERY re-executes sub-query after TTL elapses", async () => {
+    _refreshCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:TtlRefresh) AS { CALL refreshcachecountergen() YIELD id RETURN id } REFRESH EVERY 1 SECOND`
+    ).run();
+
+    // Two back-to-back accesses hit the cache.
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(1);
+
+    // Wait past the 1-second TTL.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1100));
+
+    // Next access should re-execute the backing sub-query.
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(2);
+
+    await new Runner("DROP VIRTUAL (:TtlRefresh)").run();
+});

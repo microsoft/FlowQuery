@@ -528,13 +528,13 @@ fq.provenance[0].rows[1].nodes; // contributed YYZ: includes b = yyz
 This lets you map each element of a `collect`/`sum`/`avg` result back
 to the exact node / relationship ids that produced it.
 
-##### Property-Level Lineage: `{ properties: true }`
+##### Property-Level Lineage
 
-When you also want the matched property **values** alongside the ids,
-add `{ properties: true }`:
+Each `NodeBinding` and `RelationshipHop` produced under `{ provenance:
+true }` also carries the matched **property values** alongside the ids:
 
 ```javascript
-const fq = new FlowQuery(query, null, null, { provenance: true, properties: true });
+const fq = new FlowQuery(query, null, null, { provenance: true });
 await fq.run();
 
 fq.provenance[0].nodes[0];
@@ -549,27 +549,22 @@ fq.provenance[0].relationships[0].hops[0];
 // }
 ```
 
-Semantics:
-
-- `properties: true` implies `provenance: true`.
 - `NodeBinding.properties` is a shallow copy of the matched record with
   `id` and `_label` stripped. `RelationshipHop.properties` is a shallow
   copy of the matched relationship's user-visible properties.
-- Without the option the `properties` field is omitted, keeping the
-  default lineage payload minimal.
 
-##### Deep Mode: Threading Lineage Through Virtual Sub-Queries
+##### Threading Lineage Through Virtual Sub-Queries
 
 A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
 produces the synthesised records exposed under the `:X` label. By
 default, a downstream `MATCH (x:X)` only sees the synthesised row's
 `id` — the upstream query that produced it is opaque.
 
-Passing `{ deep: true }` (which implies `provenance: true`) threads the
-inner runner's `RowProvenance` onto every binding whose record came
-from a virtual. Each `NodeBinding` and each `RelationshipHop` gains
-an optional `source: RowProvenance` field carrying the inner row's full
-lineage — recursively, when a virtual matches another virtual:
+When `{ provenance: true }` is set, the inner runner's `RowProvenance`
+is threaded onto every binding whose record came from a virtual. Each
+`NodeBinding` and each `RelationshipHop` gains an optional `source:
+RowProvenance` field carrying the inner row's full lineage —
+recursively, when a virtual matches another virtual:
 
 ```typescript
 import { Runner } from "flowquery";
@@ -592,7 +587,7 @@ await new Runner(`
     }
 `).run();
 
-const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { deep: true });
+const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { provenance: true });
 await fq.run();
 
 fq.provenance[0].nodes[0];
@@ -607,18 +602,100 @@ fq.provenance[0].nodes[0];
 
 Semantics:
 
-- `deep: true` implies `provenance: true` — setting deep alone enables
-  row-level lineage.
 - The `source` field is **omitted** when the binding's record did not
   come from a virtual sub-query (e.g. records from `UNWIND … RETURN`
   inside the virtual produce a `source` with empty `nodes` and
   `relationships`, signalling "lineage was threaded but no graph slots
   were bound at this level").
-- Deep mode is **recursive**: a virtual that matches another virtual
-  carries nested `source` chains all the way down.
-- Deep mode bypasses the static-virtual cache because each invocation
-  must produce fresh records to back the lineage weak-map. Static
-  caching continues to apply when `deep: false`.
+- Sub-query lineage is **recursive**: a virtual that matches another
+  virtual carries nested `source` chains all the way down.
+- Provenance mode bypasses the static-virtual cache because each
+  invocation must produce fresh records to back the lineage weak-map.
+  Static caching continues to apply when `provenance` is off.
+
+##### Column-Level Lineage: Tracing Each Result Cell to Its Source
+
+`runner.info.returns` (added to `StatementInfo`) maps every output
+column to the `alias.property` accesses that compose it. Combined with
+row provenance it gives you per-cell traceability — value → source
+binding → node id → source URL — without any runtime AST inspection.
+
+For a query
+
+```cypher
+MATCH (c:City)-[f:FLIGHT]->(d:City)
+WHERE c.country = 'US'
+RETURN c.name AS origin, d.name AS destination, f.airline AS airline
+```
+
+`runner.info.returns` is:
+
+```javascript
+{
+  origin: {
+    references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  destination: {
+    references: [{ alias: 'd', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  airline: {
+    references: [{
+      alias: 'f', kind: 'relationship',
+      labels: ['FLIGHT'], property: 'airline'
+    }],
+    kind: 'property'
+  }
+}
+```
+
+`kind` summarises how the column was built:
+
+| `kind`         | Meaning                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `'literal'`    | Pure literal expression, no bindings (e.g. `42 AS answer`).               |
+| `'property'`   | Direct `alias.property` projection (or pass-through).                     |
+| `'expression'` | Computed from one or more `alias.property` accesses.                      |
+| `'aggregate'`  | Aggregate function (`count`, `sum`, `collect`, …); see `aggregate` field. |
+
+Combining `info.returns` with `runner.provenance` lets you write a
+generic per-cell trace:
+
+```javascript
+function traceCell(runner, rowIdx, column) {
+    const lineage = runner.info.returns[column];
+    return lineage.references.map((ref) => {
+        const binding = runner.provenance[rowIdx][
+            ref.kind === "node" ? "nodes" : "relationships"
+        ].find((b) => b.alias === ref.alias);
+        return {
+            column,
+            value: runner.results[rowIdx][column],
+            sourceAlias: ref.alias,
+            sourceLabel: ref.labels[0],
+            sourceProperty: ref.property,
+            sourceId: binding?.id,
+            sourceUrls:
+                runner.info.nodes[ref.labels[0]]?.sources ??
+                runner.info.relationships[ref.labels[0]]?.sources,
+            // Deep-mode chain back to the originating virtual sub-query:
+            innerLineage: binding?.source,
+        };
+    });
+}
+```
+
+Notes:
+
+- The map is keyed by the column's output alias (the part after `AS`),
+  falling back to `expr0`, `expr1`, … for unnamed columns.
+- `count(c)` and similar aggregates over a bare binding produce
+  `kind: 'aggregate'`, `aggregate: 'count'`, and an empty `references`
+  list (no specific property is read). Use `count(c.id)` to surface a
+  property reference.
+- Multi-label intersection matches (`MATCH (n:A:B)`) populate every
+  label in `references[i].labels`.
 
 ### WHERE Clause
 

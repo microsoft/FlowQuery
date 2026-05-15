@@ -55,29 +55,28 @@ class VirtualStatement {
      * persistent cache when it is safe to do so.
      *
      * @param args        Pass-down filter arguments; bypasses the cache.
-     * @param deep        Thread inner row provenance onto each record's
-     *                    virtual-source weak-map link; also bypasses the
+     * @param provenance  Run the inner statement with provenance enabled
+     *                    so each emitted record carries a weak-map link to
+     *                    the inner row that produced it.  Also bypasses the
      *                    cache (the weak-map binding must be re-established
      *                    each call).
-     * @param properties  Capture matched property values into the inner
-     *                    runner's provenance.
      */
     public async data(
         args: Record<string, any> | null = null,
-        deep: boolean = false,
-        properties: boolean = false
+        provenance: boolean = false
     ): Promise<Record<string, any>[]> {
         if (this._statement === null) {
             throw new Error("Statement is null");
         }
-        // Filter pass-down queries (with args) and deep mode bypass the
-        // persistent cache: arg-bound results depend on runtime values, and
-        // deep mode needs fresh records to back the lineage weak-map.
-        const cacheable = !deep && args === null && this._isStatic;
+        // Filter pass-down queries (with args) and provenance mode bypass
+        // the persistent cache: arg-bound results depend on runtime values,
+        // and provenance mode needs fresh records to back the lineage
+        // weak-map.
+        const cacheable = !provenance && args === null && this._isStatic;
         if (cacheable && this._cache !== null && this.isCacheFresh()) {
             return this._cache;
         }
-        const result = await this.runInner(args, deep, properties);
+        const result = await this.runInner(args, provenance);
         if (cacheable) {
             this._cache = result;
             this._cachedAt = Date.now();
@@ -87,21 +86,16 @@ class VirtualStatement {
 
     private async runInner(
         args: Record<string, any> | null,
-        deep: boolean,
-        properties: boolean
+        provenance: boolean
     ): Promise<Record<string, any>[]> {
         // Lazy dynamic import to avoid a load-time cycle:
         // virtual_statement -> runner -> parsing -> graph (back to here).
         // Python uses the same idiom (function-local import).
         const RunnerCtor: typeof Runner = (await import("../compute/runner")).default;
-        const runner = new RunnerCtor(null, this._statement, args, {
-            provenance: deep,
-            deep,
-            properties,
-        });
+        const runner = new RunnerCtor(null, this._statement, args, { provenance });
         await runner.run();
         const result = runner.results;
-        if (deep) {
+        if (provenance) {
             const prov = runner.provenance;
             const len = Math.min(prov.length, result.length);
             for (let i = 0; i < len; i++) {

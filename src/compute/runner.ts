@@ -40,31 +40,19 @@ export interface RunnerOptions {
      * relationship `(left_id, right_id, type)` hops were bound while the
      * row was being projected.  Access via {@link Runner.provenance}.
      *
+     * Each {@link NodeBinding} and {@link RelationshipHop} also carries:
+     *
+     * - `properties`: a shallow copy of the matched record's user-visible
+     *   property values.
+     * - `source`: when the record came from a `CREATE VIRTUAL (:X) AS
+     *   { ... }` sub-query, the inner runner's `RowProvenance` row that
+     *   produced it.  Recursive — a virtual that matches another virtual
+     *   carries nested `source` chains.
+     *
      * Defaults to `false`; when disabled the runner has zero provenance
      * overhead.
      */
     provenance?: boolean;
-
-    /**
-     * When `true`, threads provenance through virtual sub-query lineage:
-     * each {@link NodeBinding} / {@link RelationshipHop} whose record
-     * originated from a `CREATE VIRTUAL (:X) AS { ... }` block also carries
-     * the inner runner's row provenance under `source`.  Recursive — a
-     * virtual that matches another virtual will carry nested `source`
-     * chains.
-     *
-     * Implies `provenance: true`.  Defaults to `false`.
-     */
-    deep?: boolean;
-
-    /**
-     * When `true`, each `NodeBinding` and `RelationshipHop` in the
-     * provenance also carries a `properties` field with a shallow copy of
-     * the matched record's user-visible property values.
-     *
-     * Implies `provenance: true`.  Defaults to `false`.
-     */
-    properties?: boolean;
 }
 
 /**
@@ -138,11 +126,7 @@ class Runner {
             throw new Error("Either statement or AST must be provided");
         }
         this._args = args;
-        // Both `deep` and `properties` are heavier extensions of provenance
-        // and imply it; normalise here so the rest of the runner only checks
-        // a single flag.
-        this._options =
-            options.deep || options.properties ? { ...options, provenance: true } : options;
+        this._options = options;
 
         if (ast !== null) {
             this._isTopLevel = false;
@@ -203,8 +187,7 @@ class Runner {
             try {
                 if (this._isTopLevel) {
                     DataResolver.getInstance().dataCache = new DataCache(
-                        this._options.deep === true,
-                        this._options.properties === true
+                        this._options.provenance === true
                     );
                 }
                 if (this._options.provenance) {
@@ -261,10 +244,9 @@ class Runner {
      * re-publishes itself as the single active source going forward.
      */
     private attachProvenance(first: Operation, sink: RowProvenance[]): void {
-        const captureProps = this._options.properties === true;
         const makeSites = (): ProvenanceSites => {
             const s = new ProvenanceSites();
-            s.captureProperties = captureProps;
+            s.captureProperties = true;
             return s;
         };
         let activeSites: ProvenanceSites = makeSites();

@@ -21,7 +21,13 @@ import {
     OutputSchema,
     ParameterSchema,
 } from "./parsing/functions/function_metadata";
-import type { NodeInfo, RelationshipInfo, StatementInfo } from "./parsing/statement_info_crawler";
+import type {
+    ColumnLineage,
+    ColumnReference,
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+} from "./parsing/statement_info_crawler";
 
 /**
  * List all registered functions with their metadata.
@@ -54,6 +60,8 @@ FlowQuery.Function = Function;
 
 export default FlowQuery;
 export type {
+    ColumnLineage,
+    ColumnReference,
     NodeBinding,
     NodeInfo,
     RelationshipBinding,

@@ -28,10 +28,9 @@ class PhysicalNode extends Node {
     }
     public data(
         args: Record<string, any> | null = null,
-        deep: boolean = false,
-        properties: boolean = false
+        provenance: boolean = false
     ): Promise<Record<string, any>[]> {
-        return this._virtual.data(args, deep, properties);
+        return this._virtual.data(args, provenance);
     }
 }
 

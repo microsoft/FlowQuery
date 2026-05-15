@@ -7374,3 +7374,190 @@ test("Test LET REFRESH EVERY re-executes sub-query after TTL elapses", async () 
 
     await new Runner("DROP BINDING letTtlRefresh").run();
 });
+
+// =====================================================================
+// Column-level lineage (info.returns) — bridges AST-level lineage with
+// runtime row provenance for per-cell traceability.
+// =====================================================================
+
+test("Test info.returns maps each output column to its alias.property reference", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColLinCity) AS {
+            UNWIND [{id: 'nyc', name: 'New York', country: 'US'}] AS c
+            RETURN c.id AS id, c.name AS name, c.country AS country
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (c:ColLinCity)
+        RETURN c.name AS origin, c.country AS region
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns).toEqual({
+        origin: {
+            references: [{ alias: "c", kind: "node", labels: ["ColLinCity"], property: "name" }],
+            kind: "property",
+        },
+        region: {
+            references: [{ alias: "c", kind: "node", labels: ["ColLinCity"], property: "country" }],
+            kind: "property",
+        },
+    });
+    await new Runner("DELETE VIRTUAL (:ColLinCity)").run();
+});
+
+test("Test info.returns kind='literal' for pure literal columns", () => {
+    const runner = new Runner(`WITH 1 AS x RETURN 42 AS answer, 'hi' AS greeting`);
+    const info = runner.metadata.info!;
+    expect(info.returns.answer).toEqual({ references: [], kind: "literal" });
+    expect(info.returns.greeting).toEqual({ references: [], kind: "literal" });
+});
+
+test("Test info.returns kind='expression' when a column combines multiple references", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColLinPerson) AS {
+            UNWIND [{id: 1, first: 'Ada', last: 'Lovelace'}] AS r
+            RETURN r.id AS id, r.first AS first, r.last AS last
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (p:ColLinPerson)
+        RETURN p.first + ' ' + p.last AS fullName
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns.fullName.kind).toBe("expression");
+    expect(info.returns.fullName.references).toEqual(
+        expect.arrayContaining([
+            { alias: "p", kind: "node", labels: ["ColLinPerson"], property: "first" },
+            { alias: "p", kind: "node", labels: ["ColLinPerson"], property: "last" },
+        ])
+    );
+    expect(info.returns.fullName.references.length).toBe(2);
+    await new Runner("DELETE VIRTUAL (:ColLinPerson)").run();
+});
+
+test("Test info.returns kind='aggregate' surfaces the function name and inner references", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColLinAggCity) AS {
+            UNWIND [{id: 'a', country: 'US'}, {id: 'b', country: 'US'}] AS r
+            RETURN r.id AS id, r.country AS country
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (c:ColLinAggCity)
+        RETURN c.country AS country, count(c) AS n, collect(c.id) AS ids
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns.country.kind).toBe("property");
+    expect(info.returns.n.kind).toBe("aggregate");
+    expect(info.returns.n.aggregate).toBe("count");
+    // count(c) has no Lookup so references stay empty.
+    expect(info.returns.n.references).toEqual([]);
+    expect(info.returns.ids.kind).toBe("aggregate");
+    expect(info.returns.ids.aggregate).toBe("collect");
+    expect(info.returns.ids.references).toEqual([
+        { alias: "c", kind: "node", labels: ["ColLinAggCity"], property: "id" },
+    ]);
+    await new Runner("DELETE VIRTUAL (:ColLinAggCity)").run();
+});
+
+test("Test info.returns covers relationship references", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColLinRelCity) AS {
+            UNWIND [{id: 'nyc'}, {id: 'lax'}] AS c RETURN c.id AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ColLinRelCity)-[:COL_LIN_FLIGHT]-(:ColLinRelCity) AS {
+            UNWIND [{left_id: 'nyc', right_id: 'lax', airline: 'AA'}] AS f
+            RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (a:ColLinRelCity)-[r:COL_LIN_FLIGHT]->(b:ColLinRelCity)
+        RETURN r.airline AS airline
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns).toEqual({
+        airline: {
+            references: [
+                {
+                    alias: "r",
+                    kind: "relationship",
+                    labels: ["COL_LIN_FLIGHT"],
+                    property: "airline",
+                },
+            ],
+            kind: "property",
+        },
+    });
+    await new Runner("DELETE VIRTUAL (:ColLinRelCity)-[:COL_LIN_FLIGHT]-(:ColLinRelCity)").run();
+    await new Runner("DELETE VIRTUAL (:ColLinRelCity)").run();
+});
+
+test("Test info.returns combined with provenance traces each cell to its source data", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColTraceCity) AS {
+            UNWIND [
+                {id: 'nyc', name: 'New York', country: 'US'},
+                {id: 'lhr', name: 'London', country: 'UK'}
+            ] AS c
+            RETURN c.id AS id, c.name AS name, c.country AS country
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (c:ColTraceCity)
+        WHERE c.country = 'US'
+        RETURN c.name AS origin, c.country AS region
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    // For each output cell we reconstruct: value → source alias →
+    // node id → matched property value, using info.returns + provenance.
+    const info = runner.metadata.info!;
+    expect(runner.results.length).toBe(1);
+    const row = runner.results[0];
+    const prov = runner.provenance[0];
+    for (const [column, value] of Object.entries(row)) {
+        const lineage = info.returns[column];
+        expect(lineage).toBeDefined();
+        expect(lineage.references.length).toBeGreaterThan(0);
+        const ref = lineage.references[0];
+        const binding = prov.nodes.find((n) => n.alias === ref.alias);
+        expect(binding).toBeDefined();
+        expect(binding!.label).toBe(ref.labels[0]);
+        // The matched property value must equal the column value because
+        // this RETURN is a direct alias.prop projection.
+        expect(binding!.properties![ref.property]).toBe(value);
+    }
+    await new Runner("DELETE VIRTUAL (:ColTraceCity)").run();
+});
+
+test("Test info.returns is empty for queries without RETURN", () => {
+    const runner = new Runner(`
+        CREATE VIRTUAL (:ColLinEmpty) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns).toEqual({});
+});
+
+test("Test info.returns is a deep copy", () => {
+    const runner = new Runner(`WITH 1 AS x RETURN x AS y`);
+    const info1 = runner.metadata.info!;
+    info1.returns.injected = { references: [], kind: "literal" };
+    if (info1.returns.y) {
+        info1.returns.y.references.push({
+            alias: "MUT",
+            kind: "node",
+            labels: ["MUT"],
+            property: "MUT",
+        });
+    }
+    const info2 = runner.metadata.info!;
+    expect(info2.returns.injected).toBeUndefined();
+    expect(info2.returns.y.references).toEqual([]);
+});

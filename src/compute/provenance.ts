@@ -23,15 +23,15 @@ export interface NodeBinding {
     id: any;
     /**
      * Shallow snapshot of the matched record's property values (excluding
-     * `id` and internal `_label`).  Present only when the runner was
-     * constructed with `{ properties: true }`.
+     * `id` and internal `_label`).  Present whenever the runner was
+     * constructed with `{ provenance: true }`.
      */
     properties?: Record<string, any>;
     /**
-     * Deep-mode lineage: when the matched node came from a virtual
+     * When the matched node came from a virtual
      * `CREATE VIRTUAL (:X) AS { ... }` sub-query, this is the inner
      * runner's `RowProvenance` row that produced the record.  Omitted
-     * when deep mode is off or the source is not a virtual.
+     * when the source is not a virtual.
      */
     source?: RowProvenance;
 }
@@ -48,12 +48,12 @@ export interface RelationshipHop {
     type: string;
     /**
      * Shallow snapshot of the relationship record's property values.
-     * Present only when the runner was constructed with
-     * `{ properties: true }`.
+     * Present whenever the runner was constructed with
+     * `{ provenance: true }`.
      */
     properties?: Record<string, any>;
     /**
-     * Deep-mode lineage: when the traversed edge came from a virtual
+     * When the traversed edge came from a virtual
      * relationship's inner sub-query, this is the inner runner's row
      * provenance for the contributing record.  Omitted otherwise.
      */
@@ -147,7 +147,7 @@ export class ProvenanceSites {
 
     /**
      * Enable property-level capture for snapshots produced by this collector.
-     * Set by the Runner when constructed with `{ properties: true }`.
+     * Set by the Runner when constructed with `{ provenance: true }`.
      */
     public set captureProperties(value: boolean) {
         this._captureProperties = value;

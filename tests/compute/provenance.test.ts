@@ -506,20 +506,6 @@ test("Provenance composes across chained aggregated WITH clauses", async () => {
     await dropCityGraph();
 });
 
-test("Deep mode is off by default: bindings carry no source field", async () => {
-    await createCityGraph();
-    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.id AS id`, null, null, {
-        provenance: true,
-    });
-    await runner.run();
-    for (const row of runner.provenance) {
-        for (const n of row.nodes) {
-            expect(n.source).toBeUndefined();
-        }
-    }
-    await dropCityGraph();
-});
-
 test("Deep mode threads UNWIND-virtual sub-query lineage onto node bindings", async () => {
     await new Runner(`
         CREATE VIRTUAL (:DeepCity) AS {
@@ -531,7 +517,7 @@ test("Deep mode threads UNWIND-virtual sub-query lineage onto node bindings", as
         }
     `).run();
     const runner = new Runner(`MATCH (c:DeepCity) RETURN c.id AS id`, null, null, {
-        deep: true,
+        provenance: true,
     });
     await runner.run();
     expect(runner.results.length).toBe(2);
@@ -568,7 +554,7 @@ test("Deep mode threads MATCH-virtual sub-query lineage onto node bindings", asy
         }
     `).run();
     const runner = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, {
-        deep: true,
+        provenance: true,
     });
     await runner.run();
     const ids = runner.results.map((r: Record<string, any>) => r.id).sort();
@@ -610,7 +596,7 @@ test("Deep mode threads virtual-relationship sub-query lineage onto hops", async
         `MATCH (a:DeepCity)-[r:DEEP_FLIGHT]->(b:DeepCity) RETURN a.id, b.id`,
         null,
         null,
-        { deep: true }
+        { provenance: true }
     );
     await runner.run();
     expect(runner.results.length).toBe(1);
@@ -647,7 +633,9 @@ test("Deep mode recurses through nested virtual sub-queries", async () => {
             MATCH (b:LevelB) RETURN b.id AS id
         }
     `).run();
-    const runner = new Runner(`MATCH (c:LevelC) RETURN c.id AS id`, null, null, { deep: true });
+    const runner = new Runner(`MATCH (c:LevelC) RETURN c.id AS id`, null, null, {
+        provenance: true,
+    });
     await runner.run();
     expect(runner.results.length).toBe(2);
     for (const row of runner.provenance) {
@@ -665,17 +653,6 @@ test("Deep mode recurses through nested virtual sub-queries", async () => {
     await new Runner("DELETE VIRTUAL (:LevelC)").run();
     await new Runner("DELETE VIRTUAL (:LevelB)").run();
     await new Runner("DELETE VIRTUAL (:LevelA)").run();
-});
-
-test("Deep mode implies provenance: setting deep alone enables row lineage", async () => {
-    await createCityGraph();
-    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.id AS id`, null, null, {
-        deep: true,
-    });
-    await runner.run();
-    expect(runner.provenance.length).toBe(runner.results.length);
-    expect(runner.results.length).toBeGreaterThan(0);
-    await dropCityGraph();
 });
 
 // ============================================================================
@@ -788,10 +765,10 @@ test("Aggregate rows expose one segment per contributing input row, aligned with
 });
 
 // ============================================================================
-// property-level lineage (opt-in via {properties: true})
+// property-level lineage (always on when provenance is enabled)
 // ============================================================================
 
-test("{properties: true} attaches matched property values onto NodeBinding", async () => {
+test("Provenance attaches matched property values onto NodeBinding", async () => {
     await createCityGraph();
     const runner = new Runner(
         `
@@ -801,7 +778,7 @@ test("{properties: true} attaches matched property values onto NodeBinding", asy
     `,
         null,
         null,
-        { provenance: true, properties: true }
+        { provenance: true }
     );
     await runner.run();
     for (const p of runner.provenance) {
@@ -817,7 +794,7 @@ test("{properties: true} attaches matched property values onto NodeBinding", asy
     await dropCityGraph();
 });
 
-test("{properties: true} attaches matched property values onto RelationshipHop", async () => {
+test("Provenance attaches matched property values onto RelationshipHop", async () => {
     await createCityGraph();
     const runner = new Runner(
         `
@@ -826,7 +803,7 @@ test("{properties: true} attaches matched property values onto RelationshipHop",
     `,
         null,
         null,
-        { provenance: true, properties: true }
+        { provenance: true }
     );
     await runner.run();
     for (const p of runner.provenance) {
@@ -836,32 +813,6 @@ test("{properties: true} attaches matched property values onto RelationshipHop",
         // Structural fields not duplicated.
         expect(hop.properties!.left_id).toBeUndefined();
         expect(hop.properties!.right_id).toBeUndefined();
-    }
-    await dropCityGraph();
-});
-
-test("{properties: true} without {provenance: true} is a no-op", async () => {
-    await createCityGraph();
-    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.name AS name`, null, null, {
-        properties: true,
-    });
-    await runner.run();
-    // properties alone implies provenance (matches deep semantics).
-    expect(runner.provenance.length).toBe(runner.results.length);
-    for (const p of runner.provenance) {
-        expect(p.nodes[0].properties).toBeDefined();
-    }
-    await dropCityGraph();
-});
-
-test("Without {properties: true}, NodeBinding has no properties field", async () => {
-    await createCityGraph();
-    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.name AS name`, null, null, {
-        provenance: true,
-    });
-    await runner.run();
-    for (const p of runner.provenance) {
-        expect(p.nodes[0].properties).toBeUndefined();
     }
     await dropCityGraph();
 });

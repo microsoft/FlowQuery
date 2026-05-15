@@ -11,22 +11,15 @@ import PhysicalRelationship from "./physical_relationship";
  */
 class DataCache {
     private _cache: Map<string, Record<string, any>[]> = new Map();
-    private _deep: boolean;
-    private _properties: boolean;
+    private _provenance: boolean;
 
-    constructor(deep: boolean = false, properties: boolean = false) {
-        this._deep = deep;
-        this._properties = properties;
+    constructor(provenance: boolean = false) {
+        this._provenance = provenance;
     }
 
-    /** Whether sub-queries should be run with deep-mode provenance. */
-    public get deep(): boolean {
-        return this._deep;
-    }
-
-    /** Whether sub-queries should capture property values in their provenance. */
-    public get properties(): boolean {
-        return this._properties;
+    /** Whether sub-queries should be run with provenance enabled. */
+    public get provenance(): boolean {
+        return this._provenance;
     }
 
     public async get(
@@ -35,19 +28,20 @@ class DataCache {
         args: Record<string, any> | null
     ): Promise<Record<string, any>[]> {
         if (args !== null) {
-            return physical.data(args, this._deep, this._properties);
+            return physical.data(args, this._provenance);
         }
-        // Deep mode must re-run the inner query each invocation because the
-        // virtual-source weak map is populated only on the freshly produced
-        // records.  Static caches store inert records with no back-links.
-        if (this._deep) {
-            return physical.data(null, true, this._properties);
+        // Provenance mode must re-run the inner query each invocation
+        // because the virtual-source weak map is populated only on the
+        // freshly produced records.  Static caches store inert records
+        // with no back-links.
+        if (this._provenance) {
+            return physical.data(null, true);
         }
         const cached = this._cache.get(key);
         if (cached !== undefined) {
             return cached;
         }
-        const data = await physical.data(null, false, this._properties);
+        const data = await physical.data(null, false);
         this._cache.set(key, data);
         return data;
     }

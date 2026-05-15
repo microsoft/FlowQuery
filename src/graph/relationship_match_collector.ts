@@ -27,8 +27,8 @@ class RelationshipMatchCollector {
             endNode: null,
             properties: relProperties,
         };
-        // Deep-mode: thread the underlying record's inner provenance onto
-        // the freshly constructed match object so the snapshot can read it
+        // Thread the underlying record's inner provenance onto the
+        // freshly constructed match object so the snapshot can read it
         // by reference.
         if (currentRecord != null) {
             const src = getVirtualSource(currentRecord);

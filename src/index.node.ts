@@ -14,7 +14,13 @@ import {
     OutputSchema,
     ParameterSchema,
 } from "./parsing/functions/function_metadata";
-import { NodeInfo, RelationshipInfo, StatementInfo } from "./parsing/statement_info_crawler";
+import {
+    ColumnLineage,
+    ColumnReference,
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+} from "./parsing/statement_info_crawler";
 
 /**
  * List all registered functions with their metadata.
@@ -58,4 +64,6 @@ export {
     StatementInfo,
     NodeInfo,
     RelationshipInfo,
+    ColumnLineage,
+    ColumnReference,
 };

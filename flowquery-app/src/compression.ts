@@ -2,10 +2,13 @@
 // Uses control chars (0x01–0x1F) that won't appear in query text.
 // Ordered longest-first so multi-word phrases are matched before their parts.
 const DICTIONARY: [string, string][] = [
+    ["REFRESH BINDING", "\x02"],
     ["OPTIONAL MATCH", "\x01"],
     ["LOAD JSON FROM", "\x03"],
     ["LOAD CSV FROM", "\x04"],
     ["LOAD TEXT FROM", "\x05"],
+    ["REFRESH EVERY", "\x0b"],
+    ["DROP BINDING", "\x0c"],
     ["ORDER BY", "\x06"],
     ["STARTS WITH", "\x07"],
     ["ENDS WITH", "\x08"],

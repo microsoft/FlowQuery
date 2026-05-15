@@ -1,7 +1,7 @@
 """Main parser for FlowQuery statements."""
 
 import sys
-from typing import Dict, Generator, Iterator, List, Optional, Tuple, cast
+from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, cast
 
 from ..graph.hops import Hops
 from ..graph.node import Node
@@ -62,15 +62,35 @@ from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
 from .operations.delete_relationship import DeleteRelationship
+from .operations.drop_binding import DropBinding
+from .operations.let import Let
 from .operations.limit import Limit
 from .operations.load import Load
 from .operations.match import Match
+from .operations.merge import (
+    Merge,
+    MergeMatchedAction,
+    MergeMatchedDelete,
+    MergeMatchedUpdate,
+    MergeNotMatchedInsert,
+    MergeOnClause,
+    MergeOnKeys,
+    MergeOnPredicate,
+    MergeSetItem,
+    MergeSourceAlias,
+    MergeTargetAlias,
+)
 from .operations.operation import Operation
 from .operations.order_by import OrderBy, SortField
+from .operations.refresh_binding import RefreshBinding
+from .operations.refresh_node import RefreshNode
+from .operations.refresh_relationship import RefreshRelationship
 from .operations.return_op import Return
 from .operations.union import Union
 from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
+from .operations.update import Update
+from .operations.update_delete import UpdateDelete
 from .operations.where import Where
 from .operations.with_op import With
 from .parser_state import ParserState
@@ -158,12 +178,29 @@ class Parser(BaseParser):
             yield previous
 
     def _validate_is_create_or_delete(self, root: ASTNode) -> None:
-        """Validates that all operations in a statement are CREATE or DELETE."""
+        """Validates that all operations in a statement are CREATE, DELETE, REFRESH, LET, or UPDATE."""
         op = root.first_child()
         while op is not None:
-            if not isinstance(op, (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
+            if not isinstance(
+                op,
+                (
+                    CreateNode,
+                    CreateRelationship,
+                    DeleteNode,
+                    DeleteRelationship,
+                    DropBinding,
+                    RefreshNode,
+                    RefreshRelationship,
+                    RefreshBinding,
+                    Let,
+                    Update,
+                    UpdateDelete,
+                    Merge,
+                ),
+            ):
                 raise ValueError(
-                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE statements can appear "
+                    "before the last statement in a multi-statement query"
                 )
             op = op.next  # type: ignore[assignment]
 
@@ -176,6 +213,8 @@ class Parser(BaseParser):
             if root.child_count() > 0:
                 if self.token.is_semicolon():
                     break
+                if is_sub_query and self.token.is_closing_brace():
+                    return root
                 self._expect_and_skip_whitespace_and_comments()
             else:
                 self._skip_whitespace_and_comments()
@@ -261,8 +300,29 @@ class Parser(BaseParser):
             new_root.add_child(union)
             return new_root
 
-        if not isinstance(operation, (Return, Call, CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)):
-            raise ValueError("Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement")
+        if not isinstance(
+            operation,
+            (
+                Return,
+                Call,
+                CreateNode,
+                CreateRelationship,
+                DeleteNode,
+                DeleteRelationship,
+                DropBinding,
+                RefreshNode,
+                RefreshRelationship,
+                RefreshBinding,
+                Let,
+                Update,
+                UpdateDelete,
+                Merge,
+            ),
+        ):
+            raise ValueError(
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, "
+                "DROP, REFRESH, LET, UPDATE, or MERGE statement"
+            )
 
         return root
 
@@ -275,7 +335,11 @@ class Parser(BaseParser):
             self._parse_call() or
             self._parse_match() or
             self._parse_create() or
-            self._parse_delete()
+            self._parse_delete() or
+            self._parse_refresh() or
+            self._parse_let() or
+            self._parse_update() or
+            self._parse_merge()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -385,6 +449,17 @@ class Parser(BaseParser):
             expression = self._parse_expression()
             if expression is None:
                 raise ValueError("Expected expression or async function")
+            # A bare unresolved identifier in `LOAD JSON FROM <name>` is
+            # treated as a reference to a LET-bound value, resolved at
+            # execution time against the global Bindings store.
+            from .expressions.binding_reference import BindingReference
+            inner = expression.first_child()
+            if (
+                isinstance(inner, Reference)
+                and inner.referred is None
+                and not inner.identifier.startswith("$")
+            ):
+                expression.replace_child(inner, BindingReference(inner.identifier))
             from_node.add_child(expression)
 
         self._expect_and_skip_whitespace_and_comments()
@@ -457,11 +532,16 @@ class Parser(BaseParser):
         return Match(patterns, optional)
 
     def _parse_create(self) -> Optional[Operation]:
-        """Parse CREATE VIRTUAL statement for nodes and relationships."""
+        """Parse CREATE [STATIC] VIRTUAL statement with optional REFRESH EVERY clause."""
         if not self.token.is_create():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        is_static = False
+        if self.token.is_static():
+            is_static = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_virtual():
             raise ValueError("Expected VIRTUAL")
         self.set_next_token()
@@ -511,19 +591,81 @@ class Parser(BaseParser):
         if query is None:
             raise ValueError("Expected sub-query")
 
+        # Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
+        # for STATIC virtual entities (caching must be enabled to refresh).
+        # We deliberately peek past REFRESH to confirm EVERY follows: a bare
+        # REFRESH VIRTUAL ... is a separate top-level statement.
+        refresh_every_ms: Optional[int] = None
+        saved_index = self._token_index
+        self._skip_whitespace_and_comments()
+        consumed_refresh_clause = False
+        if self.token.is_refresh():
+            after_refresh_index = self._token_index
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_every():
+                if not is_static:
+                    raise ValueError(
+                        "REFRESH EVERY requires STATIC (caching must be enabled)"
+                    )
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                if not self.token.is_number():
+                    raise ValueError("Expected number after REFRESH EVERY")
+                try:
+                    amount = float(self.token.value or "0")
+                except ValueError as e:
+                    raise ValueError("Expected number after REFRESH EVERY") from e
+                if amount <= 0:
+                    raise ValueError("REFRESH EVERY interval must be a positive number")
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                unit = (self.token.value or "").upper()
+                unit_ms = {
+                    "SECOND": 1000,
+                    "SECONDS": 1000,
+                    "MINUTE": 60_000,
+                    "MINUTES": 60_000,
+                    "HOUR": 3_600_000,
+                    "HOURS": 3_600_000,
+                    "DAY": 86_400_000,
+                    "DAYS": 86_400_000,
+                }
+                if unit not in unit_ms:
+                    raise ValueError(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    )
+                refresh_every_ms = int(amount * unit_ms[unit])
+                self.set_next_token()
+                consumed_refresh_clause = True
+            else:
+                # Not REFRESH EVERY — must be the start of a separate
+                # REFRESH VIRTUAL statement.  Rewind to before REFRESH.
+                self._token_index = after_refresh_index
+        if not consumed_refresh_clause:
+            self._token_index = saved_index
+
         if relationship is not None:
-            return CreateRelationship(relationship, query)
+            return CreateRelationship(relationship, query, is_static, refresh_every_ms)
         else:
-            return CreateNode(node, query)
+            return CreateNode(node, query, is_static, refresh_every_ms)
 
     def _parse_delete(self) -> Optional[Operation]:
-        """Parse DELETE VIRTUAL statement for nodes and relationships."""
-        if not self.token.is_delete():
+        """Parse DELETE/DROP VIRTUAL or DROP BINDING statement."""
+        if not self.token.is_delete() and not self.token.is_drop():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_binding():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected binding name")
+            name = self.token.value or ""
+            self.set_next_token()
+            return DropBinding(name)
         if not self.token.is_virtual():
-            raise ValueError("Expected VIRTUAL")
+            raise ValueError("Expected VIRTUAL or BINDING")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
 
@@ -564,6 +706,480 @@ class Parser(BaseParser):
         else:
             return DeleteNode(node)
 
+    def _parse_refresh(self) -> Optional[Operation]:
+        """Parse REFRESH VIRTUAL or REFRESH BINDING statement."""
+        if not self.token.is_refresh():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_binding():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected binding name")
+            name = self.token.value or ""
+            self.set_next_token()
+            return RefreshBinding(name)
+        if not self.token.is_virtual():
+            raise ValueError("Expected VIRTUAL or BINDING")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        node = self._parse_node()
+        if node is None:
+            raise ValueError("Expected node definition")
+
+        relationship: Optional[Relationship] = None
+        if self.token.is_subtract() and self.peek() and self.peek().is_opening_bracket():
+            self.set_next_token()  # skip -
+            self.set_next_token()  # skip [
+            if not self.token.is_colon():
+                raise ValueError("Expected ':' for relationship type")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError("Expected relationship type identifier")
+            rel_type = self.token.value or ""
+            self.set_next_token()
+            if not self.token.is_closing_bracket():
+                raise ValueError("Expected closing bracket for relationship definition")
+            self.set_next_token()
+            if not self.token.is_subtract():
+                raise ValueError("Expected '-' for relationship definition")
+            self.set_next_token()
+            if self.token.is_greater_than():
+                self.set_next_token()
+            target = self._parse_node()
+            if target is None:
+                raise ValueError("Expected target node definition")
+            relationship = Relationship()
+            relationship.type = rel_type
+            relationship.source = node
+            relationship.target = target
+
+        if relationship is not None:
+            return RefreshRelationship(relationship)
+        return RefreshNode(node)
+
+    def _looks_like_pipeline_start(self) -> bool:
+        """True if the current token opens a query pipeline (the right-
+        hand side of `LET name =` / `UPDATE name =`)."""
+        return (
+            self.token.is_with()
+            or self.token.is_unwind()
+            or self.token.is_load()
+            or self.token.is_call()
+            or self.token.is_match()
+            or self.token.is_optional()
+            or self.token.is_return()
+        )
+
+    def _brace_opens_sub_query(self) -> bool:
+        """Peek past `{` to disambiguate sub-query braces from map literals."""
+        if not self.token.is_opening_brace():
+            return False
+        saved_index = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        result = (
+            self.token.is_with()
+            or self.token.is_unwind()
+            or self.token.is_load()
+            or self.token.is_call()
+            or self.token.is_match()
+            or self.token.is_optional()
+            or self.token.is_return()
+        )
+        self._token_index = saved_index
+        return result
+
+    def _parse_let_update_rhs(self) -> Tuple[Optional[Expression], Optional[ASTNode]]:
+        """Parses the right-hand side of a `LET` / `UPDATE`."""
+        self._expect_and_skip_whitespace_and_comments()
+        if self._brace_opens_sub_query():
+            sub_query = self._parse_sub_query()
+            if sub_query is None:
+                raise ValueError("Expected sub-query")
+            return None, sub_query
+        if self._looks_like_pipeline_start():
+            saved_state = self._state
+            self._state = ParserState()
+            sub_query = self._parse_tokenized(True)
+            self._state = saved_state
+            if sub_query.child_count() == 0:
+                raise ValueError("Expected expression or sub-query")
+            return None, sub_query
+        expression = self._parse_expression()
+        if expression is None:
+            raise ValueError("Expected expression or sub-query")
+        return expression, None
+
+    def _parse_let(self) -> Optional[Let]:
+        if not self.token.is_let():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected identifier after LET")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if not self.token.is_equals():
+            raise ValueError("Expected '=' after LET identifier")
+        self.set_next_token()
+        expression, sub_query = self._parse_let_update_rhs()
+
+        # Optional trailing REFRESH EVERY <n> <unit> clause turns the
+        # binding into a refreshable one.  Requires a sub-query RHS
+        # (there is nothing to re-evaluate for a literal expression).
+        refresh_every_ms: Optional[int] = None
+        saved_index = self._token_index
+        self._skip_whitespace_and_comments()
+        consumed_refresh_clause = False
+        if self.token.is_refresh():
+            after_refresh_index = self._token_index
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_every():
+                if sub_query is None:
+                    raise ValueError(
+                        "LET REFRESH EVERY requires a sub-query right-hand side"
+                    )
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                if not self.token.is_number():
+                    raise ValueError("Expected number after REFRESH EVERY")
+                try:
+                    amount = float(self.token.value or "0")
+                except ValueError as e:
+                    raise ValueError("Expected number after REFRESH EVERY") from e
+                if amount <= 0:
+                    raise ValueError("REFRESH EVERY interval must be a positive number")
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                unit = (self.token.value or "").upper()
+                unit_ms = {
+                    "SECOND": 1000,
+                    "SECONDS": 1000,
+                    "MINUTE": 60_000,
+                    "MINUTES": 60_000,
+                    "HOUR": 3_600_000,
+                    "HOURS": 3_600_000,
+                    "DAY": 86_400_000,
+                    "DAYS": 86_400_000,
+                }
+                if unit not in unit_ms:
+                    raise ValueError(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    )
+                refresh_every_ms = int(amount * unit_ms[unit])
+                self.set_next_token()
+                consumed_refresh_clause = True
+            else:
+                # Not REFRESH EVERY; rewind so the outer loop sees REFRESH.
+                self._token_index = after_refresh_index
+        if not consumed_refresh_clause:
+            self._token_index = saved_index
+
+        return Let(name, expression, sub_query, refresh_every_ms)
+
+    def _parse_update(self) -> Optional[Operation]:
+        if not self.token.is_update():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected identifier after UPDATE")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+
+        # `UPDATE name AS alias DELETE WHERE <pred>` — row-filter branch.
+        if self.token.is_as():
+            return self._parse_update_delete_tail(name)
+
+        # `UPDATE name = <rhs>` — assign branch.
+        if not self.token.is_equals():
+            raise ValueError("Expected '=' in UPDATE")
+        self.set_next_token()
+        expression, sub_query = self._parse_let_update_rhs()
+        return Update(name, expression, sub_query)
+
+    def _parse_merge(self) -> Optional[Merge]:
+        """Parses a ``MERGE INTO <name> [AS <target>] USING <rhs>
+        [AS <source>] ON <on-clause> <when-clauses>`` statement."""
+        if not self.token.is_merge():
+            return None
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_into():
+            raise ValueError("Expected INTO after MERGE")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected binding name after MERGE INTO")
+        name = self.token.value
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        target_alias: Optional[str] = None
+        if self.token.is_as():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected alias after AS in MERGE INTO")
+            target_alias = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if not self.token.is_using():
+            raise ValueError("Expected USING after MERGE INTO target")
+        self.set_next_token()
+        source_expression, source_sub_query = self._parse_let_update_rhs()
+        if source_expression is not None:
+            # The source RHS lives outside the LET / UPDATE binding-RHS
+            # scope, so a bare identifier here refers to an existing
+            # binding (e.g. ``USING incoming AS s``) rather than a
+            # declaration-site name.  Convert unresolved references so
+            # they resolve against the global Bindings store at runtime.
+            self._convert_unresolved_references_to_bindings(source_expression)
+        self._skip_whitespace_and_comments()
+        source_alias: Optional[str] = None
+        if self.token.is_as():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected alias after AS in MERGE INTO … USING")
+            source_alias = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if not self.token.is_on():
+            raise ValueError("Expected ON in MERGE INTO")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Pre-create the Merge with placeholders so that aliases can
+        # resolve to the per-row context while we parse the ON clause
+        # and the WHEN expressions.
+        placeholder_on: MergeOnClause = MergeOnKeys([])
+        merge = Merge(
+            name,
+            target_alias,
+            source_alias,
+            source_expression,
+            source_sub_query,
+            placeholder_on,
+            None,
+            None,
+        )
+        if target_alias is not None:
+            self._state.variables[target_alias] = MergeTargetAlias(merge)
+        if source_alias is not None:
+            self._state.variables[source_alias] = MergeSourceAlias(merge)
+        try:
+            on_clause = self._parse_merge_on()
+            self._skip_whitespace_and_comments()
+            matched: Optional[MergeMatchedAction] = None
+            not_matched: Optional[MergeNotMatchedInsert] = None
+            while self.token.is_when():
+                kind, action = self._parse_merge_when_clause()
+                if kind == "matched":
+                    if matched is not None:
+                        raise ValueError("Duplicate WHEN MATCHED clause in MERGE INTO")
+                    matched = cast(MergeMatchedAction, action)
+                else:
+                    if not_matched is not None:
+                        raise ValueError("Duplicate WHEN NOT MATCHED clause in MERGE INTO")
+                    not_matched = cast(MergeNotMatchedInsert, action)
+                self._skip_whitespace_and_comments()
+            if matched is None and not_matched is None:
+                raise ValueError("MERGE INTO requires at least one WHEN clause")
+            merge.set_clauses(on_clause, matched, not_matched)
+        finally:
+            if target_alias is not None:
+                self._state.variables.pop(target_alias, None)
+            if source_alias is not None:
+                self._state.variables.pop(source_alias, None)
+        return merge
+
+    def _parse_merge_on(self) -> MergeOnClause:
+        """Parses the body of the ``ON`` clause.  A bare identifier (or
+        parenthesised list of identifiers) followed by ``WHEN`` is the
+        key form; anything else is parsed as an expression."""
+        saved_index = self._token_index
+        keys = self._try_parse_merge_key_list()
+        if keys is not None:
+            return MergeOnKeys(keys)
+        self._token_index = saved_index
+        predicate = self._parse_expression()
+        if predicate is None:
+            raise ValueError("Expected predicate or key list after MERGE INTO … ON")
+        self._convert_unresolved_references_to_bindings(predicate)
+        return MergeOnPredicate(predicate)
+
+    def _try_parse_merge_key_list(self) -> Optional[List[str]]:
+        """Speculatively parses ``<id>`` or ``(<id> [, <id>]*)`` followed
+        by ``WHEN``.  Returns the key list on success or ``None``."""
+        keys: List[str] = []
+        if self.token.is_left_parenthesis():
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            while not self.token.is_right_parenthesis():
+                if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                    return None
+                keys.append(self.token.value)
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+                if self.token.is_comma():
+                    self.set_next_token()
+                    self._skip_whitespace_and_comments()
+                elif not self.token.is_right_parenthesis():
+                    return None
+            self.set_next_token()
+        else:
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                return None
+            keys.append(self.token.value)
+            self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if not self.token.is_when():
+            return None
+        if len(keys) == 0:
+            return None
+        return keys
+
+    def _parse_merge_when_clause(self) -> Tuple[str, Any]:
+        """Parses a single ``WHEN [NOT] MATCHED THEN UPDATE SET … |
+        DELETE | INSERT [<expr>]`` clause.  Returns a tuple of
+        ``("matched" | "not_matched", action)``.  Caller is positioned
+        on ``WHEN``."""
+        self.set_next_token()  # consume WHEN
+        self._expect_and_skip_whitespace_and_comments()
+        negated = False
+        if self.token.is_not():
+            negated = True
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_matched():
+            raise ValueError(
+                "Expected MATCHED after WHEN" + (" NOT" if negated else "")
+            )
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_then():
+            raise ValueError(
+                "Expected THEN after WHEN" + (" NOT" if negated else "") + " MATCHED"
+            )
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if negated:
+            if not self.token.is_insert():
+                raise ValueError("Expected INSERT after WHEN NOT MATCHED THEN")
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            expression: Optional[Expression] = None
+            if (
+                not self.token.is_when()
+                and not self.token.is_eof()
+                and not self.token.is_semicolon()
+                and not self.token.is_closing_brace()
+            ):
+                expression = self._parse_expression()
+                if expression is None:
+                    raise ValueError("Expected expression after WHEN NOT MATCHED THEN INSERT")
+                self._convert_unresolved_references_to_bindings(expression)
+            return ("not_matched", MergeNotMatchedInsert(expression))
+        if self.token.is_update():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_set():
+                raise ValueError("Expected SET after WHEN MATCHED THEN UPDATE")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            set_items = self._parse_merge_set_list()
+            return ("matched", MergeMatchedUpdate(set_items))
+        if self.token.is_delete():
+            self.set_next_token()
+            return ("matched", MergeMatchedDelete())
+        raise ValueError("Expected UPDATE or DELETE after WHEN MATCHED THEN")
+
+    def _parse_merge_set_list(self) -> List[MergeSetItem]:
+        """Parses ``.field [= <expr>] [, .field [= <expr>]]*``."""
+        items: List[MergeSetItem] = []
+        while True:
+            if not self.token.is_dot():
+                raise ValueError("Expected '.' before SET field name")
+            self.set_next_token()
+            if not self.token.is_identifier_or_keyword() or self.token.value is None:
+                raise ValueError("Expected field name after '.'")
+            field = self.token.value
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            expression: Optional[Expression] = None
+            if self.token.is_equals():
+                self.set_next_token()
+                self._expect_and_skip_whitespace_and_comments()
+                expression = self._parse_expression()
+                if expression is None:
+                    raise ValueError(f"Expected expression after SET .{field} =")
+                self._convert_unresolved_references_to_bindings(expression)
+                self._skip_whitespace_and_comments()
+            items.append(MergeSetItem(field, expression))
+            if not self.token.is_comma():
+                break
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        if len(items) == 0:
+            raise ValueError("Expected at least one SET field")
+        return items
+
+    def _parse_update_delete_tail(self, name: str) -> UpdateDelete:
+        """Parses the tail of ``UPDATE name AS alias DELETE WHERE <pred>``,
+        with ``AS`` already consumed by the caller's lookahead."""
+        self.set_next_token()  # consume AS
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_identifier_or_keyword() or self.token.value is None:
+            raise ValueError("Expected alias after AS")
+        alias = self.token.value
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_delete():
+            raise ValueError("Expected DELETE after UPDATE alias")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        if not self.token.is_where():
+            raise ValueError("Expected WHERE after UPDATE … DELETE")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+
+        # Inject the alias into the parser's variable scope while we
+        # parse the predicate so that `<alias>` / `<alias>.field`
+        # references resolve to the UpdateDelete's per-row value.
+        update_delete = UpdateDelete(name, alias, Expression())
+        self._state.variables[alias] = update_delete
+        predicate = self._parse_expression()
+        self._state.variables.pop(alias, None)
+        if predicate is None:
+            raise ValueError("Expected predicate expression after WHERE")
+        # Any other unresolved bare identifiers (e.g. `IN banned`) refer
+        # to LET-bound bindings, which are resolved at run-time against
+        # the global Bindings store.
+        self._convert_unresolved_references_to_bindings(predicate)
+        update_delete.set_predicate(predicate)
+        return update_delete
+
+    def _convert_unresolved_references_to_bindings(self, node: ASTNode) -> None:
+        """Recursively replaces unresolved ``Reference`` nodes with
+        ``BindingReference``, used to support cross-binding references
+        inside ``UPDATE … AS u DELETE WHERE …`` predicates."""
+        from .expressions.binding_reference import BindingReference
+        for child in list(node.get_children()):
+            if (
+                isinstance(child, Reference)
+                and child.referred is None
+                and not child.identifier.startswith("$")
+            ):
+                node.replace_child(child, BindingReference(child.identifier))
+            else:
+                self._convert_unresolved_references_to_bindings(child)
+
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""
         if not self.token.is_union():
@@ -582,7 +1198,7 @@ class Parser(BaseParser):
         if not self.token.is_opening_brace():
             return None
         self.set_next_token()
-        self._expect_and_skip_whitespace_and_comments()
+        self._skip_whitespace_and_comments()
         query = self._parse_tokenized(is_sub_query=True)
         self._skip_whitespace_and_comments()
         if not self.token.is_closing_brace():

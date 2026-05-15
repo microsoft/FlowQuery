@@ -1,4 +1,5 @@
 import Runner from "../../src/compute/runner";
+import Bindings from "../../src/graph/bindings";
 import Database from "../../src/graph/database";
 import Node from "../../src/graph/node";
 import Relationship from "../../src/graph/relationship";
@@ -1377,6 +1378,38 @@ test("Test relationships function", async () => {
     expect(results[0].rels.length).toBe(1);
     expect(results[0].rels[0].type).toBe("CONNECTED_TO");
     expect(results[0].rels[0].properties.distance).toBe(190);
+});
+
+test("RETURN of a whole node does not leak the internal _label key", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:City) AS {
+            UNWIND [
+                {id: 1, name: 'New York'},
+                {id: 2, name: 'Boston'}
+            ] AS record
+            RETURN record.id AS id, record.name AS name
+        }
+    `).run();
+    const match = new Runner(`
+        MATCH (c:City)
+        RETURN c
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(2);
+    for (const row of results) {
+        expect(row.c).not.toHaveProperty("_label");
+        // The user-facing payload should still expose the data fields.
+        expect(row.c).toHaveProperty("id");
+        expect(row.c).toHaveProperty("name");
+    }
+    // `labels()` must still work even though `_label` is hidden from RETURN.
+    const labelsMatch = new Runner(`
+        MATCH (c:City)
+        RETURN labels(c) AS labels
+    `);
+    await labelsMatch.run();
+    expect(labelsMatch.results[0].labels).toEqual(["City"]);
 });
 
 test("Test nodes function with null", async () => {
@@ -5331,7 +5364,7 @@ test("Test multi-statement rejects retrieval before last", () => {
             }
         `);
     }).toThrow(
-        "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+        "Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
     );
 });
 
@@ -7042,4 +7075,302 @@ test("Test metadata WITH-rebind also recovers literal values via WHERE equality"
     expect(info.nodes.MetaWithRebLitUser.literal_values).toEqual({
         id: ["rick.o"],
     });
+});
+
+// ===== STATIC virtual / REFRESH EVERY / DROP VIRTUAL / REFRESH VIRTUAL =====
+
+const _cacheCounter = { count: 0 };
+const _refreshCounter = { count: 0 };
+
+@FunctionDef({
+    description: "Counter generator for STATIC cache test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class StaticCacheCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _cacheCounter.count++;
+        yield { id: _cacheCounter.count, name: "v" + _cacheCounter.count };
+    }
+}
+
+@FunctionDef({
+    description: "Counter generator for REFRESH VIRTUAL test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class RefreshCacheCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _refreshCounter.count++;
+        yield { id: _refreshCounter.count };
+    }
+}
+
+test("Test STATIC virtual node caches across queries", async () => {
+    _cacheCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:CacheTestA) AS { CALL staticcachecountergen() YIELD id, name RETURN id, name }`
+    ).run();
+    const r1 = new Runner("MATCH (n:CacheTestA) RETURN n.id AS id");
+    await r1.run();
+    const r2 = new Runner("MATCH (n:CacheTestA) RETURN n.id AS id");
+    await r2.run();
+    expect(r1.results).toEqual(r2.results);
+    expect(_cacheCounter.count).toBe(1);
+    await new Runner("DROP VIRTUAL (:CacheTestA)").run();
+});
+
+test("Test STATIC re-CREATE without DROP throws", async () => {
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:StaticDup) AS { UNWIND [{id:1}] AS r RETURN r.id AS id }`
+    ).run();
+    await expect(
+        new Runner(
+            `CREATE STATIC VIRTUAL (:StaticDup) AS { UNWIND [{id:2}] AS r RETURN r.id AS id }`
+        ).run()
+    ).rejects.toThrow(/already exists/);
+    await new Runner("DROP VIRTUAL (:StaticDup)").run();
+});
+
+test("Test REFRESH EVERY without STATIC throws", () => {
+    expect(
+        () =>
+            new Runner(
+                `CREATE VIRTUAL (:NoStatic) AS { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+            )
+    ).toThrow(/REFRESH EVERY requires STATIC/);
+});
+
+test("Test REFRESH VIRTUAL invalidates cache", async () => {
+    _refreshCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:RefreshTest) AS { CALL refreshcachecountergen() YIELD id RETURN id }`
+    ).run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(1);
+    await new Runner("REFRESH VIRTUAL (:RefreshTest)").run();
+    await new Runner("MATCH (n:RefreshTest) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(2);
+    await new Runner("DROP VIRTUAL (:RefreshTest)").run();
+});
+
+test("Test DROP VIRTUAL works as alias for DELETE VIRTUAL", async () => {
+    const db = Database.getInstance();
+    await new Runner(
+        `CREATE VIRTUAL (:DropAlias) AS { UNWIND [{id:1}] AS r RETURN r.id AS id }`
+    ).run();
+    expect(db.getNode(new Node(null, "DropAlias"))).not.toBeNull();
+    await new Runner("DROP VIRTUAL (:DropAlias)").run();
+    expect(db.getNode(new Node(null, "DropAlias"))).toBeNull();
+});
+
+test("Test REFRESH EVERY parses all supported units to milliseconds", async () => {
+    const db = Database.getInstance();
+    const cases: { unit: string; amount: number; expected: number }[] = [
+        { unit: "SECOND", amount: 1, expected: 1_000 },
+        { unit: "SECONDS", amount: 30, expected: 30_000 },
+        { unit: "MINUTE", amount: 1, expected: 60_000 },
+        { unit: "MINUTES", amount: 5, expected: 300_000 },
+        { unit: "HOUR", amount: 1, expected: 3_600_000 },
+        { unit: "HOURS", amount: 2, expected: 7_200_000 },
+        { unit: "DAY", amount: 1, expected: 86_400_000 },
+        { unit: "DAYS", amount: 3, expected: 259_200_000 },
+    ];
+    for (const { unit, amount, expected } of cases) {
+        const label = `RefreshUnit_${unit}_${amount}`;
+        await new Runner(
+            `CREATE STATIC VIRTUAL (:${label}) AS { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY ${amount} ${unit}`
+        ).run();
+        const physical = db.getNode(new Node(null, label));
+        expect(physical).not.toBeNull();
+        expect(physical!.refreshEveryMs).toBe(expected);
+        expect(physical!.isStatic).toBe(true);
+        await new Runner(`DROP VIRTUAL (:${label})`).run();
+    }
+});
+
+test("Test REFRESH EVERY re-executes sub-query after TTL elapses", async () => {
+    _refreshCounter.count = 0;
+    await new Runner(
+        `CREATE STATIC VIRTUAL (:TtlRefresh) AS { CALL refreshcachecountergen() YIELD id RETURN id } REFRESH EVERY 1 SECOND`
+    ).run();
+
+    // Two back-to-back accesses hit the cache.
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(1);
+
+    // Wait past the 1-second TTL.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1100));
+
+    // Next access should re-execute the backing sub-query.
+    await new Runner("MATCH (n:TtlRefresh) RETURN n.id AS id").run();
+    expect(_refreshCounter.count).toBe(2);
+
+    await new Runner("DROP VIRTUAL (:TtlRefresh)").run();
+});
+
+// ===== Refreshable LET / REFRESH BINDING / DROP BINDING =====
+
+const _letCacheCounter = { count: 0 };
+const _letRefreshCounter = { count: 0 };
+
+@FunctionDef({
+    description: "Counter generator for LET cache test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class StaticLetCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _letCacheCounter.count++;
+        yield { id: _letCacheCounter.count };
+    }
+}
+
+@FunctionDef({
+    description: "Counter generator for REFRESH BINDING test",
+    category: "async",
+    parameters: [],
+    output: { description: "Yields one record per call", type: "any" },
+})
+class RefreshLetCounterGen extends AsyncFunction {
+    constructor() {
+        super();
+        this._expectedParameterCount = 0;
+    }
+    public async *generate(): AsyncGenerator<any> {
+        _letRefreshCounter.count++;
+        yield { id: _letRefreshCounter.count };
+    }
+}
+
+test("Test plain LET sub-query caches the result", async () => {
+    _letCacheCounter.count = 0;
+    await new Runner(`LET letCacheA = { CALL staticletcountergen() YIELD id RETURN id }`).run();
+    const r1 = new Runner("LOAD JSON FROM letCacheA AS x RETURN x.id AS id");
+    await r1.run();
+    const r2 = new Runner("LOAD JSON FROM letCacheA AS x RETURN x.id AS id");
+    await r2.run();
+    expect(r1.results).toEqual(r2.results);
+    expect(_letCacheCounter.count).toBe(1);
+    await new Runner("DROP BINDING letCacheA").run();
+});
+
+test("Test refreshable LET re-create without DROP throws", async () => {
+    await new Runner(
+        `LET letDup = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
+    await expect(
+        new Runner(
+            `LET letDup = { UNWIND [{id:2}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+        ).run()
+    ).rejects.toThrow(/already exists/);
+    await new Runner("DROP BINDING letDup").run();
+});
+
+test("Test LET REFRESH EVERY with expression RHS throws", () => {
+    expect(() => new Runner(`LET bad = 42 REFRESH EVERY 1 MINUTE`)).toThrow(
+        /LET REFRESH EVERY requires a sub-query/
+    );
+});
+
+test("Test REFRESH BINDING invalidates cache", async () => {
+    _letRefreshCounter.count = 0;
+    await new Runner(
+        `LET letRefreshTest = { CALL refreshletcountergen() YIELD id RETURN id } REFRESH EVERY 1 MINUTE`
+    ).run();
+    await new Runner("LOAD JSON FROM letRefreshTest AS x RETURN x.id AS id").run();
+    await new Runner("LOAD JSON FROM letRefreshTest AS x RETURN x.id AS id").run();
+    expect(_letRefreshCounter.count).toBe(1);
+    await new Runner("REFRESH BINDING letRefreshTest").run();
+    await new Runner("LOAD JSON FROM letRefreshTest AS x RETURN x.id AS id").run();
+    expect(_letRefreshCounter.count).toBe(2);
+    await new Runner("DROP BINDING letRefreshTest").run();
+});
+
+test("Test DROP BINDING removes the binding", async () => {
+    await new Runner(`LET dropMe = 7`).run();
+    await new Runner("DROP BINDING dropMe").run();
+    await expect(new Runner("LOAD JSON FROM dropMe AS x RETURN x").run()).rejects.toThrow(
+        /is not defined/
+    );
+});
+
+test("Test UPDATE on refreshable binding throws", async () => {
+    await new Runner(
+        `LET refreshableUpd = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
+    await expect(new Runner(`UPDATE refreshableUpd = 9`).run()).rejects.toThrow(/is refreshable/);
+    await new Runner("DROP BINDING refreshableUpd").run();
+});
+
+test("Test MERGE on refreshable binding throws", async () => {
+    await new Runner(
+        `LET refreshableMerge = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
+    await expect(
+        new Runner(
+            `MERGE INTO refreshableMerge AS t USING [{id:2}] AS s ON id WHEN MATCHED THEN UPDATE SET .id = s.id`
+        ).run()
+    ).rejects.toThrow(/is refreshable/);
+    await new Runner("DROP BINDING refreshableMerge").run();
+});
+
+test("Test LET REFRESH EVERY parses all supported units to milliseconds", async () => {
+    const cases: { unit: string; amount: number; expected: number }[] = [
+        { unit: "SECOND", amount: 1, expected: 1_000 },
+        { unit: "SECONDS", amount: 30, expected: 30_000 },
+        { unit: "MINUTE", amount: 1, expected: 60_000 },
+        { unit: "MINUTES", amount: 5, expected: 300_000 },
+        { unit: "HOUR", amount: 1, expected: 3_600_000 },
+        { unit: "HOURS", amount: 2, expected: 7_200_000 },
+        { unit: "DAY", amount: 1, expected: 86_400_000 },
+        { unit: "DAYS", amount: 3, expected: 259_200_000 },
+    ];
+    const bindings = Bindings.getInstance();
+    for (const { unit, amount, expected } of cases) {
+        const name = `letRefreshUnit_${unit}_${amount}`;
+        await new Runner(
+            `LET ${name} = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY ${amount} ${unit}`
+        ).run();
+        const entry = bindings.getEntry(name);
+        expect(entry).toBeDefined();
+        expect(entry!.isRefreshable).toBe(true);
+        expect(entry!.refreshEveryMs).toBe(expected);
+        await new Runner(`DROP BINDING ${name}`).run();
+    }
+});
+
+test("Test LET REFRESH EVERY re-executes sub-query after TTL elapses", async () => {
+    _letRefreshCounter.count = 0;
+    await new Runner(
+        `LET letTtlRefresh = { CALL refreshletcountergen() YIELD id RETURN id } REFRESH EVERY 1 SECOND`
+    ).run();
+
+    await new Runner("LOAD JSON FROM letTtlRefresh AS x RETURN x.id AS id").run();
+    await new Runner("LOAD JSON FROM letTtlRefresh AS x RETURN x.id AS id").run();
+    expect(_letRefreshCounter.count).toBe(1);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 1100));
+
+    await new Runner("LOAD JSON FROM letTtlRefresh AS x RETURN x.id AS id").run();
+    expect(_letRefreshCounter.count).toBe(2);
+
+    await new Runner("DROP BINDING letTtlRefresh").run();
 });

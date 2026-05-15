@@ -571,6 +571,46 @@ class Token {
         return this._type === TokenType.KEYWORD && this._value === Keyword.DELETE;
     }
 
+    public static get STATIC(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.STATIC);
+    }
+
+    public isStatic(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.STATIC;
+    }
+
+    public static get REFRESH(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.REFRESH);
+    }
+
+    public isRefresh(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.REFRESH;
+    }
+
+    public static get EVERY(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.EVERY);
+    }
+
+    public isEvery(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.EVERY;
+    }
+
+    public static get DROP(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.DROP);
+    }
+
+    public isDrop(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.DROP;
+    }
+
+    public static get BINDING(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.BINDING);
+    }
+
+    public isBinding(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.BINDING;
+    }
+
     public static get SET(): Token {
         return new Token(TokenType.KEYWORD, Keyword.SET);
     }
@@ -747,6 +787,64 @@ class Token {
 
     public isExists(): boolean {
         return this._type === TokenType.KEYWORD && this._value === Keyword.EXISTS;
+    }
+
+    // LET / UPDATE bindings
+
+    public static get LET(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.LET);
+    }
+
+    public isLet(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.LET;
+    }
+
+    public static get UPDATE(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.UPDATE);
+    }
+
+    public isUpdate(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.UPDATE;
+    }
+
+    public static get ON(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.ON);
+    }
+
+    public isOn(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.ON;
+    }
+
+    public static get MATCHED(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.MATCHED);
+    }
+
+    public isMatched(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.MATCHED;
+    }
+
+    public static get INTO(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.INTO);
+    }
+
+    public isInto(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.INTO;
+    }
+
+    public static get USING(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.USING);
+    }
+
+    public isUsing(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.USING;
+    }
+
+    public static get INSERT(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.INSERT);
+    }
+
+    public isInsert(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.INSERT;
     }
 
     // End of file token

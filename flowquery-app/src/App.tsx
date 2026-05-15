@@ -124,7 +124,14 @@ export class App extends React.Component<Record<string, never>, AppState> {
                 {metadata && (
                     <div style={{ display: "flex", gap: 12, padding: "4px 0", flexWrap: "wrap" }}>
                         {Object.entries(metadata)
-                            .filter(([, v]) => v !== 0)
+                            .filter(
+                                ([, v]) =>
+                                    v !== 0 &&
+                                    v !== null &&
+                                    (typeof v === "number" ||
+                                        typeof v === "string" ||
+                                        typeof v === "boolean")
+                            )
                             .map(([k, v]) => (
                                 <Text key={k} size={200} font="monospace">
                                     {formatMetadataKey(k)}: {String(v)}

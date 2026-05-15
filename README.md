@@ -227,7 +227,7 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 
 #### Multi-Statement Queries
 
-Multiple statements can be separated by semicolons. Only `CREATE VIRTUAL` and `DELETE VIRTUAL` statements may appear before the last statement. The last statement can be any valid query.
+Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
 
 ```cypher
 CREATE VIRTUAL (:Person) AS {
@@ -252,6 +252,97 @@ console.log(runner.metadata);
 //   virtual_nodes_deleted: 0, virtual_relationships_deleted: 0,
 //   info: { node_labels: ["X"], relationship_types: [], sources: [], ... } }
 ```
+
+#### Caching Virtual Entities: `STATIC` and `REFRESH`
+
+By default, every `MATCH` against a virtual node or relationship re-executes
+its backing sub-query. For expensive sources (HTTP endpoints, large CSV files)
+you can opt in to persistent caching with the `STATIC` keyword:
+
+```cypher
+CREATE STATIC VIRTUAL (:Country) AS {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca2,population' AS c
+    RETURN c.cca2 AS code, c.name.common AS name
+};
+```
+
+The sub-query runs once on first access and the result is reused for every
+subsequent query in the same process — across `Runner` instances. STATIC
+virtual entities are protected: re-running `CREATE STATIC VIRTUAL (:Country)`
+without first dropping the existing entry raises an error. Use
+`DROP VIRTUAL (:Country)` (an alias for `DELETE VIRTUAL`) to remove it.
+
+To refresh on a schedule, add a `REFRESH EVERY <n> <unit>` clause. Supported
+units are `SECOND[S]`, `MINUTE[S]`, `HOUR[S]`, and `DAY[S]`:
+
+```cypher
+CREATE STATIC VIRTUAL (:Country) AS {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca2,population' AS c
+    RETURN c.cca2 AS code, c.name.common AS name
+} REFRESH EVERY 1 HOUR;
+```
+
+Refresh is lazy: the cache is re-populated on the first access after the TTL
+elapses; no background timers are scheduled. `REFRESH EVERY` requires
+`STATIC` (caching must be enabled to refresh).
+
+To force an immediate refresh from anywhere in a query, use
+`REFRESH VIRTUAL (...)`:
+
+```cypher
+REFRESH VIRTUAL (:Country);
+MATCH (c:Country) RETURN c.name
+```
+
+`REFRESH VIRTUAL` works on both nodes and relationships and clears the cache
+so that the next access re-executes the backing sub-query.
+
+#### Refreshable `LET` Bindings: `REFRESH EVERY`, `REFRESH BINDING`, `DROP BINDING`
+
+`LET` bindings live for the lifetime of the process, just like virtual
+nodes and relationships, and the same caching primitives apply. A plain
+`LET name = { ... }` evaluates the sub-query once, when the `LET`
+statement executes, and stores the result in the global binding store;
+all subsequent reads return that cached value without re-running the
+sub-query. To opt into TTL-based re-evaluation, add a trailing
+`REFRESH EVERY <n> <unit>` clause:
+
+```cypher
+LET users = {
+    LOAD JSON FROM 'https://example.com/users.json' AS u
+    RETURN u.id AS id, u.name AS name
+} REFRESH EVERY 5 MINUTES;
+LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name
+```
+
+The sub-query still runs eagerly at `LET` time and the result is cached
+just like a plain binding; the `REFRESH EVERY` clause additionally
+arranges for the next read after the TTL has elapsed to re-execute the
+sub-query.
+
+Refreshable bindings (those with a `REFRESH EVERY` clause) cannot be
+silently overwritten: re-running `LET name = { ... } REFRESH EVERY ...`
+without first dropping the existing binding raises an error, and so
+does `UPDATE name = ...` or `MERGE INTO name ...` against the same
+name. `LET ... REFRESH EVERY` requires a sub-query right-hand side
+(an expression like `42 REFRESH EVERY 1 MINUTE` is rejected). To force
+an immediate refresh outside the TTL schedule, use `REFRESH BINDING`:
+
+```cypher
+REFRESH BINDING users;
+LOAD JSON FROM users AS u RETURN u.id AS id
+```
+
+To remove any binding (plain or refreshable), use `DROP BINDING`:
+
+```cypher
+DROP BINDING users;
+```
+
+`UPDATE` and `MERGE INTO` against a refreshable binding are blocked
+because the mutation would be invisibly overwritten by the next
+refresh. Use `REFRESH BINDING name` to re-evaluate the source, or
+`DROP BINDING name` and redefine the binding plainly.
 
 #### Statement Info: Labels, Properties, and Source Lineage
 
@@ -390,6 +481,115 @@ Removes duplicate rows from `RETURN` or `WITH`.
 UNWIND [1, 1, 2, 2] AS i RETURN DISTINCT i
 // [{ i: 1 }, { i: 2 }]
 ```
+
+### Bindings (`LET` / `UPDATE` / `MERGE INTO`)
+
+A **binding** is a named, mutable value that persists across statements in a multi-statement query. Bindings live in a flat per-query namespace, are introduced with `LET`, wholesale-replaced with `UPDATE`, row-filtered with `UPDATE … AS x DELETE WHERE …`, and per-row upserted/merged with `MERGE INTO … USING … ON … WHEN …`. Once bound, the value can be referenced anywhere an expression is allowed (e.g. as the source of `LOAD JSON FROM`, `UNWIND`, `MERGE INTO`'s `USING`, or directly inside an expression).
+
+#### LET
+
+`LET name = <expression-or-subquery>` introduces a new binding. The right-hand side can be any expression or a braced sub-query whose final `RETURN` provides the value.
+
+```cypher
+LET data = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+LET threshold = 10;
+LET fresh = {
+    UNWIND [1, 2, 3] AS n
+    RETURN n AS n
+};
+LOAD JSON FROM data AS d
+WITH d WHERE d.id >= threshold OR d.id <= 2
+RETURN d.id AS id, d.name AS name
+```
+
+`LET` fails if the binding already exists — use `UPDATE` to overwrite.
+
+#### UPDATE
+
+`UPDATE name = <expression-or-subquery>` replaces the value of an existing binding wholesale. Works for any value (scalars, maps, arrays).
+
+```cypher
+LET counter = 0;
+UPDATE counter = counter + 1;
+RETURN counter AS counter
+// [{ counter: 1 }]
+```
+
+`UPDATE` fails if the binding doesn't exist — use `LET` first.
+
+#### UPDATE ... AS alias DELETE WHERE ...
+
+Filters rows out of an array binding in place. The alias names each row during predicate evaluation.
+
+```cypher
+LET users = [
+    {id: 1, name: 'Alice', expired: false},
+    {id: 2, name: 'Bob',   expired: true}
+];
+UPDATE users AS u DELETE WHERE u.expired;
+LOAD JSON FROM users AS u
+RETURN u.id AS id, u.name AS name
+// [{ id: 1, name: 'Alice' }]
+```
+
+#### MERGE INTO ... USING ... ON ... WHEN ...
+
+SQL-style keyed merge. For each row of the source, find matching rows in the target (by key or predicate) and apply per-row branches:
+
+```
+MERGE INTO target [AS t]
+    USING <source-expression-or-subquery> [AS s]
+    ON <key-or-key-list> | <predicate>
+    [WHEN MATCHED THEN UPDATE SET <field-list>]
+    [WHEN MATCHED THEN DELETE]
+    [WHEN NOT MATCHED THEN INSERT [<row-expression>]]
+```
+
+```cypher
+// Upsert by key: replace listed fields on matches; append unmatched source rows
+LET users = [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}];
+MERGE INTO users
+    USING [{id: 2, name: 'Bobby'}, {id: 3, name: 'Charlie'}]
+    ON id
+    WHEN MATCHED THEN UPDATE SET .id, .name
+    WHEN NOT MATCHED THEN INSERT;
+// users → [{id:1,name:'Alice'}, {id:2,name:'Bobby'}, {id:3,name:'Charlie'}]
+
+// Composite key
+MERGE INTO rows
+    USING incoming
+    ON (tenant, id)
+    WHEN MATCHED THEN UPDATE SET .v
+    WHEN NOT MATCHED THEN INSERT;
+
+// Per-row expressions across target (u) and source (s) aliases
+MERGE INTO users AS u
+    USING incoming AS s
+    ON id
+    WHEN MATCHED THEN UPDATE SET .name = s.name + ' (' + u.name + ')'
+    WHEN NOT MATCHED THEN INSERT {id: s.id, name: 'New: ' + s.name};
+
+// Predicate-based join
+MERGE INTO users AS u
+    USING incoming AS s
+    ON u.tenant = s.tenant AND u.email = s.email
+    WHEN MATCHED THEN UPDATE SET .v = s.v
+    WHEN NOT MATCHED THEN INSERT;
+
+// Tombstone delete: rows in target that also appear in source are removed
+MERGE INTO users
+    USING [{id: 2}, {id: 3}]
+    ON id
+    WHEN MATCHED THEN DELETE;
+```
+
+Notes:
+
+- The source may be any expression (array literal, binding name) or a braced sub-query. When the source is a bare binding name, give it an alias: `USING incoming AS s`.
+- `ON id` is shorthand for the equality predicate `t.id = s.id`; `ON (a, b)` requires equality on every listed key. Anything else is treated as a Boolean predicate evaluated per `(target, source)` pair.
+- `WHEN MATCHED THEN UPDATE SET .field` overwrites only the listed fields, preserving the rest from the existing row. `SET .field = expr` evaluates `expr` per matched pair, with target and source aliases in scope.
+- `WHEN NOT MATCHED THEN INSERT` (no row expression) appends the source row as-is. `INSERT { … }` appends an explicit row expression instead.
+- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent — omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
 
 ### Expressions
 
@@ -832,6 +1032,18 @@ RETURN f.name, f.description, f.category
 │  stmt1; stmt2; ... stmtN             -- multi-statement     │
 │  LIMIT n                                                    │
 ├─────────────────────────────────────────────────────────────┤
+│  BINDINGS                                                   │
+├─────────────────────────────────────────────────────────────┤
+│  LET name = expr | { subquery }      -- new binding         │
+│  UPDATE name = expr | { subquery }   -- replace existing    │
+│  UPDATE name AS x DELETE WHERE cond  -- row-filter binding  │
+│  MERGE INTO target [AS t]                                   │
+│      USING <expr | subquery> [AS s]                         │
+│      ON key | (k1,k2,...) | predicate                       │
+│      [WHEN MATCHED THEN UPDATE SET .f [= expr], ...]        │
+│      [WHEN MATCHED THEN DELETE]                             │
+│      [WHEN NOT MATCHED THEN INSERT [ {row-expr} ]]          │
+├─────────────────────────────────────────────────────────────┤
 │  GRAPH OPERATIONS                                           │
 ├─────────────────────────────────────────────────────────────┤
 │  CREATE VIRTUAL (:Label) AS { subquery }                    │
@@ -1164,6 +1376,37 @@ WITH a, b, [s IN a.skills WHERE s IN b.skills] AS shared
 WHERE size(shared) > 0
 RETURN a.name AS employee1, b.name AS employee2, shared AS sharedSkills
 ORDER BY size(shared) DESC
+```
+
+### Virtual Country Borders Graph
+
+This example pulls live data from the public [REST Countries](https://restcountries.com/) API and projects it into a `(:Country)-[:BORDERS]-(:Country)` virtual graph in a single semicolon-chained query, then ranks European countries by how many direct neighbors they have. [Try live!](https://microsoft.github.io/FlowQuery/?nZBRa4MwFIXf8yvumx1YXelbRxlWM-qwCtGujDGKxrQVrJFoB2Xsv49Eq3Ure1iekuvxnu8cD0dA-amoRcYqmMMnAgDwAsuB5zDw4YkEK9AOdV1WM9MUrKo7tUH50fyYGhMzzvPHXcbytJoX8ZHplMZTXbB9xgu95OUpj2t5TbhImag0sEKgyofgaE18oIb8A9pjhZClOoL-UEOulX5HXsjvymWoaOy6Da37UNOzKM0V2lDXgl52tU_09YCQTbAVYXhxSbS2PBjNbFXH-U4Kb5bXt_s7dpa2aduIXbY-UJ9lGGDA_zfa-G22CIiDSfg-_h_w2t-4vnPVjGzlVpSc7eqtzJMo8Gx_kE-Ft7Iiewmj-DZW0o3RZokJhvhSwBw0fBK8ZBpqzeKuqwb1rDeXUaJCFSzbHxIutmqIlAUsXn_MwcGhjTx35UYwuf8G)
+
+A single shared `LET` binding fetches the data once. Both virtuals (the `(:Country)` nodes and the `(:Country)-[:BORDERS]-(:Country)` relationships) are projected from the same binding, so there is exactly one HTTP round-trip per Runner invocation. Add `REFRESH EVERY 1 HOUR` to the `LET` if you want the cache to auto-refresh on a schedule.
+
+```cypher
+LET countries = {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca3,region,population,borders' AS c
+    RETURN c.cca3        AS id,
+           c.name.common AS name,
+           c.region      AS region,
+           c.population  AS population,
+           c.borders     AS borders
+};
+CREATE VIRTUAL (:Country) AS {
+    LOAD JSON FROM countries AS c
+    RETURN c.id AS id, c.name AS name, c.region AS region, c.population AS population
+};
+CREATE VIRTUAL (:Country)-[:BORDERS]-(:Country) AS {
+    LOAD JSON FROM countries AS c
+    UNWIND c.borders AS b
+    RETURN c.id AS left_id, b AS right_id
+};
+MATCH (a:Country)-[:BORDERS]-(b:Country)
+WHERE a.region = 'Europe'
+RETURN a.name AS country, count(b) AS neighbor_count
+ORDER BY neighbor_count DESC
+LIMIT 10
 ```
 
 ## Contributing

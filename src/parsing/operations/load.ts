@@ -149,6 +149,23 @@ class Load extends Operation {
         } else if (this.type instanceof Text) {
             data = await result.text();
         }
+        await this.emit(data);
+    }
+
+    /**
+     * Emits an already-resolved JSON value (e.g. coming from a LET-binding
+     * referenced by `LOAD JSON FROM <name>`).  Arrays expand into one
+     * iteration per element; non-array values are emitted once.
+     */
+    private async loadFromValue(data: any): Promise<void> {
+        await this.emit(data);
+    }
+
+    /**
+     * Drives the downstream pipeline for the given data.  Shared by
+     * URL / file / value loading paths.
+     */
+    private async emit(data: any): Promise<void> {
         if (Array.isArray(data)) {
             for (const item of data) {
                 this._value = item;
@@ -160,6 +177,9 @@ class Load extends Operation {
         } else if (typeof data === "string") {
             this._value = data;
             await this.next?.run();
+        } else if (data !== null && data !== undefined) {
+            this._value = data;
+            await this.next?.run();
         }
     }
 
@@ -169,7 +189,12 @@ class Load extends Operation {
         } else if (this.isFileUri) {
             await this.loadFromFile();
         } else {
-            await this.loadFromUrl();
+            const source = this.children[1].value();
+            if (typeof source === "string") {
+                await this.loadFromUrl();
+            } else {
+                await this.loadFromValue(source);
+            }
         }
     }
     public async run(): Promise<void> {

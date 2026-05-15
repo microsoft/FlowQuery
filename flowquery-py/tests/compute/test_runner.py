@@ -1456,6 +1456,43 @@ class TestRunner:
         assert results[0]["rels"][0]["properties"]["distance"] == 190
 
     @pytest.mark.asyncio
+    async def test_return_whole_node_does_not_leak_internal_label_key(self):
+        """`RETURN n` should not surface the internal `_label` key."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:City) AS {
+                UNWIND [
+                    {id: 1, name: 'New York'},
+                    {id: 2, name: 'Boston'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+            """
+        ).run()
+        match = Runner(
+            """
+            MATCH (c:City)
+            RETURN c
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 2
+        for row in results:
+            assert "_label" not in row["c"]
+            assert "id" in row["c"]
+            assert "name" in row["c"]
+        # `labels()` must still work even though `_label` is hidden from RETURN.
+        labels_match = Runner(
+            """
+            MATCH (c:City)
+            RETURN labels(c) AS labels
+            """
+        )
+        await labels_match.run()
+        assert labels_match.results[0]["labels"] == ["City"]
+
+    @pytest.mark.asyncio
     async def test_nodes_function_with_null(self):
         """Test nodes function with null."""
         runner = Runner("RETURN nodes(null) as n")
@@ -5798,7 +5835,7 @@ class TestMultiStatement:
         assert match_b.results[0] == {"name": "B"}
 
     def test_multi_statement_rejects_retrieval_before_last(self):
-        with pytest.raises(ValueError, match="Only CREATE and DELETE"):
+        with pytest.raises(ValueError, match="Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE"):
             Runner("""
                 RETURN 1 AS x;
                 CREATE VIRTUAL (:PyShouldFail) AS {
@@ -7449,3 +7486,324 @@ class TestQuirkFixes:
         # Cleanup
         await Runner("DELETE VIRTUAL (:PyLenPerson)-[:PY_LEN_KNOWS]-(:PyLenPerson)").run()
         await Runner("DELETE VIRTUAL (:PyLenPerson)").run()
+
+
+# ===== STATIC virtual / REFRESH EVERY / DROP VIRTUAL / REFRESH VIRTUAL =====
+
+_py_cache_counter = {"count": 0}
+_py_refresh_counter = {"count": 0}
+
+
+@FunctionDef({
+    "description": "Counter generator for STATIC cache test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyStaticCacheCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pystaticcachecountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_cache_counter["count"] += 1
+        yield {"id": _py_cache_counter["count"], "name": f"v{_py_cache_counter['count']}"}
+
+
+@FunctionDef({
+    "description": "Counter generator for REFRESH VIRTUAL test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyRefreshCacheCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pyrefreshcachecountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_refresh_counter["count"] += 1
+        yield {"id": _py_refresh_counter["count"]}
+
+
+class TestStaticVirtualCache:
+    @pytest.mark.asyncio
+    async def test_static_virtual_node_caches_across_queries(self):
+        _py_cache_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyCacheTestA) AS "
+            "{ CALL pystaticcachecountergen() YIELD id, name RETURN id, name }"
+        ).run()
+        r1 = Runner("MATCH (n:PyCacheTestA) RETURN n.id AS id")
+        await r1.run()
+        r2 = Runner("MATCH (n:PyCacheTestA) RETURN n.id AS id")
+        await r2.run()
+        assert r1.results == r2.results
+        assert _py_cache_counter["count"] == 1
+        await Runner("DROP VIRTUAL (:PyCacheTestA)").run()
+
+    @pytest.mark.asyncio
+    async def test_static_re_create_without_drop_throws(self):
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyStaticDup) AS "
+            "{ UNWIND [{id:1}] AS r RETURN r.id AS id }"
+        ).run()
+        with pytest.raises(ValueError, match="already exists"):
+            await Runner(
+                "CREATE STATIC VIRTUAL (:PyStaticDup) AS "
+                "{ UNWIND [{id:2}] AS r RETURN r.id AS id }"
+            ).run()
+        await Runner("DROP VIRTUAL (:PyStaticDup)").run()
+
+    def test_refresh_every_without_static_throws(self):
+        with pytest.raises(ValueError, match="REFRESH EVERY requires STATIC"):
+            Runner(
+                "CREATE VIRTUAL (:PyNoStatic) AS "
+                "{ UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE"
+            )
+
+    @pytest.mark.asyncio
+    async def test_refresh_virtual_invalidates_cache(self):
+        _py_refresh_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyRefreshTest) AS "
+            "{ CALL pyrefreshcachecountergen() YIELD id RETURN id }"
+        ).run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 1
+        await Runner("REFRESH VIRTUAL (:PyRefreshTest)").run()
+        await Runner("MATCH (n:PyRefreshTest) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 2
+        await Runner("DROP VIRTUAL (:PyRefreshTest)").run()
+
+    @pytest.mark.asyncio
+    async def test_drop_virtual_works_as_alias_for_delete_virtual(self):
+        db = Database.get_instance()
+        await Runner(
+            "CREATE VIRTUAL (:PyDropAlias) AS "
+            "{ UNWIND [{id:1}] AS r RETURN r.id AS id }"
+        ).run()
+        assert db.get_node(Node(None, "PyDropAlias")) is not None
+        await Runner("DROP VIRTUAL (:PyDropAlias)").run()
+        assert db.get_node(Node(None, "PyDropAlias")) is None
+
+    @pytest.mark.asyncio
+    async def test_refresh_every_parses_all_supported_units(self):
+        db = Database.get_instance()
+        cases = [
+            ("SECOND", 1, 1_000),
+            ("SECONDS", 30, 30_000),
+            ("MINUTE", 1, 60_000),
+            ("MINUTES", 5, 300_000),
+            ("HOUR", 1, 3_600_000),
+            ("HOURS", 2, 7_200_000),
+            ("DAY", 1, 86_400_000),
+            ("DAYS", 3, 259_200_000),
+        ]
+        for unit, amount, expected in cases:
+            label = f"PyRefreshUnit_{unit}_{amount}"
+            await Runner(
+                f"CREATE STATIC VIRTUAL (:{label}) AS "
+                "{ UNWIND [{id:1}] AS r RETURN r.id AS id } "
+                f"REFRESH EVERY {amount} {unit}"
+            ).run()
+            physical = db.get_node(Node(None, label))
+            assert physical is not None
+            assert physical.refresh_every_ms == expected
+            assert physical.is_static is True
+            await Runner(f"DROP VIRTUAL (:{label})").run()
+
+    @pytest.mark.asyncio
+    async def test_refresh_every_re_executes_sub_query_after_ttl(self):
+        import asyncio
+
+        _py_refresh_counter["count"] = 0
+        await Runner(
+            "CREATE STATIC VIRTUAL (:PyTtlRefresh) AS "
+            "{ CALL pyrefreshcachecountergen() YIELD id RETURN id } "
+            "REFRESH EVERY 1 SECOND"
+        ).run()
+
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 1
+
+        await asyncio.sleep(1.1)
+
+        await Runner("MATCH (n:PyTtlRefresh) RETURN n.id AS id").run()
+        assert _py_refresh_counter["count"] == 2
+
+        await Runner("DROP VIRTUAL (:PyTtlRefresh)").run()
+
+
+# ===== STATIC LET / REFRESH BINDING / DROP BINDING =====
+
+_py_let_cache_counter = {"count": 0}
+_py_let_refresh_counter = {"count": 0}
+
+
+@FunctionDef({
+    "description": "Counter generator for STATIC LET cache test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyStaticLetCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pystaticletcountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_let_cache_counter["count"] += 1
+        yield {"id": _py_let_cache_counter["count"]}
+
+
+@FunctionDef({
+    "description": "Counter generator for REFRESH BINDING test",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "Yields one record per call", "type": "any"},
+})
+class _PyRefreshLetCounterGen(AsyncFunction):
+    def __init__(self):
+        super().__init__("pyrefreshletcountergen")
+        self._expected_parameter_count = 0
+
+    async def generate(self) -> AsyncIterator:
+        _py_let_refresh_counter["count"] += 1
+        yield {"id": _py_let_refresh_counter["count"]}
+
+
+class TestStaticLetBinding:
+    @pytest.mark.asyncio
+    async def test_plain_let_subquery_caches_the_result(self):
+        _py_let_cache_counter["count"] = 0
+        await Runner(
+            "LET pyLetCacheA = "
+            "{ CALL pystaticletcountergen() YIELD id RETURN id }"
+        ).run()
+        r1 = Runner("LOAD JSON FROM pyLetCacheA AS x RETURN x.id AS id")
+        await r1.run()
+        r2 = Runner("LOAD JSON FROM pyLetCacheA AS x RETURN x.id AS id")
+        await r2.run()
+        assert r1.results == r2.results
+        assert _py_let_cache_counter["count"] == 1
+        await Runner("DROP BINDING pyLetCacheA").run()
+
+    @pytest.mark.asyncio
+    async def test_refreshable_let_re_create_without_drop_throws(self):
+        await Runner(
+            "LET pyLetDup = { UNWIND [{id:1}] AS r RETURN r.id AS id } "
+            "REFRESH EVERY 1 MINUTE"
+        ).run()
+        with pytest.raises(ValueError, match="already exists"):
+            await Runner(
+                "LET pyLetDup = { UNWIND [{id:2}] AS r RETURN r.id AS id } "
+                "REFRESH EVERY 1 MINUTE"
+            ).run()
+        await Runner("DROP BINDING pyLetDup").run()
+
+    @pytest.mark.asyncio
+    async def test_let_refresh_every_with_expression_rhs_throws(self):
+        with pytest.raises(
+            ValueError, match="LET REFRESH EVERY requires a sub-query"
+        ):
+            Runner("LET pyBad = 42 REFRESH EVERY 1 MINUTE")
+
+    @pytest.mark.asyncio
+    async def test_refresh_binding_invalidates_cache(self):
+        _py_let_refresh_counter["count"] = 0
+        await Runner(
+            "LET pyLetRefreshTest = "
+            "{ CALL pyrefreshletcountergen() YIELD id RETURN id } "
+            "REFRESH EVERY 1 MINUTE"
+        ).run()
+        await Runner("LOAD JSON FROM pyLetRefreshTest AS x RETURN x.id AS id").run()
+        await Runner("LOAD JSON FROM pyLetRefreshTest AS x RETURN x.id AS id").run()
+        assert _py_let_refresh_counter["count"] == 1
+        await Runner("REFRESH BINDING pyLetRefreshTest").run()
+        await Runner("LOAD JSON FROM pyLetRefreshTest AS x RETURN x.id AS id").run()
+        assert _py_let_refresh_counter["count"] == 2
+        await Runner("DROP BINDING pyLetRefreshTest").run()
+
+    @pytest.mark.asyncio
+    async def test_drop_binding_removes_binding(self):
+        await Runner("LET pyDropMe = 7").run()
+        await Runner("DROP BINDING pyDropMe").run()
+        with pytest.raises(RuntimeError, match="is not defined"):
+            await Runner("LOAD JSON FROM pyDropMe AS x RETURN x").run()
+
+    @pytest.mark.asyncio
+    async def test_update_on_refreshable_binding_throws(self):
+        await Runner(
+            "LET pyRefreshableUpd = { UNWIND [{id:1}] AS r RETURN r.id AS id } "
+            "REFRESH EVERY 1 MINUTE"
+        ).run()
+        with pytest.raises(RuntimeError, match="is refreshable"):
+            await Runner("UPDATE pyRefreshableUpd = 9").run()
+        await Runner("DROP BINDING pyRefreshableUpd").run()
+
+    @pytest.mark.asyncio
+    async def test_merge_on_refreshable_binding_throws(self):
+        await Runner(
+            "LET pyRefreshableMerge = "
+            "{ UNWIND [{id:1}] AS r RETURN r.id AS id } "
+            "REFRESH EVERY 1 MINUTE"
+        ).run()
+        with pytest.raises(RuntimeError, match="is refreshable"):
+            await Runner(
+                "MERGE INTO pyRefreshableMerge AS t USING [{id:2}] AS s ON id "
+                "WHEN MATCHED THEN UPDATE SET .id = s.id"
+            ).run()
+        await Runner("DROP BINDING pyRefreshableMerge").run()
+
+    @pytest.mark.asyncio
+    async def test_let_refresh_every_parses_all_supported_units(self):
+        from flowquery.graph.bindings import Bindings
+
+        bindings = Bindings.get_instance()
+        cases = [
+            ("SECOND", 1, 1_000),
+            ("SECONDS", 30, 30_000),
+            ("MINUTE", 1, 60_000),
+            ("MINUTES", 5, 300_000),
+            ("HOUR", 1, 3_600_000),
+            ("HOURS", 2, 7_200_000),
+            ("DAY", 1, 86_400_000),
+            ("DAYS", 3, 259_200_000),
+        ]
+        for unit, amount, expected in cases:
+            name = f"pyLetRefreshUnit_{unit}_{amount}"
+            await Runner(
+                f"LET {name} = "
+                "{ UNWIND [{id:1}] AS r RETURN r.id AS id } "
+                f"REFRESH EVERY {amount} {unit}"
+            ).run()
+            entry = bindings.get_entry(name)
+            assert entry is not None
+            assert entry.is_refreshable is True
+            assert entry.refresh_every_ms == expected
+            await Runner(f"DROP BINDING {name}").run()
+
+    @pytest.mark.asyncio
+    async def test_let_refresh_every_re_executes_sub_query_after_ttl(self):
+        import asyncio
+
+        _py_let_refresh_counter["count"] = 0
+        await Runner(
+            "LET pyLetTtlRefresh = "
+            "{ CALL pyrefreshletcountergen() YIELD id RETURN id } "
+            "REFRESH EVERY 1 SECOND"
+        ).run()
+
+        await Runner("LOAD JSON FROM pyLetTtlRefresh AS x RETURN x.id AS id").run()
+        await Runner("LOAD JSON FROM pyLetTtlRefresh AS x RETURN x.id AS id").run()
+        assert _py_let_refresh_counter["count"] == 1
+
+        await asyncio.sleep(1.1)
+
+        await Runner("LOAD JSON FROM pyLetTtlRefresh AS x RETURN x.id AS id").run()
+        assert _py_let_refresh_counter["count"] == 2
+
+        await Runner("DROP BINDING pyLetTtlRefresh").run()

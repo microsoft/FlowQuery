@@ -519,6 +519,41 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.DELETE.value
 
     @staticmethod
+    def STATIC() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.STATIC.value)
+
+    def is_static(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.STATIC.value
+
+    @staticmethod
+    def REFRESH() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.REFRESH.value)
+
+    def is_refresh(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.REFRESH.value
+
+    @staticmethod
+    def EVERY() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.EVERY.value)
+
+    def is_every(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.EVERY.value
+
+    @staticmethod
+    def DROP() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.DROP.value)
+
+    def is_drop(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.DROP.value
+
+    @staticmethod
+    def BINDING() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.BINDING.value)
+
+    def is_binding(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.BINDING.value
+
+    @staticmethod
     def SET() -> Token:
         return Token(TokenType.KEYWORD, Keyword.SET.value)
 
@@ -682,6 +717,57 @@ class Token:
 
     def is_exists(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.EXISTS.value
+
+    # LET / UPDATE bindings
+
+    @staticmethod
+    def LET() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.LET.value)
+
+    def is_let(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.LET.value
+
+    @staticmethod
+    def UPDATE() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.UPDATE.value)
+
+    def is_update(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.UPDATE.value
+
+    @staticmethod
+    def ON() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.ON.value)
+
+    def is_on(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.ON.value
+
+    @staticmethod
+    def MATCHED() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.MATCHED.value)
+
+    def is_matched(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.MATCHED.value
+
+    @staticmethod
+    def INTO() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.INTO.value)
+
+    def is_into(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.INTO.value
+
+    @staticmethod
+    def USING() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.USING.value)
+
+    def is_using(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.USING.value
+
+    @staticmethod
+    def INSERT() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.INSERT.value)
+
+    def is_insert(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.INSERT.value
 
     # Other utility methods
 

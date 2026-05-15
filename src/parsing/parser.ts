@@ -20,6 +20,7 @@ import KeyValuePair from "./data_structures/key_value_pair";
 import ListComprehension from "./data_structures/list_comprehension";
 import Lookup from "./data_structures/lookup";
 import RangeLookup from "./data_structures/range_lookup";
+import BindingReference from "./expressions/binding_reference";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
@@ -56,15 +57,30 @@ import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
 import DeleteNode from "./operations/delete_node";
 import DeleteRelationship from "./operations/delete_relationship";
+import DropBinding from "./operations/drop_binding";
+import Let from "./operations/let";
 import Limit from "./operations/limit";
 import Load from "./operations/load";
 import Match from "./operations/match";
+import Merge, {
+    MergeMatchedAction,
+    MergeNotMatchedAction,
+    MergeOnClause,
+    MergeSetItem,
+    MergeSourceAlias,
+    MergeTargetAlias,
+} from "./operations/merge";
 import Operation from "./operations/operation";
 import OrderBy, { SortField } from "./operations/order_by";
+import RefreshBinding from "./operations/refresh_binding";
+import RefreshNode from "./operations/refresh_node";
+import RefreshRelationship from "./operations/refresh_relationship";
 import Return from "./operations/return";
 import Union from "./operations/union";
 import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
+import Update from "./operations/update";
+import UpdateDelete from "./operations/update_delete";
 import Where from "./operations/where";
 import With from "./operations/with";
 import ParserState from "./parser_state";
@@ -157,7 +173,9 @@ class Parser extends BaseParser {
     }
 
     /**
-     * Validates that all operations in a statement are CREATE or DELETE.
+     * Validates that all operations in a statement are CREATE, DELETE,
+     * REFRESH, LET, or UPDATE — the declaration kinds that may precede the
+     * terminal statement in a multi-statement query.
      */
     private validateIsCreateOrDelete(root: ASTNode): void {
         let op: Operation | null = root.firstChild() as Operation;
@@ -166,10 +184,18 @@ class Parser extends BaseParser {
                 !(op instanceof CreateNode) &&
                 !(op instanceof CreateRelationship) &&
                 !(op instanceof DeleteNode) &&
-                !(op instanceof DeleteRelationship)
+                !(op instanceof DeleteRelationship) &&
+                !(op instanceof DropBinding) &&
+                !(op instanceof RefreshNode) &&
+                !(op instanceof RefreshRelationship) &&
+                !(op instanceof RefreshBinding) &&
+                !(op instanceof Let) &&
+                !(op instanceof Update) &&
+                !(op instanceof UpdateDelete) &&
+                !(op instanceof Merge)
             ) {
                 throw new Error(
-                    "Only CREATE and DELETE statements can appear before the last statement in a multi-statement query"
+                    "Only CREATE, DELETE, DROP, REFRESH, LET, UPDATE, and MERGE statements can appear before the last statement in a multi-statement query"
                 );
             }
             op = op.next;
@@ -184,6 +210,9 @@ class Parser extends BaseParser {
             if (root.childCount() > 0) {
                 if (this.token.isSemicolon()) {
                     break;
+                }
+                if (isSubQuery && this.token.isClosingBrace()) {
+                    return root;
                 }
                 this.expectAndSkipWhitespaceAndComments();
             } else {
@@ -276,10 +305,18 @@ class Parser extends BaseParser {
             !(operation instanceof CreateNode) &&
             !(operation instanceof CreateRelationship) &&
             !(operation instanceof DeleteNode) &&
-            !(operation instanceof DeleteRelationship)
+            !(operation instanceof DeleteRelationship) &&
+            !(operation instanceof DropBinding) &&
+            !(operation instanceof RefreshNode) &&
+            !(operation instanceof RefreshRelationship) &&
+            !(operation instanceof RefreshBinding) &&
+            !(operation instanceof Let) &&
+            !(operation instanceof Update) &&
+            !(operation instanceof UpdateDelete) &&
+            !(operation instanceof Merge)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, or DELETE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, DROP, REFRESH, LET, UPDATE, or MERGE statement"
             );
         }
         return root;
@@ -294,6 +331,10 @@ class Parser extends BaseParser {
             this.parseCall() ||
             this.parseCreate() ||
             this.parseDelete() ||
+            this.parseRefresh() ||
+            this.parseLet() ||
+            this.parseUpdate() ||
+            this.parseMerge() ||
             this.parseMatch()
         );
     }
@@ -430,6 +471,17 @@ class Parser extends BaseParser {
             if (expression === null) {
                 throw new Error("Expected expression or async function");
             }
+            // A bare unresolved identifier in `LOAD JSON FROM <name>` is
+            // treated as a reference to a LET-bound value, resolved at
+            // execution time against the global Bindings store.
+            const inner = expression.firstChild();
+            if (
+                inner instanceof Reference &&
+                inner.referred === undefined &&
+                !inner.identifier.startsWith("$")
+            ) {
+                expression.replaceChild(inner, new BindingReference(inner.identifier));
+            }
             from.addChild(expression);
         }
 
@@ -500,6 +552,12 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let isStatic = false;
+        if (this.token.isStatic()) {
+            isStatic = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
         if (!this.token.isVirtual()) {
             throw new Error("Expected VIRTUAL");
         }
@@ -551,23 +609,91 @@ class Parser extends BaseParser {
         if (query === null) {
             throw new Error("Expected sub-query");
         }
+        // Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
+        // for STATIC virtual entities (caching must be enabled to refresh).
+        // We deliberately peek past REFRESH to confirm EVERY follows: a bare
+        // `REFRESH VIRTUAL ...` is a separate top-level statement.
+        let refreshEveryMs: number | null = null;
+        const savedIndex = this.tokenIndex;
+        this.skipWhitespaceAndComments();
+        let consumedRefreshClause = false;
+        if (this.token.isRefresh()) {
+            // Look ahead past whitespace for EVERY.
+            const afterRefreshIndex = this.tokenIndex;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isEvery()) {
+                if (!isStatic) {
+                    throw new Error("REFRESH EVERY requires STATIC (caching must be enabled)");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number after REFRESH EVERY");
+                }
+                const amount = Number(this.token.value);
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    throw new Error("REFRESH EVERY interval must be a positive number");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                const unit = (this.token.value || "").toUpperCase();
+                const unitMs: Record<string, number> = {
+                    SECOND: 1000,
+                    SECONDS: 1000,
+                    MINUTE: 60_000,
+                    MINUTES: 60_000,
+                    HOUR: 3_600_000,
+                    HOURS: 3_600_000,
+                    DAY: 86_400_000,
+                    DAYS: 86_400_000,
+                };
+                if (!(unit in unitMs)) {
+                    throw new Error(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    );
+                }
+                refreshEveryMs = amount * unitMs[unit];
+                this.setNextToken();
+                consumedRefreshClause = true;
+            } else {
+                // Not REFRESH EVERY — must be the start of a separate
+                // REFRESH VIRTUAL statement.  Rewind to before REFRESH.
+                this.tokenIndex = afterRefreshIndex;
+            }
+        }
+        if (!consumedRefreshClause) {
+            // No REFRESH clause present; restore token position so the
+            // outer loop sees the original whitespace/next-clause boundary.
+            this.tokenIndex = savedIndex;
+        }
         let create: CreateNode | CreateRelationship;
         if (relationship !== null) {
-            create = new CreateRelationship(relationship, query);
+            create = new CreateRelationship(relationship, query, isStatic, refreshEveryMs);
         } else {
-            create = new CreateNode(node, query);
+            create = new CreateNode(node, query, isStatic, refreshEveryMs);
         }
         return create;
     }
 
-    private parseDelete(): DeleteNode | DeleteRelationship | null {
-        if (!this.token.isDelete()) {
+    private parseDelete(): DeleteNode | DeleteRelationship | DropBinding | null {
+        if (!this.token.isDelete() && !this.token.isDrop()) {
             return null;
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isBinding()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected binding name");
+            }
+            const name: string = this.token.value || "";
+            this.setNextToken();
+            return new DropBinding(name);
+        }
         if (!this.token.isVirtual()) {
-            throw new Error("Expected VIRTUAL");
+            throw new Error("Expected VIRTUAL or BINDING");
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
@@ -612,6 +738,614 @@ class Parser extends BaseParser {
             result = new DeleteNode(node);
         }
         return result;
+    }
+
+    private parseRefresh(): RefreshNode | RefreshRelationship | RefreshBinding | null {
+        if (!this.token.isRefresh()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isBinding()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected binding name");
+            }
+            const name: string = this.token.value || "";
+            this.setNextToken();
+            return new RefreshBinding(name);
+        }
+        if (!this.token.isVirtual()) {
+            throw new Error("Expected VIRTUAL or BINDING");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const node: Node | null = this.parseNode();
+        if (node === null) {
+            throw new Error("Expected node definition");
+        }
+        let relationship: Relationship | null = null;
+        if (this.token.isSubtract() && this.peek()?.isOpeningBracket()) {
+            this.setNextToken();
+            this.setNextToken();
+            if (!this.token.isColon()) {
+                throw new Error("Expected ':' for relationship type");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error("Expected relationship type identifier");
+            }
+            const type: string = this.token.value || "";
+            this.setNextToken();
+            if (!this.token.isClosingBracket()) {
+                throw new Error("Expected closing bracket for relationship definition");
+            }
+            this.setNextToken();
+            if (!this.token.isSubtract()) {
+                throw new Error("Expected '-' for relationship definition");
+            }
+            this.setNextToken();
+            const target: Node | null = this.parseNode();
+            if (target === null) {
+                throw new Error("Expected target node definition");
+            }
+            relationship = new Relationship();
+            relationship.type = type;
+            relationship.source = node;
+            relationship.target = target;
+        }
+        if (relationship !== null) {
+            return new RefreshRelationship(relationship);
+        }
+        return new RefreshNode(node);
+    }
+
+    /**
+     * Returns true when the current token is a clause keyword that
+     * starts a query pipeline (the right-hand side of a `LET name =`
+     * or `UPDATE name =`).  Used to disambiguate between binding a
+     * plain expression and binding the rows produced by a sub-query.
+     */
+    private looksLikePipelineStart(): boolean {
+        return (
+            this.token.isWith() ||
+            this.token.isUnwind() ||
+            this.token.isLoad() ||
+            this.token.isCall() ||
+            this.token.isMatch() ||
+            this.token.isOptional() ||
+            this.token.isReturn()
+        );
+    }
+
+    /**
+     * Peeks past `{` to decide whether the brace opens a sub-query
+     * (first significant token is a clause keyword) or a map literal
+     * (anything else, e.g. identifier+colon or string key).
+     */
+    private braceOpensSubQuery(): boolean {
+        if (!this.token.isOpeningBrace()) {
+            return false;
+        }
+        const savedIndex = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        const result =
+            this.token.isWith() ||
+            this.token.isUnwind() ||
+            this.token.isLoad() ||
+            this.token.isCall() ||
+            this.token.isMatch() ||
+            this.token.isOptional() ||
+            this.token.isReturn();
+        this.tokenIndex = savedIndex;
+        return result;
+    }
+
+    /**
+     * Parses the right-hand side of a `LET` / `UPDATE`.  Returns the
+     * expression *or* the sub-query AST that was parsed.
+     */
+    private parseLetUpdateRhs(): { expression: Expression | null; subQuery: ASTNode | null } {
+        this.expectAndSkipWhitespaceAndComments();
+        // Explicit braces wrap a sub-query only when followed by a
+        // clause keyword; otherwise `{ ... }` is a map literal.
+        if (this.braceOpensSubQuery()) {
+            const subQuery = this.parseSubQuery();
+            if (subQuery === null) {
+                throw new Error("Expected sub-query");
+            }
+            return { expression: null, subQuery };
+        }
+        if (this.looksLikePipelineStart()) {
+            // Inline sub-query: parse a pipeline up to ; / EOF.
+            const savedState = this._state;
+            this._state = new ParserState();
+            const subQuery = this._parseTokenized(true);
+            this._state = savedState;
+            if (subQuery.firstChild() === null) {
+                throw new Error("Expected expression or sub-query");
+            }
+            return { expression: null, subQuery };
+        }
+        const expression = this.parseExpression();
+        if (expression === null) {
+            throw new Error("Expected expression or sub-query");
+        }
+        return { expression, subQuery: null };
+    }
+
+    private parseLet(): Let | null {
+        if (!this.token.isLet()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected identifier after LET");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (!this.token.isEquals()) {
+            throw new Error("Expected '=' after LET identifier");
+        }
+        this.setNextToken();
+        const { expression, subQuery } = this.parseLetUpdateRhs();
+        // Optional trailing REFRESH EVERY <n> <unit> clause turns the
+        // binding into a refreshable one.  Requires a sub-query RHS
+        // (there is nothing to re-evaluate for a literal expression).
+        // Peek past REFRESH to confirm EVERY follows: a bare
+        // `REFRESH BINDING` is a separate top-level statement.
+        let refreshEveryMs: number | null = null;
+        const savedIndex = this.tokenIndex;
+        this.skipWhitespaceAndComments();
+        let consumedRefreshClause = false;
+        if (this.token.isRefresh()) {
+            const afterRefreshIndex = this.tokenIndex;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isEvery()) {
+                if (subQuery === null) {
+                    throw new Error("LET REFRESH EVERY requires a sub-query right-hand side");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                if (!this.token.isNumber()) {
+                    throw new Error("Expected number after REFRESH EVERY");
+                }
+                const amount = Number(this.token.value);
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    throw new Error("REFRESH EVERY interval must be a positive number");
+                }
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                const unit = (this.token.value || "").toUpperCase();
+                const unitMs: Record<string, number> = {
+                    SECOND: 1000,
+                    SECONDS: 1000,
+                    MINUTE: 60_000,
+                    MINUTES: 60_000,
+                    HOUR: 3_600_000,
+                    HOURS: 3_600_000,
+                    DAY: 86_400_000,
+                    DAYS: 86_400_000,
+                };
+                if (!(unit in unitMs)) {
+                    throw new Error(
+                        "Expected time unit (SECOND[S], MINUTE[S], HOUR[S], DAY[S]) after REFRESH EVERY interval"
+                    );
+                }
+                refreshEveryMs = amount * unitMs[unit];
+                this.setNextToken();
+                consumedRefreshClause = true;
+            } else {
+                // Not REFRESH EVERY; must be the start of a separate
+                // REFRESH statement.  Rewind to before REFRESH.
+                this.tokenIndex = afterRefreshIndex;
+            }
+        }
+        if (!consumedRefreshClause) {
+            this.tokenIndex = savedIndex;
+        }
+        return new Let(name, expression, subQuery, refreshEveryMs);
+    }
+
+    private parseUpdate(): Update | UpdateDelete | null {
+        if (!this.token.isUpdate()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected identifier after UPDATE");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+
+        // `UPDATE name AS alias DELETE WHERE <pred>` — row-filtering branch.
+        if (this.token.isAs()) {
+            return this.parseUpdateDeleteTail(name);
+        }
+
+        // `UPDATE name = <rhs>` — assign branch.
+        if (!this.token.isEquals()) {
+            throw new Error("Expected '=' in UPDATE");
+        }
+        this.setNextToken();
+        const { expression, subQuery } = this.parseLetUpdateRhs();
+        return new Update(name, expression, subQuery);
+    }
+
+    /**
+     * Parses a `MERGE INTO <name> [AS <target>] USING <rhs>
+     * [AS <source>] ON <on-clause> <when-clauses>` statement.
+     */
+    private parseMerge(): Merge | null {
+        if (!this.token.isMerge()) {
+            return null;
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isInto()) {
+            throw new Error("Expected INTO after MERGE");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected binding name after MERGE INTO");
+        }
+        const name = this.token.value;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        // Optional `AS <target-alias>`.
+        let targetAlias: string | null = null;
+        if (this.token.isAs()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected alias after AS in MERGE INTO");
+            }
+            targetAlias = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (!this.token.isUsing()) {
+            throw new Error("Expected USING after MERGE INTO target");
+        }
+        this.setNextToken();
+        const { expression: sourceExpression, subQuery: sourceSubQuery } = this.parseLetUpdateRhs();
+        if (sourceExpression !== null) {
+            // The source RHS lives outside the LET / UPDATE binding-RHS
+            // scope, so a bare identifier here refers to an existing
+            // binding (e.g. `USING incoming AS s`) rather than a
+            // declaration-site name.  Convert unresolved references so
+            // they resolve against the global Bindings store at runtime.
+            this.convertUnresolvedReferencesToBindings(sourceExpression);
+        }
+        this.skipWhitespaceAndComments();
+        // Optional `AS <source-alias>`.
+        let sourceAlias: string | null = null;
+        if (this.token.isAs()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected alias after AS in MERGE INTO … USING");
+            }
+            sourceAlias = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (!this.token.isOn()) {
+            throw new Error("Expected ON in MERGE INTO");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Pre-create the Merge with placeholders so that aliases can
+        // resolve to the per-row context while we parse the ON clause
+        // and the WHEN expressions.  The proxy aliases delegate to
+        // `targetValue()` / `sourceValue()` on this instance.
+        const placeholderOn: MergeOnClause = { type: "keys", keys: [] };
+        const merge = new Merge(
+            name,
+            targetAlias,
+            sourceAlias,
+            sourceExpression,
+            sourceSubQuery,
+            placeholderOn,
+            null,
+            null
+        );
+        if (targetAlias !== null) {
+            this._state.variables.set(targetAlias, new MergeTargetAlias(merge));
+        }
+        if (sourceAlias !== null) {
+            this._state.variables.set(sourceAlias, new MergeSourceAlias(merge));
+        }
+        let onClause: MergeOnClause;
+        try {
+            onClause = this.parseMergeOn();
+            this.skipWhitespaceAndComments();
+            // Build the matched / not-matched actions from one or more
+            // WHEN clauses.  Track whether we've already seen each kind
+            // to forbid duplicates.
+            let matched: MergeMatchedAction | null = null;
+            let notMatched: MergeNotMatchedAction | null = null;
+            while (this.token.isWhen()) {
+                const parsed = this.parseMergeWhenClause();
+                if (parsed.kind === "matched") {
+                    if (matched !== null) {
+                        throw new Error("Duplicate WHEN MATCHED clause in MERGE INTO");
+                    }
+                    matched = parsed.action;
+                } else {
+                    if (notMatched !== null) {
+                        throw new Error("Duplicate WHEN NOT MATCHED clause in MERGE INTO");
+                    }
+                    notMatched = parsed.action;
+                }
+                this.skipWhitespaceAndComments();
+            }
+            if (matched === null && notMatched === null) {
+                throw new Error("MERGE INTO requires at least one WHEN clause");
+            }
+            merge.setClauses(onClause, matched, notMatched);
+        } finally {
+            if (targetAlias !== null) {
+                this._state.variables.delete(targetAlias);
+            }
+            if (sourceAlias !== null) {
+                this._state.variables.delete(sourceAlias);
+            }
+        }
+        return merge;
+    }
+
+    /**
+     * Parses the body of the `ON` clause.  Distinguishes a short-form
+     * key list (`ON id`, `ON (a, b, c)`) from a full predicate
+     * expression by looking ahead: a bare identifier (or parenthesised
+     * list of identifiers) followed by `WHEN` is the key form;
+     * anything else is parsed as an expression.
+     */
+    private parseMergeOn(): MergeOnClause {
+        // Snapshot tokenizer position so we can rewind after a failed
+        // key-list probe.
+        const savedIndex = this.tokenIndex;
+        const keys = this.tryParseMergeKeyList();
+        if (keys !== null) {
+            return { type: "keys", keys };
+        }
+        // Not a key list — rewind and parse as a predicate expression.
+        this.tokenIndex = savedIndex;
+        const predicate = this.parseExpression();
+        if (predicate === null) {
+            throw new Error("Expected predicate or key list after MERGE INTO … ON");
+        }
+        this.convertUnresolvedReferencesToBindings(predicate);
+        return { type: "predicate", predicate };
+    }
+
+    /**
+     * Speculatively parses `<id>` or `(<id> [, <id>]*)` followed by
+     * `WHEN`.  Returns the key list on success, or `null` if the
+     * lookahead doesn't match (leaving the caller to rewind and try
+     * an expression).
+     */
+    private tryParseMergeKeyList(): string[] | null {
+        const keys: string[] = [];
+        if (this.token.isLeftParenthesis()) {
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            while (!this.token.isRightParenthesis()) {
+                if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                    return null;
+                }
+                keys.push(this.token.value);
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+                if (this.token.isComma()) {
+                    this.setNextToken();
+                    this.skipWhitespaceAndComments();
+                } else if (!this.token.isRightParenthesis()) {
+                    return null;
+                }
+            }
+            this.setNextToken();
+        } else {
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                return null;
+            }
+            keys.push(this.token.value);
+            this.setNextToken();
+        }
+        // Must be followed by `WHEN` (with any whitespace) to be a key list.
+        this.skipWhitespaceAndComments();
+        if (!this.token.isWhen()) {
+            return null;
+        }
+        if (keys.length === 0) {
+            return null;
+        }
+        return keys;
+    }
+
+    /**
+     * Parses a single `WHEN [NOT] MATCHED THEN UPDATE SET … | DELETE
+     * | INSERT [<expr>]` clause.  Caller is positioned on `WHEN`.
+     */
+    private parseMergeWhenClause():
+        | { kind: "matched"; action: MergeMatchedAction }
+        | { kind: "notMatched"; action: MergeNotMatchedAction } {
+        this.setNextToken(); // consume WHEN
+        this.expectAndSkipWhitespaceAndComments();
+        let negated = false;
+        if (this.token.isNot()) {
+            negated = true;
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+        }
+        if (!this.token.isMatched()) {
+            throw new Error("Expected MATCHED after WHEN" + (negated ? " NOT" : ""));
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isThen()) {
+            throw new Error("Expected THEN after WHEN" + (negated ? " NOT" : "") + " MATCHED");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (negated) {
+            // WHEN NOT MATCHED — only INSERT is meaningful.
+            if (!this.token.isInsert()) {
+                throw new Error("Expected INSERT after WHEN NOT MATCHED THEN");
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            // Optional expression: anything that isn't a WHEN / EOF /
+            // semicolon / closing brace is the row-builder expression.
+            let expression: Expression | null = null;
+            if (
+                !this.token.isWhen() &&
+                !this.token.isEOF() &&
+                !this.token.isSemicolon() &&
+                !this.token.isClosingBrace()
+            ) {
+                expression = this.parseExpression();
+                if (expression === null) {
+                    throw new Error("Expected expression after WHEN NOT MATCHED THEN INSERT");
+                }
+                this.convertUnresolvedReferencesToBindings(expression);
+            }
+            return { kind: "notMatched", action: { type: "insert", expression } };
+        }
+        // WHEN MATCHED — accepts UPDATE SET … or DELETE.
+        if (this.token.isUpdate()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isSet()) {
+                throw new Error("Expected SET after WHEN MATCHED THEN UPDATE");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            const setItems = this.parseMergeSetList();
+            return { kind: "matched", action: { type: "update", setItems } };
+        }
+        if (this.token.isDelete()) {
+            this.setNextToken();
+            return { kind: "matched", action: { type: "delete" } };
+        }
+        throw new Error("Expected UPDATE or DELETE after WHEN MATCHED THEN");
+    }
+
+    /**
+     * Parses `.field [= <expr>] [, .field [= <expr>]]*` — the body of a
+     * `WHEN MATCHED THEN UPDATE SET` clause.  An item without an
+     * explicit `= <expr>` defaults to `source.<field>` at run time.
+     */
+    private parseMergeSetList(): MergeSetItem[] {
+        const items: MergeSetItem[] = [];
+        while (true) {
+            if (!this.token.isDot()) {
+                throw new Error("Expected '.' before SET field name");
+            }
+            this.setNextToken();
+            if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+                throw new Error("Expected field name after '.'");
+            }
+            const field = this.token.value;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            let expression: Expression | null = null;
+            if (this.token.isEquals()) {
+                this.setNextToken();
+                this.expectAndSkipWhitespaceAndComments();
+                expression = this.parseExpression();
+                if (expression === null) {
+                    throw new Error(`Expected expression after SET .${field} =`);
+                }
+                this.convertUnresolvedReferencesToBindings(expression);
+                this.skipWhitespaceAndComments();
+            }
+            items.push({ field, expression });
+            if (!this.token.isComma()) {
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        if (items.length === 0) {
+            throw new Error("Expected at least one SET field");
+        }
+        return items;
+    }
+
+    /**
+     * Parses the tail of `UPDATE name AS alias DELETE WHERE <pred>`,
+     * with `AS` already consumed by the caller's lookahead.
+     */
+    private parseUpdateDeleteTail(name: string): UpdateDelete {
+        this.setNextToken(); // consume AS
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
+            throw new Error("Expected alias after AS");
+        }
+        const alias = this.token.value;
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isDelete()) {
+            throw new Error("Expected DELETE after UPDATE alias");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        if (!this.token.isWhere()) {
+            throw new Error("Expected WHERE after UPDATE … DELETE");
+        }
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+
+        // Inject the alias into the parser's variable scope while we
+        // parse the predicate so that `<alias>` / `<alias>.field`
+        // references resolve to the UpdateDelete's per-row value.
+        const updateDelete = new UpdateDelete(name, alias, new Expression());
+        this._state.variables.set(alias, updateDelete);
+        const predicate = this.parseExpression();
+        this._state.variables.delete(alias);
+        if (predicate === null) {
+            throw new Error("Expected predicate expression after WHERE");
+        }
+        // Any other unresolved bare identifiers (e.g. `IN banned`) refer
+        // to LET-bound bindings, which are resolved at run-time against
+        // the global Bindings store.
+        this.convertUnresolvedReferencesToBindings(predicate);
+        updateDelete.setPredicate(predicate);
+        return updateDelete;
+    }
+
+    /**
+     * Recursively replaces any unresolved {@link Reference} node in
+     * the given subtree with a {@link BindingReference}, which looks up
+     * the value from the global {@link Bindings} store at run-time.
+     *
+     * Used by `UPDATE … AS u DELETE WHERE …` so that predicates can
+     * reference other bindings by name, and to keep `LOAD JSON FROM …`
+     * behaviour consistent at arbitrary depth.
+     */
+    private convertUnresolvedReferencesToBindings(node: ASTNode): void {
+        for (const child of node.getChildren().slice()) {
+            if (
+                child instanceof Reference &&
+                child.referred === undefined &&
+                !child.identifier.startsWith("$")
+            ) {
+                node.replaceChild(child, new BindingReference(child.identifier));
+            } else {
+                this.convertUnresolvedReferencesToBindings(child);
+            }
+        }
     }
 
     private parseMatch(): Match | null {
@@ -954,7 +1688,7 @@ class Parser extends BaseParser {
             return null;
         }
         this.setNextToken();
-        this.expectAndSkipWhitespaceAndComments();
+        this.skipWhitespaceAndComments();
         const query: ASTNode = this._parseTokenized(true);
         this.skipWhitespaceAndComments();
         if (!this.token.isClosingBrace()) {

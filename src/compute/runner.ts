@@ -7,6 +7,8 @@ import Relationship from "../graph/relationship";
 import ASTNode from "../parsing/ast_node";
 import BindingReference from "../parsing/expressions/binding_reference";
 import ParameterReference from "../parsing/expressions/parameter_reference";
+import AggregatedReturn from "../parsing/operations/aggregated_return";
+import AggregatedWith from "../parsing/operations/aggregated_with";
 import CreateNode from "../parsing/operations/create_node";
 import CreateRelationship from "../parsing/operations/create_relationship";
 import DeleteNode from "../parsing/operations/delete_node";
@@ -206,11 +208,13 @@ class Runner {
     }
 
     /**
-     * Walks the terminal statement's operation chain (and into UNION
-     * sub-pipelines) to register every MATCH-bound `Node` and
-     * `Relationship` slot with the terminal operation's provenance
-     * collector(s).  Called once per `run()` when the `provenance`
-     * option is enabled.
+     * Walks the terminal statement's operation chain and wires every
+     * MATCH-bound `Node` / `Relationship` slot to the operation that
+     * will project it.  Aggregation boundaries (`AggregatedWith`,
+     * `AggregatedReturn`) absorb upstream sites into their group-level
+     * accumulation; aggregations downstream of one another chain via
+     * each `AggregatedWith` re-exposing itself as a provenance source
+     * for the next consumer.
      *
      * Only the last statement may produce rows; preceding statements
      * are limited to CREATE / DELETE / REFRESH / DROP and never need
@@ -223,20 +227,33 @@ class Runner {
     }
 
     /**
-     * Collect all MATCH-bound elements reachable from `first` up to (and
-     * including) the terminal Return / Union.  For Union, recurse into
-     * the left and right sub-pipelines so each branch carries its own
-     * site list.
+     * Walk `first..terminal`, accumulating live MATCH sites into the
+     * "active" source list and handing it off at every aggregation
+     * boundary.  Each `AggregatedWith` consumes the active list and then
+     * re-publishes itself as the single active source going forward.
      */
     private attachProvenance(first: Operation, sink: RowProvenance[]): void {
-        const sites = new ProvenanceSites();
+        let activeSites: ProvenanceSites = new ProvenanceSites();
+        // Extra (non-site) sources contributed by upstream aggregations.
+        let activeAggregations: AggregatedWith[] = [];
         let op: Operation | null = first;
         let terminal: Operation | null = null;
         while (op !== null) {
             if (op instanceof Match) {
                 for (const pattern of op.patterns) {
-                    Runner.collectSitesFromPattern(pattern, sites);
+                    Runner.collectSitesFromPattern(pattern, activeSites);
                 }
+            } else if (op instanceof AggregatedWith) {
+                // Aggregation boundary: hand off current sources and
+                // re-publish the aggregation as the new source.
+                if (!activeSites.isEmpty) {
+                    op.addProvenanceSource(activeSites);
+                }
+                for (const a of activeAggregations) {
+                    op.addProvenanceSource(a.asProvenanceSource());
+                }
+                activeSites = new ProvenanceSites();
+                activeAggregations = [op];
             }
             if (op.next === null) {
                 terminal = op;
@@ -252,8 +269,22 @@ class Runner {
             this.attachProvenance(terminal.left, leftSink);
             this.attachProvenance(terminal.right, rightSink);
             terminal.enableProvenance(leftSink, rightSink, sink);
-        } else if (terminal instanceof Return) {
-            terminal.enableProvenance(sites, sink);
+            return;
+        }
+        if (terminal instanceof Return) {
+            // AggregatedReturn folds sources into its GroupBy; plain Return
+            // snapshots them per emitted row.  Both share the same source
+            // registration API.  We always enable the sink so even
+            // source-less queries (`WITH ... RETURN`) emit one
+            // `{nodes:[], relationships:[]}` per result row for shape
+            // consistency with the results array.
+            if (!activeSites.isEmpty) {
+                terminal.addProvenanceSource(activeSites);
+            }
+            for (const a of activeAggregations) {
+                terminal.addProvenanceSource(a.asProvenanceSource());
+            }
+            terminal.enableProvenance(sink);
         }
     }
 

@@ -58,6 +58,33 @@ export interface RowProvenance {
 }
 
 /**
+ * Anything that can produce a `RowProvenance` segment for the row currently
+ * being emitted.  Two implementations exist today:
+ *
+ *  - {@link ProvenanceSites} — snapshots the live bindings of a MATCH's
+ *    `Node` / `Relationship` slots at the moment of the emit.
+ *  - `AggregatedWith` (in `aggregated_with.ts`) — replays the pre-computed
+ *    provenance of the group it is currently flushing downstream.
+ *
+ * The terminal `Return` (and intermediate `AggregatedWith` /
+ * `AggregatedReturn` operations) iterate their registered sources per row
+ * and concatenate the segments into a single `RowProvenance`.
+ */
+export interface ProvenanceSource {
+    snapshot(): RowProvenance;
+}
+
+/**
+ * Concatenate one segment into a destination row.  Lives here so the
+ * merge order and dedup behaviour stay consistent across consumers
+ * (`Return`, `GroupBy`, `AggregatedWith`).
+ */
+export function mergeProvenanceSegment(into: RowProvenance, segment: RowProvenance): void {
+    for (const n of segment.nodes) into.nodes.push(n);
+    for (const r of segment.relationships) into.relationships.push(r);
+}
+
+/**
  * Holds the set of `Node` and `Relationship` slots discovered in a query's
  * MATCH operations.  These are stable references; their live state is read
  * synchronously on each `snapshot()` call to capture the bindings active at

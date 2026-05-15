@@ -1,4 +1,4 @@
-import { ProvenanceSites, RowProvenance } from "../../compute/provenance";
+import { ProvenanceSource, RowProvenance, mergeProvenanceSegment } from "../../compute/provenance";
 import Limit from "./limit";
 import OrderBy from "./order_by";
 import Projection from "./projection";
@@ -20,7 +20,7 @@ class Return extends Projection {
     protected _results: Record<string, any>[] = [];
     private _limit: Limit | null = null;
     protected _orderBy: OrderBy | null = null;
-    protected _provenanceSites: ProvenanceSites | null = null;
+    protected _provenanceSources: ProvenanceSource[] | null = null;
     protected _provenanceSink: RowProvenance[] | null = null;
     protected _provenanceRows: RowProvenance[] = [];
     public set where(where: Where) {
@@ -39,14 +39,26 @@ class Return extends Projection {
         this._orderBy = orderBy;
     }
     /**
-     * Enable row-level provenance capture.  `sites` holds the registered
-     * Node/Relationship slots whose live bindings are read on every emitted
-     * row; `sink` is the runner-owned array that receives the post-sorted,
-     * post-limited provenance entries (aligned by index with results).
+     * Direct the runner-owned sink that receives the post-sorted,
+     * post-limited provenance rows.  Once a sink is registered, every
+     * emit captures a snapshot from the registered provenance sources.
      */
-    public enableProvenance(sites: ProvenanceSites, sink: RowProvenance[]): void {
-        this._provenanceSites = sites;
+    public enableProvenance(sink: RowProvenance[]): void {
         this._provenanceSink = sink;
+    }
+    /**
+     * Append a provenance source.  Sources are snapshotted per emitted
+     * row and their segments are concatenated in registration order.
+     * Multiple MATCHes downstream of the last aggregation register their
+     * `ProvenanceSites` here; upstream aggregations register themselves
+     * as virtual sources that replay the current group's accumulated
+     * provenance.
+     */
+    public addProvenanceSource(source: ProvenanceSource): void {
+        if (this._provenanceSources === null) {
+            this._provenanceSources = [];
+        }
+        this._provenanceSources.push(source);
     }
     public async run(): Promise<void> {
         if (!this.where) {
@@ -77,12 +89,25 @@ class Return extends Projection {
             this._orderBy.captureSortKeys();
         }
         this._results.push(Object.fromEntries(record));
-        if (this._provenanceSites !== null) {
-            this._provenanceRows.push(this._provenanceSites.snapshot());
+        if (this._provenanceSink !== null) {
+            this._provenanceRows.push(this._snapshotProvenance());
         }
         if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();
         }
+    }
+    /**
+     * Concatenate all registered provenance sources into a single
+     * `RowProvenance`.  Called once per emitted row.
+     */
+    protected _snapshotProvenance(): RowProvenance {
+        const merged: RowProvenance = { nodes: [], relationships: [] };
+        if (this._provenanceSources !== null) {
+            for (const src of this._provenanceSources) {
+                mergeProvenanceSegment(merged, src.snapshot());
+            }
+        }
+        return merged;
     }
     public async initialize(): Promise<void> {
         this._results = [];
@@ -110,7 +135,7 @@ class Return extends Projection {
     private _buildOutput(): { results: Record<string, any>[]; provenance: RowProvenance[] } {
         let results = this._results;
         let provenance = this._provenanceRows;
-        const wantProvenance = this._provenanceSites !== null;
+        const wantProvenance = this._provenanceSink !== null;
         if (this._orderBy !== null) {
             const indices = this._orderBy.sortIndices(results);
             results = indices.map((i) => results[i]);

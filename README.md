@@ -484,6 +484,13 @@ Semantics:
   per `(alias, id)` for nodes and per `(alias, hops)` for relationships.
 - `UNION ALL` concatenates branch provenance; `UNION` keeps the first
   branch's lineage for deduplicated rows.
+- Aggregating `WITH` clauses carry lineage forward. Inside the group, the
+  contributing bindings (the upstream `MATCH` nodes and relationships)
+  are deduplicated and frozen; any subsequent `MATCH` adds its own
+  live bindings on top, so the final `RETURN` row's provenance shows
+  both the pre-aggregation sources and the post-aggregation bindings.
+  Chained aggregating `WITH` clauses compose transitively — the original
+  ids and hops survive every aggregation hop.
 
 When the option is omitted or set to `false`, the runner has zero
 provenance overhead and `runner.provenance` returns an empty array.

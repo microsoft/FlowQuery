@@ -1,6 +1,6 @@
 import {
     NodeBinding,
-    ProvenanceSites,
+    ProvenanceSource,
     RelationshipBinding,
     RowProvenance,
     nodeBindingKey,
@@ -55,7 +55,7 @@ class GroupBy extends Projection {
     private _mappers: Expression[] | null = null;
     private _reducers: AggregateFunction[] | null = null;
     protected _where: Where | null = null;
-    private _provenanceSites: ProvenanceSites | null = null;
+    private _provenanceSources: ProvenanceSource[] | null = null;
     public async run(): Promise<void> {
         this.resetTree();
         this.map();
@@ -63,27 +63,34 @@ class GroupBy extends Projection {
         this.recordProvenance();
     }
     /**
-     * Register the provenance collector so each `run()` (one per match)
-     * folds the current bindings into the active group's dedup maps.
+     * Register a provenance source whose snapshot is folded into the
+     * currently active group on every `run()`.  May be called multiple
+     * times to compose contributions from several upstream MATCHes or
+     * upstream aggregation boundaries.
      */
-    public enableProvenance(sites: ProvenanceSites): void {
-        this._provenanceSites = sites;
+    public addProvenanceSource(source: ProvenanceSource): void {
+        if (this._provenanceSources === null) {
+            this._provenanceSources = [];
+        }
+        this._provenanceSources.push(source);
     }
     public get provenanceEnabled(): boolean {
-        return this._provenanceSites !== null;
+        return this._provenanceSources !== null;
     }
     private recordProvenance(): void {
-        if (this._provenanceSites === null) return;
-        const snap = this._provenanceSites.snapshot();
+        if (this._provenanceSources === null) return;
         const nodeMap = this.current.provenanceNodes;
-        for (const b of snap.nodes) {
-            const k = nodeBindingKey(b);
-            if (!nodeMap.has(k)) nodeMap.set(k, b);
-        }
         const relMap = this.current.provenanceRelationships;
-        for (const b of snap.relationships) {
-            const k = relationshipBindingKey(b);
-            if (!relMap.has(k)) relMap.set(k, b);
+        for (const src of this._provenanceSources) {
+            const snap = src.snapshot();
+            for (const b of snap.nodes) {
+                const k = nodeBindingKey(b);
+                if (!nodeMap.has(k)) nodeMap.set(k, b);
+            }
+            for (const b of snap.relationships) {
+                const k = relationshipBindingKey(b);
+                if (!relMap.has(k)) relMap.set(k, b);
+            }
         }
     }
     private get root(): Node {

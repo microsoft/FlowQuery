@@ -355,3 +355,151 @@ test("Provenance is empty for CREATE / DELETE VIRTUAL statements", async () => {
     expect(runner.provenance).toEqual([]);
     await new Runner("DELETE VIRTUAL (:ProvEmpty)").run();
 });
+
+test("Provenance flows through aggregated WITH into a downstream RETURN", async () => {
+    await createCityGraph();
+    // count(b) per origin country; downstream RETURN should still have access
+    // to which a-ids (and r/b ids) contributed to each group's count.
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity)-[r:PROV_FLIGHT]->(b:ProvCity)
+        WITH a.country AS country, count(b) AS reachable
+        RETURN country, reachable
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    expect(runner.results.length).toBe(runner.provenance.length);
+    const usIdx = runner.results.findIndex((r: Record<string, any>) => r.country === "US");
+    expect(usIdx).toBeGreaterThanOrEqual(0);
+    const usProv = runner.provenance[usIdx];
+    const usAIds = usProv.nodes
+        .filter((n) => n.alias === "a")
+        .map((n) => n.id)
+        .sort();
+    // NYC and LAX both originate flights and are US.
+    expect(usAIds).toEqual(["lax", "nyc"]);
+    // The relationship binding should list every contributing hop (deduped).
+    const usHops = usProv.relationships
+        .filter((rel) => rel.alias === "r")
+        .flatMap((rel) => rel.hops);
+    // Three US-origin flights: nyc->lax, nyc->yyz, lax->yyz.
+    expect(usHops.length).toBe(3);
+    await dropCityGraph();
+});
+
+test("Provenance combines pre-WITH group lineage with post-WITH live MATCH lineage", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ProvUser) AS {
+            UNWIND [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Carol'}
+            ] AS u
+            RETURN u.id AS id, u.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ProvUser)-[:PROV_KNOWS]-(:ProvUser) AS {
+            UNWIND [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3}
+            ] AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ProvProject) AS {
+            UNWIND [
+                {id: 10, name: 'Atlas'},
+                {id: 11, name: 'Borealis'}
+            ] AS p
+            RETURN p.id AS id, p.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ProvUser)-[:PROV_WORKS_ON]-(:ProvProject) AS {
+            UNWIND [
+                {left_id: 1, right_id: 10},
+                {left_id: 1, right_id: 11}
+            ] AS r
+            RETURN r.left_id AS left_id, r.right_id AS right_id
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (u:ProvUser)-[:PROV_KNOWS]->(s:ProvUser)
+        WITH u, count(s) AS acquaintances
+        MATCH (u)-[:PROV_WORKS_ON]->(p:ProvProject)
+        RETURN u.name AS name, acquaintances, p.name AS project
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    // Alice is the only user with PROV_KNOWS edges; she has two projects.
+    expect(runner.results.length).toBe(2);
+    expect(runner.provenance.length).toBe(2);
+    for (let i = 0; i < runner.results.length; i++) {
+        const p = runner.provenance[i];
+        // The aggregated group's contribution (u, s, the KNOWS edge) survives.
+        const u = p.nodes.find((n) => n.alias === "u")!;
+        expect(u.id).toBe(1);
+        const knownIds = p.nodes
+            .filter((n) => n.alias === "s")
+            .map((n) => n.id)
+            .sort();
+        expect(knownIds).toEqual([2, 3]);
+        // The post-WITH MATCH contributes the freshly-bound project.
+        const project = p.nodes.find((n) => n.alias === "p")!;
+        expect([10, 11]).toContain(project.id);
+        // KNOWS relationship hops from before the aggregation survived.
+        const knowsHops = p.relationships
+            .filter((rel) => rel.type === "PROV_KNOWS" || rel.alias === null)
+            .flatMap((rel) => rel.hops);
+        expect(knowsHops.some((h) => h.left_id === 1)).toBe(true);
+    }
+    await new Runner("DELETE VIRTUAL (:ProvUser)-[:PROV_WORKS_ON]-(:ProvProject)").run();
+    await new Runner("DELETE VIRTUAL (:ProvUser)-[:PROV_KNOWS]-(:ProvUser)").run();
+    await new Runner("DELETE VIRTUAL (:ProvProject)").run();
+    await new Runner("DELETE VIRTUAL (:ProvUser)").run();
+});
+
+test("Provenance composes across chained aggregated WITH clauses", async () => {
+    await createCityGraph();
+    // First aggregation: count flights per (country, origin city).
+    // Second aggregation: collapse over country, summing the counts.
+    // The lineage on the final row must transitively trace back to the
+    // original City and FLIGHT ids that fed both aggregations.
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity)-[r:PROV_FLIGHT]->(b:ProvCity)
+        WITH a.country AS country, a.name AS origin, count(b) AS reachable
+        WITH country, sum(reachable) AS total
+        RETURN country, total
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    expect(runner.results.length).toBe(runner.provenance.length);
+    expect(runner.results.length).toBeGreaterThan(0);
+    const usIdx = runner.results.findIndex((r: Record<string, any>) => r.country === "US");
+    expect(usIdx).toBeGreaterThanOrEqual(0);
+    const usProv = runner.provenance[usIdx];
+    const usAIds = usProv.nodes
+        .filter((n) => n.alias === "a")
+        .map((n) => n.id)
+        .sort();
+    // Original a-ids survive both aggregation hops.
+    expect(usAIds).toEqual(["lax", "nyc"]);
+    const usHops = usProv.relationships
+        .filter((rel) => rel.alias === "r")
+        .flatMap((rel) => rel.hops);
+    expect(usHops.length).toBe(3);
+    await dropCityGraph();
+});

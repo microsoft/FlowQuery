@@ -1,4 +1,4 @@
-import { ProvenanceSites, RowProvenance } from "../../compute/provenance";
+import { ProvenanceSource, RowProvenance } from "../../compute/provenance";
 import Expression from "../expressions/expression";
 import GroupBy from "./group_by";
 import Operation from "./operation";
@@ -9,9 +9,14 @@ class AggregatedReturn extends Return {
     public async run(): Promise<void> {
         await this._group_by.run();
     }
-    public enableProvenance(sites: ProvenanceSites, sink: RowProvenance[]): void {
-        super.enableProvenance(sites, sink);
-        this._group_by.enableProvenance(sites);
+    /**
+     * Provenance sources registered on an aggregate RETURN are folded
+     * into the active group's dedup maps rather than snapshotted per
+     * row, because each output row corresponds to a *group* of upstream
+     * matches.  Override to route through the embedded `GroupBy`.
+     */
+    public addProvenanceSource(source: ProvenanceSource): void {
+        this._group_by.addProvenanceSource(source);
     }
     public get results(): Record<string, any>[] {
         const { results } = this._buildAggregateOutput();
@@ -37,7 +42,11 @@ class AggregatedReturn extends Return {
         }
         const results: Record<string, any>[] = [];
         const provenance: RowProvenance[] = [];
-        const wantProvenance = this._group_by.provenanceEnabled;
+        // Emit a provenance entry per result row whenever a sink is
+        // registered, even if no provenance sources were attached (e.g.
+        // `RETURN count(*)` over no MATCH).  This keeps
+        // `runner.provenance.length === runner.results.length`.
+        const wantProvenance = this._provenanceSink !== null;
         if (wantProvenance) {
             const recordIter = this._group_by.generate_results();
             const provIter = this._group_by.generate_provenance();

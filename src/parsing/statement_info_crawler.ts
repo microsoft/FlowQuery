@@ -4,6 +4,7 @@ import NodeReference from "../graph/node_reference";
 import Relationship from "../graph/relationship";
 import ASTNode from "./ast_node";
 import Lookup from "./data_structures/lookup";
+import BindingReference from "./expressions/binding_reference";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
@@ -18,6 +19,7 @@ import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
 import DeleteNode from "./operations/delete_node";
 import DeleteRelationship from "./operations/delete_relationship";
+import Let from "./operations/let";
 import Load from "./operations/load";
 import Match from "./operations/match";
 import Operation from "./operations/operation";
@@ -241,6 +243,14 @@ class StatementInfoCrawler {
      */
     private _ownNodeCreates: Array<{ label: string; statement: ASTNode }> = [];
     private _ownRelCreates: Array<{ type: string; statement: ASTNode }> = [];
+    /**
+     * Map of `LET name = { ... }` binding name to the data sources its
+     * sub-query right-hand side touches.  Used to follow a downstream
+     * `LOAD JSON FROM name` reference back to the original URL / file /
+     * async-function name when both the LET and the consuming statement
+     * are crawled together.
+     */
+    private _letSources: Map<string, Set<string>> = new Map();
 
     /**
      * Walks one or more statement ASTs and returns the merged structural info.
@@ -250,8 +260,14 @@ class StatementInfoCrawler {
      */
     public crawl(statements: ASTNode | Iterable<ASTNode>): StatementInfo {
         this.reset();
-        const roots = this.toIterable(statements);
-        for (const root of roots) {
+        const rootList = Array.from(this.toIterable(statements));
+        // Pre-pass: collect the sources each LET-bound sub-query
+        // touches so we can follow downstream `LOAD FROM <letName>`
+        // references back to the underlying URL / file / function.
+        for (const root of rootList) {
+            this.collectLetSources(root);
+        }
+        for (const root of rootList) {
             this.crawlStatement(root);
         }
         this.resolveRegisteredDefinitions();
@@ -283,6 +299,36 @@ class StatementInfoCrawler {
         this._ownNodeCreates = [];
         this._ownRelCreates = [];
         this._returns = {};
+        this._letSources = new Map();
+    }
+
+    /**
+     * Pre-pass over a statement to record, for each `LET name = { ... }`
+     * with a sub-query right-hand side, the data sources its sub-query
+     * touches.  Stored in `_letSources` so a downstream
+     * `LOAD JSON FROM name` consumer can union those sources into the
+     * consuming statement's per-label / per-type source set.
+     */
+    private collectLetSources(root: ASTNode): void {
+        let op: Operation | null = null;
+        try {
+            op = root.firstChild() as Operation;
+        } catch {
+            return;
+        }
+        while (op !== null) {
+            if (op instanceof Let && op.subQuery !== null) {
+                const sources = new Set<string>();
+                this.collectSources(op.subQuery, sources);
+                let existing = this._letSources.get(op.name);
+                if (existing === undefined) {
+                    existing = new Set<string>();
+                    this._letSources.set(op.name, existing);
+                }
+                for (const s of sources) existing.add(s);
+            }
+            op = op.next;
+        }
     }
 
     private crawlStatement(root: ASTNode): void {
@@ -848,12 +894,36 @@ class StatementInfoCrawler {
                     const name = op.asyncFunction?.name;
                     if (typeof name === "string" && name.length > 0) target.add(name);
                 } else {
-                    try {
-                        const from = op.from;
-                        if (typeof from === "string" && from.length > 0) target.add(from);
-                    } catch {
-                        // Dynamic source (e.g. f-string with unresolved refs);
-                        // skip rather than fail metadata extraction.
+                    // Inspect the AST directly so a `LOAD FROM <letName>`
+                    // produces a stable `let://<name>` source label
+                    // without invoking the BindingReference's runtime
+                    // lookup (which would either throw or return a
+                    // non-string value).  The parser wraps the
+                    // reference in an Expression so we unwrap one
+                    // level to find the BindingReference itself.
+                    let sourceChild = op.fromComponent.firstChild();
+                    if (sourceChild !== null && !(sourceChild instanceof BindingReference)) {
+                        const inner = sourceChild.firstChild?.();
+                        if (inner instanceof BindingReference) sourceChild = inner;
+                    }
+                    if (sourceChild instanceof BindingReference) {
+                        const bindingName = sourceChild.name;
+                        target.add(`let://${bindingName}`);
+                        // Chase through to the LET's own sources when
+                        // we've seen the binding's definition in the
+                        // same crawl.
+                        const letSources = this._letSources.get(bindingName);
+                        if (letSources !== undefined) {
+                            for (const s of letSources) target.add(s);
+                        }
+                    } else {
+                        try {
+                            const from = op.from;
+                            if (typeof from === "string" && from.length > 0) target.add(from);
+                        } catch {
+                            // Dynamic source (e.g. f-string with unresolved refs);
+                            // skip rather than fail metadata extraction.
+                        }
                     }
                 }
             }

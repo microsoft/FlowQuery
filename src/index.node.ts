@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 import { default as FlowQuery } from "./compute/flowquery";
-import { RunnerMetadata } from "./compute/runner";
+import { CellBindingTrace, CellTrace, LineageReport, RunnerMetadata } from "./compute/runner";
 import Function from "./parsing/functions/function";
 import FunctionFactory, { AsyncDataProvider } from "./parsing/functions/function_factory";
 import {
@@ -66,4 +66,7 @@ export {
     RelationshipInfo,
     ColumnLineage,
     ColumnReference,
+    CellTrace,
+    CellBindingTrace,
+    LineageReport,
 };

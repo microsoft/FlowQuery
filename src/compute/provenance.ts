@@ -80,7 +80,29 @@ export interface RelationshipBinding {
 }
 
 /**
- * One flat slice of bindings — either a single non-aggregate row's
+ * One observation that a particular `LOAD` operation contributed a row
+ * to the projected result.  Records the resolved source name and,
+ * recursively, the inner provenance that backed the row when the
+ * source was a `LET`-bound dataset.
+ */
+export interface DataSourceBinding {
+    /**
+     * The resolved source identifier: a URL, file URI, async-function
+     * name, or `let://<name>` reference for a `LET`-bound dataset.
+     */
+    source: string;
+    /**
+     * When the row came from a `LET`-backed array whose inner runner
+     * was executed with provenance, this is the inner runner's
+     * `RowProvenance` row for the loaded record.  Provides recursive
+     * traceability back through the `LET`'s own sub-query (which may
+     * itself include `LOAD` operations).  Omitted otherwise.
+     */
+    source_provenance?: RowProvenance;
+}
+
+/**
+ * One flat slice of bindings - either a single non-aggregate row's
  * contribution, or one input row's contribution to an aggregate group.
  * Sources (`ProvenanceSource.snapshot`) and the entries in
  * `RowProvenance.rows` are all `RowSegment`s.
@@ -88,6 +110,16 @@ export interface RelationshipBinding {
 export interface RowSegment {
     nodes: NodeBinding[];
     relationships: RelationshipBinding[];
+    /**
+     * Data sources consumed while projecting this row.  Populated when
+     * the pipeline includes a `LOAD` operation: one entry per emitted
+     * `Load` record.  Each entry's `source` is the URL / file URI /
+     * async-function name / `let://name` reference; `source_provenance`
+     * is the inner `RowProvenance` row when the source was a
+     * `LET`-bound dataset.  Omitted when the segment has no Load
+     * contributions.
+     */
+    data_sources?: DataSourceBinding[];
 }
 
 /**
@@ -127,6 +159,10 @@ export interface ProvenanceSource {
 export function mergeProvenanceSegment(into: RowSegment, segment: RowSegment): void {
     for (const n of segment.nodes) into.nodes.push(n);
     for (const r of segment.relationships) into.relationships.push(r);
+    if (segment.data_sources !== undefined && segment.data_sources.length > 0) {
+        if (into.data_sources === undefined) into.data_sources = [];
+        for (const d of segment.data_sources) into.data_sources.push(d);
+    }
 }
 
 /**

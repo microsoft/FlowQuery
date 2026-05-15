@@ -7561,3 +7561,393 @@ test("Test info.returns is a deep copy", () => {
     expect(info2.returns.injected).toBeUndefined();
     expect(info2.returns.y.references).toEqual([]);
 });
+
+// =====================================================================
+// traceRow() / lineage() - convenience methods that bundle structural
+// column lineage (info.returns) with row-level provenance.
+// =====================================================================
+
+test("Test traceRow pairs each output column with its lineage and matching node bindings", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowCity) AS {
+            UNWIND [
+                {id: 'nyc', name: 'New York', country: 'US'},
+                {id: 'lhr', name: 'London', country: 'UK'}
+            ] AS c
+            RETURN c.id AS id, c.name AS name, c.country AS country
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (c:TraceRowCity)
+        WHERE c.country = 'US'
+        RETURN c.name AS origin, c.country AS region
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    expect(runner.results.length).toBe(1);
+    const trace = runner.traceRow(0);
+    expect(Object.keys(trace).sort()).toEqual(["origin", "region"]);
+
+    expect(trace.origin.column).toBe("origin");
+    expect(trace.origin.value).toBe("New York");
+    expect(trace.origin.lineage!.kind).toBe("property");
+    expect(trace.origin.lineage!.references).toEqual([
+        { alias: "c", kind: "node", labels: ["TraceRowCity"], property: "name" },
+    ]);
+    expect(trace.origin.bindings.length).toBe(1);
+    expect(trace.origin.bindings[0].reference.alias).toBe("c");
+    expect(trace.origin.bindings[0].reference.property).toBe("name");
+    expect(trace.origin.bindings[0].value).toBe("New York");
+    expect(trace.origin.bindings[0].node!.id).toBe("nyc");
+    expect(trace.origin.bindings[0].relationship).toBeUndefined();
+
+    expect(trace.region.value).toBe("US");
+    expect(trace.region.bindings[0].value).toBe("US");
+    expect(trace.region.bindings[0].node!.properties!.country).toBe("US");
+
+    await new Runner("DELETE VIRTUAL (:TraceRowCity)").run();
+});
+
+test("Test traceRow for an expression column lists all contributing references", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowPerson) AS {
+            UNWIND [{id: 1, first: 'Ada', last: 'Lovelace'}] AS r
+            RETURN r.id AS id, r.first AS first, r.last AS last
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (p:TraceRowPerson)
+        RETURN p.first + ' ' + p.last AS fullName
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    const trace = runner.traceRow(0);
+    expect(trace.fullName.value).toBe("Ada Lovelace");
+    expect(trace.fullName.lineage!.kind).toBe("expression");
+    expect(trace.fullName.bindings.length).toBe(2);
+    const byProp = Object.fromEntries(
+        trace.fullName.bindings.map((b) => [b.reference.property, b.value])
+    );
+    expect(byProp.first).toBe("Ada");
+    expect(byProp.last).toBe("Lovelace");
+    // Both bindings reference the same matched node.
+    expect(trace.fullName.bindings[0].node!.id).toBe(trace.fullName.bindings[1].node!.id);
+
+    await new Runner("DELETE VIRTUAL (:TraceRowPerson)").run();
+});
+
+test("Test traceRow for an aggregate column surfaces one binding per input row", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowAggCity) AS {
+            UNWIND [
+                {id: 'a', country: 'US'},
+                {id: 'b', country: 'US'},
+                {id: 'c', country: 'US'}
+            ] AS r
+            RETURN r.id AS id, r.country AS country
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (c:TraceRowAggCity)
+        RETURN c.country AS country, collect(c.id) AS ids
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    expect(runner.results.length).toBe(1);
+    const trace = runner.traceRow(0);
+    expect(trace.country.lineage!.kind).toBe("property");
+    expect(trace.country.value).toBe("US");
+
+    expect(trace.ids.lineage!.kind).toBe("aggregate");
+    expect(trace.ids.lineage!.aggregate).toBe("collect");
+    expect(trace.ids.value).toEqual(["a", "b", "c"]);
+    // One binding per contributing input row.
+    expect(trace.ids.bindings.length).toBe(3);
+    const idValues = trace.ids.bindings.map((b) => b.value).sort();
+    expect(idValues).toEqual(["a", "b", "c"]);
+    for (const b of trace.ids.bindings) {
+        expect(b.reference.property).toBe("id");
+        expect(b.node).toBeDefined();
+    }
+
+    await new Runner("DELETE VIRTUAL (:TraceRowAggCity)").run();
+});
+
+test("Test traceRow for a literal column has lineage but no bindings", () => {
+    const runner = new Runner(`WITH 1 AS x RETURN 42 AS answer`, null, null, {
+        provenance: true,
+    });
+    return runner.run().then(() => {
+        const trace = runner.traceRow(0);
+        expect(trace.answer.value).toBe(42);
+        expect(trace.answer.lineage).toEqual({ references: [], kind: "literal" });
+        expect(trace.answer.bindings).toEqual([]);
+    });
+});
+
+test("Test traceRow returns empty bindings when provenance is disabled", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowNoProv) AS {
+            UNWIND [{id: 1, name: 'a'}] AS r RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    const runner = new Runner(`MATCH (c:TraceRowNoProv) RETURN c.name AS n`);
+    await runner.run();
+
+    const trace = runner.traceRow(0);
+    expect(trace.n.value).toBe("a");
+    // Lineage is still populated (structural, always-on).
+    expect(trace.n.lineage!.kind).toBe("property");
+    expect(trace.n.lineage!.references[0].alias).toBe("c");
+    // But no row bindings, because provenance wasn't requested.
+    expect(trace.n.bindings).toEqual([]);
+
+    await new Runner("DELETE VIRTUAL (:TraceRowNoProv)").run();
+});
+
+test("Test traceRow surfaces relationship bindings with the matching hop value", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowRelCity) AS {
+            UNWIND [{id: 'nyc'}, {id: 'lax'}] AS c RETURN c.id AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:TraceRowRelCity)-[:TRACE_ROW_FLIGHT]-(:TraceRowRelCity) AS {
+            UNWIND [{left_id: 'nyc', right_id: 'lax', airline: 'AA'}] AS f
+            RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (a:TraceRowRelCity)-[r:TRACE_ROW_FLIGHT]->(b:TraceRowRelCity)
+        RETURN r.airline AS airline
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    const trace = runner.traceRow(0);
+    expect(trace.airline.value).toBe("AA");
+    expect(trace.airline.bindings.length).toBe(1);
+    const bound = trace.airline.bindings[0];
+    expect(bound.reference.kind).toBe("relationship");
+    expect(bound.reference.property).toBe("airline");
+    expect(bound.relationship).toBeDefined();
+    expect(bound.node).toBeUndefined();
+    expect(bound.value).toBe("AA");
+    expect(bound.relationship!.hops[0].properties!.airline).toBe("AA");
+
+    await new Runner(
+        "DELETE VIRTUAL (:TraceRowRelCity)-[:TRACE_ROW_FLIGHT]-(:TraceRowRelCity)"
+    ).run();
+    await new Runner("DELETE VIRTUAL (:TraceRowRelCity)").run();
+});
+
+test("Test traceRow throws RangeError when rowIndex is out of bounds", async () => {
+    const runner = new Runner(`WITH 1 AS x RETURN x AS y`, null, null, { provenance: true });
+    await runner.run();
+    expect(() => runner.traceRow(-1)).toThrow(RangeError);
+    expect(() => runner.traceRow(1)).toThrow(RangeError);
+});
+
+test("Test lineage() returns columns and aligned rows for every result", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:LineageReportCity) AS {
+            UNWIND [
+                {id: 'a', name: 'Alpha', country: 'US'},
+                {id: 'b', name: 'Bravo', country: 'UK'}
+            ] AS r
+            RETURN r.id AS id, r.name AS name, r.country AS country
+        }
+    `).run();
+    const runner = new Runner(
+        `
+        MATCH (c:LineageReportCity)
+        RETURN c.name AS name, c.country AS country
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+
+    const report = runner.lineage();
+    expect(Object.keys(report.columns).sort()).toEqual(["country", "name"]);
+    expect(report.columns.name.kind).toBe("property");
+    expect(report.columns.country.kind).toBe("property");
+
+    expect(report.rows.length).toBe(2);
+    // Each row trace contains the same columns as the structural map.
+    for (let i = 0; i < report.rows.length; i++) {
+        expect(Object.keys(report.rows[i]).sort()).toEqual(["country", "name"]);
+        expect(report.rows[i].name.value).toBe(runner.results[i].name);
+        expect(report.rows[i].country.value).toBe(runner.results[i].country);
+        expect(report.rows[i].name.bindings[0].node!.id).toBe(
+            report.rows[i].country.bindings[0].node!.id
+        );
+    }
+
+    await new Runner("DELETE VIRTUAL (:LineageReportCity)").run();
+});
+
+test("Test lineage() columns and traces are deep copies (callers can mutate freely)", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:LineageCopyCity) AS {
+            UNWIND [{id: 'x', name: 'X'}] AS r RETURN r.id AS id, r.name AS name
+        }
+    `).run();
+    const runner = new Runner(`MATCH (c:LineageCopyCity) RETURN c.name AS name`, null, null, {
+        provenance: true,
+    });
+    await runner.run();
+
+    const first = runner.lineage();
+    first.columns.name.references.push({
+        alias: "MUT",
+        kind: "node",
+        labels: ["MUT"],
+        property: "MUT",
+    });
+    first.columns.injected = { references: [], kind: "literal" };
+    first.rows[0].name.lineage!.references.push({
+        alias: "MUT2",
+        kind: "node",
+        labels: ["MUT2"],
+        property: "MUT2",
+    });
+
+    const second = runner.lineage();
+    expect(second.columns.name.references).toEqual([
+        { alias: "c", kind: "node", labels: ["LineageCopyCity"], property: "name" },
+    ]);
+    expect(second.columns.injected).toBeUndefined();
+    expect(second.rows[0].name.lineage!.references.length).toBe(1);
+
+    await new Runner("DELETE VIRTUAL (:LineageCopyCity)").run();
+});
+
+test("Test lineage() returns empty rows when query produces no results", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:LineageEmpty) AS {
+            UNWIND [] AS r RETURN r.id AS id
+        }
+    `).run();
+    const runner = new Runner(`MATCH (c:LineageEmpty) RETURN c.id AS id`, null, null, {
+        provenance: true,
+    });
+    await runner.run();
+
+    const report = runner.lineage();
+    expect(report.rows).toEqual([]);
+    expect(report.columns.id.kind).toBe("property");
+
+    await new Runner("DELETE VIRTUAL (:LineageEmpty)").run();
+});
+
+test("Test info.sources chases LET bindings to their underlying LOAD sources", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-letchain-"));
+    const filePath = path.join(tmpDir, "cities.json");
+    fs.writeFileSync(
+        filePath,
+        JSON.stringify([
+            { id: "nyc", name: "New York" },
+            { id: "lhr", name: "London" },
+        ])
+    );
+    const fileUri = "file://" + filePath.replace(/\\/g, "/");
+    try {
+        const runner = new Runner(`
+            LET letChainCities = { LOAD JSON FROM "${fileUri}" AS c RETURN c.id AS id, c.name AS name };
+            CREATE VIRTUAL (:LetChainCity) AS {
+                LOAD JSON FROM letChainCities AS c RETURN c.id AS id, c.name AS name
+            };
+            MATCH (c:LetChainCity) RETURN c.name AS name ORDER BY name
+        `);
+        await runner.run();
+
+        const info = runner.metadata.info!;
+        expect(info.nodes.LetChainCity).toBeDefined();
+        const sources = info.nodes.LetChainCity.sources;
+        expect(sources).toContain("let://letChainCities");
+        expect(sources).toContain(fileUri);
+        expect(info.sources).toEqual(expect.arrayContaining(["let://letChainCities", fileUri]));
+    } finally {
+        await new Runner("DELETE VIRTUAL (:LetChainCity); DROP BINDING letChainCities").run();
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});
+
+test("Test provenance chains data_sources from a virtual back through a LET binding to the original LOAD", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowquery-letprov-"));
+    const filePath = path.join(tmpDir, "cities.json");
+    fs.writeFileSync(
+        filePath,
+        JSON.stringify([
+            { id: "nyc", name: "New York" },
+            { id: "lhr", name: "London" },
+        ])
+    );
+    const fileUri = "file://" + filePath.replace(/\\/g, "/");
+    try {
+        await new Runner(
+            `LET letProvCities = { LOAD JSON FROM "${fileUri}" AS c RETURN c.id AS id, c.name AS name }`
+        ).run();
+        await new Runner(`
+            CREATE VIRTUAL (:LetProvCity) AS {
+                LOAD JSON FROM letProvCities AS c RETURN c.id AS id, c.name AS name
+            }
+        `).run();
+
+        const runner = new Runner(
+            `MATCH (c:LetProvCity) WHERE c.id = 'nyc' RETURN c.name AS name`,
+            null,
+            null,
+            { provenance: true }
+        );
+        await runner.run();
+        expect(runner.results).toEqual([{ name: "New York" }]);
+
+        const prov = runner.provenance![0];
+        expect(prov.nodes.length).toBe(1);
+        const virtualSource = prov.nodes[0].source;
+        expect(virtualSource).toBeDefined();
+        // Inner virtual provenance segment carries a data_sources entry
+        // pointing at the LET binding the virtual loaded from.
+        expect(virtualSource!.data_sources).toBeDefined();
+        const letDS = virtualSource!.data_sources!.find((d) => d.source === "let://letProvCities");
+        expect(letDS).toBeDefined();
+        // That binding's own provenance segment carries a data_sources
+        // entry pointing at the original file URL.
+        expect(letDS!.source_provenance).toBeDefined();
+        const fileDS = letDS!.source_provenance!.data_sources!.find((d) => d.source === fileUri);
+        expect(fileDS).toBeDefined();
+    } finally {
+        await new Runner("DELETE VIRTUAL (:LetProvCity); DROP BINDING letProvCities").run();
+        fs.unlinkSync(filePath);
+        fs.rmdirSync(tmpDir);
+    }
+});

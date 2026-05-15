@@ -1613,6 +1613,41 @@ Semantics:
   invocation must produce fresh records to back the lineage weak-map.
   Static caching continues to apply when `provenance` is off.
 
+#### Data Sources and LET Chaining
+
+`LOAD` operations contribute row-level `data_sources` entries on each
+emitted `RowSegment`: one `{ source, source_provenance? }` per loaded
+record. `source` is the URL, file URI, async-function name, or
+`let://<name>` reference; `source_provenance` is the inner
+`RowProvenance` of the source row when the `LOAD` was reading from a
+`LET`-bound dataset whose right-hand side itself produced lineage.
+
+The same chain surfaces structurally. `info.sources` and the per-label
+`info.nodes[Label].sources` arrays follow `LOAD FROM <letName>`
+references and emit a `let://<name>` entry, plus the underlying
+sources the `LET` sub-query touched (when both definitions are
+visible to the crawler in the same query).
+
+```cypher
+LET cities = { LOAD JSON FROM 'file:///data/cities.json' AS c RETURN c.id AS id, c.name AS name };
+CREATE VIRTUAL (:City) AS { LOAD JSON FROM cities AS c RETURN c.id AS id, c.name AS name };
+MATCH (c:City) RETURN c.name AS name
+```
+
+```javascript
+runner.metadata.info.nodes.City.sources;
+// ['file:///data/cities.json', 'let://cities']
+
+runner.provenance[0].nodes[0].source.data_sources[0];
+// {
+//   source: 'let://cities',
+//   source_provenance: {
+//     nodes: [], relationships: [],
+//     data_sources: [{ source: 'file:///data/cities.json' }]
+//   }
+// }
+```
+
 #### Column-Level Lineage: Tracing Each Result Cell to Its Source
 
 `runner.info.returns` (added to `StatementInfo`) maps every output
@@ -1659,33 +1694,6 @@ RETURN c.name AS origin, d.name AS destination, f.airline AS airline
 | `'expression'` | Computed from one or more `alias.property` accesses.                      |
 | `'aggregate'`  | Aggregate function (`count`, `sum`, `collect`, …); see `aggregate` field. |
 
-Combining `info.returns` with `runner.provenance` lets you write a
-generic per-cell trace:
-
-```javascript
-function traceCell(runner, rowIdx, column) {
-    const lineage = runner.info.returns[column];
-    return lineage.references.map((ref) => {
-        const binding = runner.provenance[rowIdx][
-            ref.kind === "node" ? "nodes" : "relationships"
-        ].find((b) => b.alias === ref.alias);
-        return {
-            column,
-            value: runner.results[rowIdx][column],
-            sourceAlias: ref.alias,
-            sourceLabel: ref.labels[0],
-            sourceProperty: ref.property,
-            sourceId: binding?.id,
-            sourceUrls:
-                runner.info.nodes[ref.labels[0]]?.sources ??
-                runner.info.relationships[ref.labels[0]]?.sources,
-            // Chain back to the originating virtual sub-query:
-            innerLineage: binding?.source,
-        };
-    });
-}
-```
-
 Notes:
 
 - The map is keyed by the column's output alias (the part after `AS`),
@@ -1696,6 +1704,63 @@ Notes:
   property reference.
 - Multi-label intersection matches (`MATCH (n:A:B)`) populate every
   label in `references[i].labels`.
+
+#### Combining Lineage and Provenance: `traceRow()` and `lineage()`
+
+`info.returns` (structural) and `runner.provenance` (runtime) are kept
+as separate streams so each is useful on its own. When you want both
+joined per cell, the `Runner` exposes two convenience methods.
+
+`runner.traceRow(rowIndex)` returns one `CellTrace` per output column
+for a single row, pairing the column's structural lineage with the
+node / relationship bindings whose alias matches it. The matched
+property value is extracted for you (including the built-ins `id`,
+`left_id`, `right_id`, `type`):
+
+```javascript
+const runner = new FlowQuery(
+    `
+    MATCH (c:City)-[f:FLIGHT]->(d:City)
+    WHERE c.country = 'US'
+    RETURN c.name AS origin, d.name AS destination, f.airline AS airline
+`,
+    null,
+    null,
+    { provenance: true }
+);
+await runner.run();
+
+const trace = runner.traceRow(0);
+// trace.origin = {
+//   column: 'origin',
+//   value: 'New York',
+//   lineage: { references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }], kind: 'property' },
+//   bindings: [{
+//     reference: { alias: 'c', kind: 'node', labels: ['City'], property: 'name' },
+//     value: 'New York',
+//     node: { alias: 'c', label: 'City', id: 'nyc', properties: { name: 'New York', country: 'US' }, source: {...} }
+//   }]
+// }
+// trace.airline.bindings[0].relationship.hops[0].properties.airline === 'AA'
+```
+
+`runner.lineage()` is the one-shot equivalent over the entire result
+set:
+
+```javascript
+const report = runner.lineage();
+// report.columns: same shape as info.returns (structural per-column).
+// report.rows[i]: same shape as traceRow(i) (per-cell trace).
+```
+
+`bindings` is empty for literal columns, when the runner was
+constructed without `{ provenance: true }`, or when a row's bindings
+don't intersect the column's references. Aggregate columns like
+`collect(c.id)` surface one binding per contributing input row, so
+`trace.ids.bindings.map(b => b.value)` aligns with the collected
+array. `info`, `provenance`, and `metadata` remain available unchanged
+
+- `traceRow` / `lineage` are purely additive helpers.
 
 ## Contributing
 

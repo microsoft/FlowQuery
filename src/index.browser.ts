@@ -7,6 +7,9 @@
  */
 import { default as FlowQuery } from "./compute/flowquery";
 import type {
+    CellBindingTrace,
+    CellTrace,
+    LineageReport,
     NodeBinding,
     RelationshipBinding,
     RelationshipHop,
@@ -60,8 +63,11 @@ FlowQuery.Function = Function;
 
 export default FlowQuery;
 export type {
+    CellBindingTrace,
+    CellTrace,
     ColumnLineage,
     ColumnReference,
+    LineageReport,
     NodeBinding,
     NodeInfo,
     RelationshipBinding,

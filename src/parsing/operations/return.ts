@@ -98,11 +98,15 @@ class Return extends Projection {
             const segment = this._snapshotProvenance();
             // Non-aggregate row: `rows` contains the single input-row segment
             // so the shape stays uniform with aggregate rows.
-            this._provenanceRows.push({
+            const row: RowProvenance = {
                 nodes: segment.nodes,
                 relationships: segment.relationships,
                 rows: [segment],
-            });
+            };
+            if (segment.data_sources !== undefined) {
+                row.data_sources = segment.data_sources;
+            }
+            this._provenanceRows.push(row);
         }
         if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();

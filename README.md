@@ -344,359 +344,6 @@ because the mutation would be invisibly overwritten by the next
 refresh. Use `REFRESH BINDING name` to re-evaluate the source, or
 `DROP BINDING name` and redefine the binding plainly.
 
-#### Statement Info: Labels, Properties, and Source Lineage
-
-`metadata.info` carries a `StatementInfo` describing the _structure_ the
-query touches — independent of execution. It captures:
-
-- The node labels and relationship types referenced.
-- The data sources backing the underlying virtual definitions.
-- The node/relationship properties **consumed** by the query —
-  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
-  `ORDER BY`, or function arguments, plus inline pattern properties
-  like `(u:User {id: 'rick.o'})`.
-- The properties **declared** by each virtual's `RETURN` clause via
-  `info.declared`, so you can validate that a query references only
-  declared properties.
-- Literal values supplied for properties at the call site via
-  `info.nodes[Label].literal_values` — collected from inline pattern
-  properties and from equality / `IN` predicates such as
-  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
-
-This is useful for governance, lineage UIs, query-cost estimation, schema
-validation, or routing decisions before the query runs.
-
-The same `StatementInfoCrawler` can also be used directly on any parsed
-AST without going through a `Runner`:
-
-```javascript
-import { StatementInfoCrawler } from "flowquery";
-
-const crawler = new StatementInfoCrawler();
-const info = crawler.crawl(parsedAst);
-```
-
-For end-to-end lineage from a property to its data source, use the
-per-entity `nodes` and `relationships` maps:
-
-```javascript
-const runner = new FlowQuery(`
-  CREATE VIRTUAL (:City) AS {
-    LOAD JSON FROM "https://example.com/cities" AS c
-    RETURN c.id AS id, c.name AS name, c.country AS country
-  };
-  CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
-    LOAD JSON FROM "https://example.com/flights" AS f
-    RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
-  };
-  MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
-  WHERE b.country IN ['US', 'CA']
-  RETURN a.name AS origin, b.name AS destination, r.airline AS airline
-`);
-const { info } = runner.metadata;
-
-console.log(info.nodes);
-// {
-//   City: {
-//     properties: ["country", "name"],
-//     sources: ["https://example.com/cities"],
-//     literal_values: { country: ["US", "CA"], name: ["NYC"] }
-//   }
-// }
-console.log(info.relationships);
-// {
-//   FLIGHT: {
-//     properties: ["airline"],
-//     sources: ["https://example.com/flights"],
-//     literal_values: {}
-//   }
-// }
-console.log(info.declared.nodes.City);
-// { properties: ["country", "id", "name"], sources: ["https://example.com/cities"] }
-console.log(info.sources);
-// ["https://example.com/cities", "https://example.com/flights"]
-```
-
-`StatementInfo` resolves sources and declared schemas for **any** virtual
-the query touches — both inline `CREATE VIRTUAL` clauses and
-previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
-`node_labels`, `relationship_types`, `sources`, `node_properties`, and
-`relationship_properties` fields stay in sync with the per-entity `nodes` /
-`relationships` maps and are convenient for quick aggregate checks. Only
-purely literal AST subtrees end up in `literal_values` — values that depend
-on parameters, references, f-strings, or subqueries are skipped.
-
-#### Row-level Provenance: Node and Relationship IDs Behind Each Result
-
-`StatementInfo` describes the _structural_ lineage of a query — which
-labels, types, and sources back it. To get the _row-level_ lineage —
-which concrete node ids and relationship `(left_id, right_id, type)`
-hops actually flowed into each result row — pass `{ provenance: true }`
-when constructing the runner and read `runner.provenance`:
-
-```javascript
-const fq = new FlowQuery(
-    `
-    MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
-    RETURN a.name AS origin, b.name AS destination
-    `,
-    null,
-    null,
-    { provenance: true }
-);
-await fq.run();
-
-fq.results;
-// [{ origin: 'NYC', destination: 'LAX' }, { origin: 'NYC', destination: 'YYZ' }]
-
-fq.provenance;
-// [
-//   {
-//     nodes: [
-//       { alias: 'a', label: 'City', id: 'nyc' },
-//       { alias: 'b', label: 'City', id: 'lax' }
-//     ],
-//     relationships: [
-//       { alias: 'r', type: 'FLIGHT',
-//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }],
-//         path: ['nyc', 'lax'] }
-//     ],
-//     rows: [/* per-input-row segments, see below */]
-//   },
-//   { nodes: [...], relationships: [{ alias: 'r', type: 'FLIGHT',
-//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }],
-//     path: ['nyc', 'yyz'] }], rows: [...] }
-// ]
-```
-
-Semantics:
-
-- `runner.provenance` is aligned **by index** with `runner.results`.
-- Each `NodeBinding.id` preserves the original scalar type of the
-  underlying record (a numeric id stays a number).
-- Anonymous nodes / relationships from the pattern are included with
-  `alias: null`.
-- Variable-length matches (`[:T*m..n]`) populate `hops` with every
-  traversed edge in path order.
-- Every `RelationshipBinding` also carries a `path` field listing every
-  visited node id in order: `[hops[0].left_id, hops[0].right_id,
-hops[1].right_id, …]`. For single-hop matches `path` has exactly two
-  entries; for variable-length matches `path.length === hops.length + 1`.
-- `OPTIONAL MATCH` misses surface as `id: null` for the unmatched node
-  and an empty `hops: []` for the unmatched relationship.
-- `ORDER BY` and `LIMIT` permute and truncate `provenance` in lockstep
-  with `results`.
-- Aggregate `RETURN` (e.g. `count`, `collect`, `sum`) unions all
-  contributing bindings into the output group's provenance, deduplicated
-  per `(alias, id)` for nodes and per `(alias, hops)` for relationships.
-- `UNION ALL` concatenates branch provenance; `UNION` keeps the first
-  branch's lineage for deduplicated rows.
-- Aggregating `WITH` clauses carry lineage forward. Inside the group, the
-  contributing bindings (the upstream `MATCH` nodes and relationships)
-  are deduplicated and frozen; any subsequent `MATCH` adds its own
-  live bindings on top, so the final `RETURN` row's provenance shows
-  both the pre-aggregation sources and the post-aggregation bindings.
-  Chained aggregating `WITH` clauses compose transitively — the original
-  ids and hops survive every aggregation hop.
-
-When the option is omitted or set to `false`, the runner has zero
-provenance overhead and `runner.provenance` returns an empty array.
-
-##### Per-Input-Row Segments: Aligning `collect()` with its Sources
-
-Each `RowProvenance` also carries a `rows` array: one **segment** per
-input row that contributed to the result. A segment is just the
-`{ nodes, relationships }` slice for that single contributing row.
-
-For non-aggregate rows `rows` always has length 1 and mirrors the
-top-level `nodes`/`relationships`. For aggregate rows the array
-positionally aligns with array-valued aggregates such as `collect`:
-
-```cypher
-MATCH (a:City)-[:FLIGHT]->(b:City)
-RETURN a.country AS country, collect(b.name) AS destinations
-```
-
-```javascript
-fq.results[0];
-// { country: 'US', destinations: ['LAX', 'YYZ'] }
-fq.provenance[0].rows.length; // 2
-fq.provenance[0].rows[0].nodes; // contributed LAX: includes b = lax
-fq.provenance[0].rows[1].nodes; // contributed YYZ: includes b = yyz
-```
-
-This lets you map each element of a `collect`/`sum`/`avg` result back
-to the exact node / relationship ids that produced it.
-
-##### Property-Level Lineage
-
-Each `NodeBinding` and `RelationshipHop` produced under `{ provenance:
-true }` also carries the matched **property values** alongside the ids:
-
-```javascript
-const fq = new FlowQuery(query, null, null, { provenance: true });
-await fq.run();
-
-fq.provenance[0].nodes[0];
-// {
-//   alias: 'a', label: 'City', id: 'nyc',
-//   properties: { name: 'New York', country: 'US' }
-// }
-fq.provenance[0].relationships[0].hops[0];
-// {
-//   left_id: 'nyc', right_id: 'lax', type: 'FLIGHT',
-//   properties: { airline: 'AA' }
-// }
-```
-
-- `NodeBinding.properties` is a shallow copy of the matched record with
-  `id` and `_label` stripped. `RelationshipHop.properties` is a shallow
-  copy of the matched relationship's user-visible properties.
-
-##### Threading Lineage Through Virtual Sub-Queries
-
-A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
-produces the synthesised records exposed under the `:X` label. By
-default, a downstream `MATCH (x:X)` only sees the synthesised row's
-`id` — the upstream query that produced it is opaque.
-
-When `{ provenance: true }` is set, the inner runner's `RowProvenance`
-is threaded onto every binding whose record came from a virtual. Each
-`NodeBinding` and each `RelationshipHop` gains an optional `source:
-RowProvenance` field carrying the inner row's full lineage —
-recursively, when a virtual matches another virtual:
-
-```typescript
-import { Runner } from "flowquery";
-
-// Virtual graph: derived city = US-only subset of SrcCity.
-await new Runner(`
-    CREATE VIRTUAL (:SrcCity) AS {
-        UNWIND [
-            { id: 'nyc', country: 'US' },
-            { id: 'lhr', country: 'UK' }
-        ] AS c
-        RETURN c.id AS id, c.country AS country
-    }
-`).run();
-await new Runner(`
-    CREATE VIRTUAL (:DerivedCity) AS {
-        MATCH (s:SrcCity)
-        WHERE s.country = 'US'
-        RETURN s.id AS id
-    }
-`).run();
-
-const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { provenance: true });
-await fq.run();
-
-fq.provenance[0].nodes[0];
-// {
-//   alias: 'd', label: 'DerivedCity', id: 'nyc',
-//   source: {
-//     nodes: [{ alias: 's', label: 'SrcCity', id: 'nyc' }],
-//     relationships: []
-//   }
-// }
-```
-
-Semantics:
-
-- The `source` field is **omitted** when the binding's record did not
-  come from a virtual sub-query (e.g. records from `UNWIND … RETURN`
-  inside the virtual produce a `source` with empty `nodes` and
-  `relationships`, signalling "lineage was threaded but no graph slots
-  were bound at this level").
-- Sub-query lineage is **recursive**: a virtual that matches another
-  virtual carries nested `source` chains all the way down.
-- Provenance mode bypasses the static-virtual cache because each
-  invocation must produce fresh records to back the lineage weak-map.
-  Static caching continues to apply when `provenance` is off.
-
-##### Column-Level Lineage: Tracing Each Result Cell to Its Source
-
-`runner.info.returns` (added to `StatementInfo`) maps every output
-column to the `alias.property` accesses that compose it. Combined with
-row provenance it gives you per-cell traceability — value → source
-binding → node id → source URL — without any runtime AST inspection.
-
-For a query
-
-```cypher
-MATCH (c:City)-[f:FLIGHT]->(d:City)
-WHERE c.country = 'US'
-RETURN c.name AS origin, d.name AS destination, f.airline AS airline
-```
-
-`runner.info.returns` is:
-
-```javascript
-{
-  origin: {
-    references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }],
-    kind: 'property'
-  },
-  destination: {
-    references: [{ alias: 'd', kind: 'node', labels: ['City'], property: 'name' }],
-    kind: 'property'
-  },
-  airline: {
-    references: [{
-      alias: 'f', kind: 'relationship',
-      labels: ['FLIGHT'], property: 'airline'
-    }],
-    kind: 'property'
-  }
-}
-```
-
-`kind` summarises how the column was built:
-
-| `kind`         | Meaning                                                                   |
-| -------------- | ------------------------------------------------------------------------- |
-| `'literal'`    | Pure literal expression, no bindings (e.g. `42 AS answer`).               |
-| `'property'`   | Direct `alias.property` projection (or pass-through).                     |
-| `'expression'` | Computed from one or more `alias.property` accesses.                      |
-| `'aggregate'`  | Aggregate function (`count`, `sum`, `collect`, …); see `aggregate` field. |
-
-Combining `info.returns` with `runner.provenance` lets you write a
-generic per-cell trace:
-
-```javascript
-function traceCell(runner, rowIdx, column) {
-    const lineage = runner.info.returns[column];
-    return lineage.references.map((ref) => {
-        const binding = runner.provenance[rowIdx][
-            ref.kind === "node" ? "nodes" : "relationships"
-        ].find((b) => b.alias === ref.alias);
-        return {
-            column,
-            value: runner.results[rowIdx][column],
-            sourceAlias: ref.alias,
-            sourceLabel: ref.labels[0],
-            sourceProperty: ref.property,
-            sourceId: binding?.id,
-            sourceUrls:
-                runner.info.nodes[ref.labels[0]]?.sources ??
-                runner.info.relationships[ref.labels[0]]?.sources,
-            // Deep-mode chain back to the originating virtual sub-query:
-            innerLineage: binding?.source,
-        };
-    });
-}
-```
-
-Notes:
-
-- The map is keyed by the column's output alias (the part after `AS`),
-  falling back to `expr0`, `expr1`, … for unnamed columns.
-- `count(c)` and similar aggregates over a bare binding produce
-  `kind: 'aggregate'`, `aggregate: 'count'`, and an empty `references`
-  list (no specific property is read). Use `count(c.id)` to surface a
-  property reference.
-- Multi-label intersection matches (`MATCH (n:A:B)`) populate every
-  label in `references[i].labels`.
-
 ### WHERE Clause
 
 Filters rows based on conditions. Supports the following operators:
@@ -1679,6 +1326,376 @@ RETURN a.name AS country, count(b) AS neighbor_count
 ORDER BY neighbor_count DESC
 LIMIT 10
 ```
+
+## Lineage and Provenance
+
+FlowQuery exposes two complementary forms of lineage:
+
+- **Structural lineage** (`metadata.info`) — what labels, types,
+  properties, and sources the parsed query touches. Available without
+  running the query and with zero runtime overhead.
+- **Row-level provenance** (`runner.provenance`) — opt-in via
+  `{ provenance: true }`; for every emitted result row, the concrete
+  node ids and relationship hops bound to it, their matched property
+  values, and (for virtual-backed records) the inner sub-query lineage
+  that produced them.
+
+Combined, they let you trace every cell of a result back to the source
+record, the source virtual, and ultimately the URL or call-site that
+backs it.
+
+### Statement Info: Labels, Properties, and Source Lineage
+
+`metadata.info` carries a `StatementInfo` describing the _structure_ the
+query touches — independent of execution. It captures:
+
+- The node labels and relationship types referenced.
+- The data sources backing the underlying virtual definitions.
+- The node/relationship properties **consumed** by the query —
+  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
+  `ORDER BY`, or function arguments, plus inline pattern properties
+  like `(u:User {id: 'rick.o'})`.
+- The properties **declared** by each virtual's `RETURN` clause via
+  `info.declared`, so you can validate that a query references only
+  declared properties.
+- Literal values supplied for properties at the call site via
+  `info.nodes[Label].literal_values` — collected from inline pattern
+  properties and from equality / `IN` predicates such as
+  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
+
+This is useful for governance, lineage UIs, query-cost estimation, schema
+validation, or routing decisions before the query runs.
+
+The same `StatementInfoCrawler` can also be used directly on any parsed
+AST without going through a `Runner`:
+
+```javascript
+import { StatementInfoCrawler } from "flowquery";
+
+const crawler = new StatementInfoCrawler();
+const info = crawler.crawl(parsedAst);
+```
+
+For end-to-end lineage from a property to its data source, use the
+per-entity `nodes` and `relationships` maps:
+
+```javascript
+const runner = new FlowQuery(`
+  CREATE VIRTUAL (:City) AS {
+    LOAD JSON FROM "https://example.com/cities" AS c
+    RETURN c.id AS id, c.name AS name, c.country AS country
+  };
+  CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+    LOAD JSON FROM "https://example.com/flights" AS f
+    RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+  };
+  MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+  WHERE b.country IN ['US', 'CA']
+  RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+`);
+const { info } = runner.metadata;
+
+console.log(info.nodes);
+// {
+//   City: {
+//     properties: ["country", "name"],
+//     sources: ["https://example.com/cities"],
+//     literal_values: { country: ["US", "CA"], name: ["NYC"] }
+//   }
+// }
+console.log(info.relationships);
+// {
+//   FLIGHT: {
+//     properties: ["airline"],
+//     sources: ["https://example.com/flights"],
+//     literal_values: {}
+//   }
+// }
+console.log(info.declared.nodes.City);
+// { properties: ["country", "id", "name"], sources: ["https://example.com/cities"] }
+console.log(info.sources);
+// ["https://example.com/cities", "https://example.com/flights"]
+```
+
+`StatementInfo` resolves sources and declared schemas for **any** virtual
+the query touches — both inline `CREATE VIRTUAL` clauses and
+previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
+`node_labels`, `relationship_types`, `sources`, `node_properties`, and
+`relationship_properties` fields stay in sync with the per-entity `nodes` /
+`relationships` maps and are convenient for quick aggregate checks. Only
+purely literal AST subtrees end up in `literal_values` — values that depend
+on parameters, references, f-strings, or subqueries are skipped.
+
+### Row-level Provenance: Node and Relationship IDs Behind Each Result
+
+`StatementInfo` describes the _structural_ lineage of a query — which
+labels, types, and sources back it. To get the _row-level_ lineage —
+which concrete node ids and relationship `(left_id, right_id, type)`
+hops actually flowed into each result row — pass `{ provenance: true }`
+when constructing the runner and read `runner.provenance`:
+
+```javascript
+const fq = new FlowQuery(
+    `
+    MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+    RETURN a.name AS origin, b.name AS destination
+    `,
+    null,
+    null,
+    { provenance: true }
+);
+await fq.run();
+
+fq.results;
+// [{ origin: 'NYC', destination: 'LAX' }, { origin: 'NYC', destination: 'YYZ' }]
+
+fq.provenance;
+// [
+//   {
+//     nodes: [
+//       { alias: 'a', label: 'City', id: 'nyc' },
+//       { alias: 'b', label: 'City', id: 'lax' }
+//     ],
+//     relationships: [
+//       { alias: 'r', type: 'FLIGHT',
+//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }],
+//         path: ['nyc', 'lax'] }
+//     ],
+//     rows: [/* per-input-row segments, see below */]
+//   },
+//   { nodes: [...], relationships: [{ alias: 'r', type: 'FLIGHT',
+//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }],
+//     path: ['nyc', 'yyz'] }], rows: [...] }
+// ]
+```
+
+Semantics:
+
+- `runner.provenance` is aligned **by index** with `runner.results`.
+- Each `NodeBinding.id` preserves the original scalar type of the
+  underlying record (a numeric id stays a number).
+- Anonymous nodes / relationships from the pattern are included with
+  `alias: null`.
+- Variable-length matches (`[:T*m..n]`) populate `hops` with every
+  traversed edge in path order.
+- Every `RelationshipBinding` also carries a `path` field listing every
+  visited node id in order: `[hops[0].left_id, hops[0].right_id,
+hops[1].right_id, …]`. For single-hop matches `path` has exactly two
+  entries; for variable-length matches `path.length === hops.length + 1`.
+- `OPTIONAL MATCH` misses surface as `id: null` for the unmatched node
+  and an empty `hops: []` for the unmatched relationship.
+- `ORDER BY` and `LIMIT` permute and truncate `provenance` in lockstep
+  with `results`.
+- Aggregate `RETURN` (e.g. `count`, `collect`, `sum`) unions all
+  contributing bindings into the output group's provenance, deduplicated
+  per `(alias, id)` for nodes and per `(alias, hops)` for relationships.
+- `UNION ALL` concatenates branch provenance; `UNION` keeps the first
+  branch's lineage for deduplicated rows.
+- Aggregating `WITH` clauses carry lineage forward. Inside the group, the
+  contributing bindings (the upstream `MATCH` nodes and relationships)
+  are deduplicated and frozen; any subsequent `MATCH` adds its own
+  live bindings on top, so the final `RETURN` row's provenance shows
+  both the pre-aggregation sources and the post-aggregation bindings.
+  Chained aggregating `WITH` clauses compose transitively — the original
+  ids and hops survive every aggregation hop.
+
+When the option is omitted or set to `false`, the runner has zero
+provenance overhead and `runner.provenance` returns an empty array.
+
+#### Per-Input-Row Segments: Aligning `collect()` with its Sources
+
+Each `RowProvenance` also carries a `rows` array: one **segment** per
+input row that contributed to the result. A segment is just the
+`{ nodes, relationships }` slice for that single contributing row.
+
+For non-aggregate rows `rows` always has length 1 and mirrors the
+top-level `nodes`/`relationships`. For aggregate rows the array
+positionally aligns with array-valued aggregates such as `collect`:
+
+```cypher
+MATCH (a:City)-[:FLIGHT]->(b:City)
+RETURN a.country AS country, collect(b.name) AS destinations
+```
+
+```javascript
+fq.results[0];
+// { country: 'US', destinations: ['LAX', 'YYZ'] }
+fq.provenance[0].rows.length; // 2
+fq.provenance[0].rows[0].nodes; // contributed LAX: includes b = lax
+fq.provenance[0].rows[1].nodes; // contributed YYZ: includes b = yyz
+```
+
+This lets you map each element of a `collect`/`sum`/`avg` result back
+to the exact node / relationship ids that produced it.
+
+#### Property-Level Lineage
+
+Each `NodeBinding` and `RelationshipHop` produced under `{ provenance:
+true }` also carries the matched **property values** alongside the ids:
+
+```javascript
+const fq = new FlowQuery(query, null, null, { provenance: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'a', label: 'City', id: 'nyc',
+//   properties: { name: 'New York', country: 'US' }
+// }
+fq.provenance[0].relationships[0].hops[0];
+// {
+//   left_id: 'nyc', right_id: 'lax', type: 'FLIGHT',
+//   properties: { airline: 'AA' }
+// }
+```
+
+- `NodeBinding.properties` is a shallow copy of the matched record with
+  `id` and `_label` stripped. `RelationshipHop.properties` is a shallow
+  copy of the matched relationship's user-visible properties.
+
+#### Threading Lineage Through Virtual Sub-Queries
+
+A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
+produces the synthesised records exposed under the `:X` label. By
+default, a downstream `MATCH (x:X)` only sees the synthesised row's
+`id` — the upstream query that produced it is opaque.
+
+When `{ provenance: true }` is set, the inner runner's `RowProvenance`
+is threaded onto every binding whose record came from a virtual. Each
+`NodeBinding` and each `RelationshipHop` gains an optional `source:
+RowProvenance` field carrying the inner row's full lineage —
+recursively, when a virtual matches another virtual:
+
+```typescript
+import { Runner } from "flowquery";
+
+// Virtual graph: derived city = US-only subset of SrcCity.
+await new Runner(`
+    CREATE VIRTUAL (:SrcCity) AS {
+        UNWIND [
+            { id: 'nyc', country: 'US' },
+            { id: 'lhr', country: 'UK' }
+        ] AS c
+        RETURN c.id AS id, c.country AS country
+    }
+`).run();
+await new Runner(`
+    CREATE VIRTUAL (:DerivedCity) AS {
+        MATCH (s:SrcCity)
+        WHERE s.country = 'US'
+        RETURN s.id AS id
+    }
+`).run();
+
+const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { provenance: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'd', label: 'DerivedCity', id: 'nyc',
+//   source: {
+//     nodes: [{ alias: 's', label: 'SrcCity', id: 'nyc' }],
+//     relationships: []
+//   }
+// }
+```
+
+Semantics:
+
+- The `source` field is **omitted** when the binding's record did not
+  come from a virtual sub-query (e.g. records from `UNWIND … RETURN`
+  inside the virtual produce a `source` with empty `nodes` and
+  `relationships`, signalling "lineage was threaded but no graph slots
+  were bound at this level").
+- Sub-query lineage is **recursive**: a virtual that matches another
+  virtual carries nested `source` chains all the way down.
+- Provenance mode bypasses the static-virtual cache because each
+  invocation must produce fresh records to back the lineage weak-map.
+  Static caching continues to apply when `provenance` is off.
+
+#### Column-Level Lineage: Tracing Each Result Cell to Its Source
+
+`runner.info.returns` (added to `StatementInfo`) maps every output
+column to the `alias.property` accesses that compose it. Combined with
+row provenance it gives you per-cell traceability — value → source
+binding → node id → source URL — without any runtime AST inspection.
+
+For a query
+
+```cypher
+MATCH (c:City)-[f:FLIGHT]->(d:City)
+WHERE c.country = 'US'
+RETURN c.name AS origin, d.name AS destination, f.airline AS airline
+```
+
+`runner.info.returns` is:
+
+```javascript
+{
+  origin: {
+    references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  destination: {
+    references: [{ alias: 'd', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  airline: {
+    references: [{
+      alias: 'f', kind: 'relationship',
+      labels: ['FLIGHT'], property: 'airline'
+    }],
+    kind: 'property'
+  }
+}
+```
+
+`kind` summarises how the column was built:
+
+| `kind`         | Meaning                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `'literal'`    | Pure literal expression, no bindings (e.g. `42 AS answer`).               |
+| `'property'`   | Direct `alias.property` projection (or pass-through).                     |
+| `'expression'` | Computed from one or more `alias.property` accesses.                      |
+| `'aggregate'`  | Aggregate function (`count`, `sum`, `collect`, …); see `aggregate` field. |
+
+Combining `info.returns` with `runner.provenance` lets you write a
+generic per-cell trace:
+
+```javascript
+function traceCell(runner, rowIdx, column) {
+    const lineage = runner.info.returns[column];
+    return lineage.references.map((ref) => {
+        const binding = runner.provenance[rowIdx][
+            ref.kind === "node" ? "nodes" : "relationships"
+        ].find((b) => b.alias === ref.alias);
+        return {
+            column,
+            value: runner.results[rowIdx][column],
+            sourceAlias: ref.alias,
+            sourceLabel: ref.labels[0],
+            sourceProperty: ref.property,
+            sourceId: binding?.id,
+            sourceUrls:
+                runner.info.nodes[ref.labels[0]]?.sources ??
+                runner.info.relationships[ref.labels[0]]?.sources,
+            // Chain back to the originating virtual sub-query:
+            innerLineage: binding?.source,
+        };
+    });
+}
+```
+
+Notes:
+
+- The map is keyed by the column's output alias (the part after `AS`),
+  falling back to `expr0`, `expr1`, … for unnamed columns.
+- `count(c)` and similar aggregates over a bare binding produce
+  `kind: 'aggregate'`, `aggregate: 'count'`, and an empty `references`
+  list (no specific property is read). Use `count(c.id)` to surface a
+  property reference.
+- Multi-label intersection matches (`MATCH (n:A:B)`) populate every
+  label in `references[i].labels`.
 
 ## Contributing
 

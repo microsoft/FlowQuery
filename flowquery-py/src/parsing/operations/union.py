@@ -1,8 +1,9 @@
 """Represents a UNION operation that combines results from two sub-queries."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from ...compute.provenance import RowProvenance
 from .operation import Operation
 
 
@@ -24,6 +25,9 @@ class Union(Operation):
         self._left: Optional[Operation] = None
         self._right: Optional[Operation] = None
         self._results: List[Dict[str, Any]] = []
+        self._left_provenance: Optional[List[RowProvenance]] = None
+        self._right_provenance: Optional[List[RowProvenance]] = None
+        self._provenance_sink: Optional[List[RowProvenance]] = None
 
     @property
     def left(self) -> Operation:
@@ -44,6 +48,20 @@ class Union(Operation):
     @right.setter
     def right(self, operation: Operation) -> None:
         self._right = operation
+
+    def enable_provenance(
+        self,
+        left_sink: List[RowProvenance],
+        right_sink: List[RowProvenance],
+        sink: List[RowProvenance],
+    ) -> None:
+        """Wire provenance through this UNION.  The Runner attaches each
+        branch to its own sink array; ``sink`` is the merged output array
+        aligned with ``_results``.
+        """
+        self._left_provenance = left_sink
+        self._right_provenance = right_sink
+        self._provenance_sink = sink
 
     @staticmethod
     def _last_in_chain(operation: Operation) -> Operation:
@@ -83,28 +101,51 @@ class Union(Operation):
                     "All sub queries in a UNION must have the same return column names"
                 )
 
-        # Combine results
-        self._results = self._combine(left_results, right_results)
+        # Combine results (and provenance when enabled)
+        rows, provenance = self._combine_with_provenance(left_results, right_results)
+        self._results = rows
+        if self._provenance_sink is not None:
+            self._provenance_sink.clear()
+            for p in provenance:
+                self._provenance_sink.append(p)
+
+    def _combine_with_provenance(
+        self,
+        left: List[Dict[str, Any]],
+        right: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[RowProvenance]]:
+        """Combines results from left and right pipelines and returns
+        both the merged rows and the merged provenance array (when
+        enabled).  UNION drops duplicates (first occurrence wins);
+        :class:`UnionAll` overrides ``_combine`` to keep all rows.
+        """
+        left_prov = self._left_provenance
+        right_prov = self._right_provenance
+        want_prov = self._provenance_sink is not None
+        rows: List[Dict[str, Any]] = list(left)
+        provenance: List[RowProvenance] = list(left_prov) if want_prov and left_prov is not None else []
+        seen: set[str] = set()
+        for row in left:
+            seen.add(json.dumps(row, sort_keys=True, default=str))
+        for i, row in enumerate(right):
+            serialized = json.dumps(row, sort_keys=True, default=str)
+            if serialized not in seen:
+                rows.append(row)
+                if want_prov and right_prov is not None:
+                    provenance.append(right_prov[i])
+                seen.add(serialized)
+        return rows, provenance
 
     def _combine(
         self,
         left: List[Dict[str, Any]],
         right: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Combines results from left and right pipelines.
-
-        UNION removes duplicates; subclass UnionAll overrides to keep all rows.
+        """Kept for backwards compatibility with subclasses that override
+        only ``_combine()``.
         """
-        combined = list(left)
-        for row in right:
-            serialized = json.dumps(row, sort_keys=True, default=str)
-            is_duplicate = any(
-                json.dumps(existing, sort_keys=True, default=str) == serialized
-                for existing in combined
-            )
-            if not is_duplicate:
-                combined.append(row)
-        return combined
+        rows, _ = self._combine_with_provenance(left, right)
+        return rows
 
     async def finish(self) -> None:
         if self.next:

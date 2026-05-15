@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 import { default as FlowQuery } from "./compute/flowquery";
-import { RunnerMetadata } from "./compute/runner";
+import { CellBindingTrace, CellTrace, LineageReport, RunnerMetadata } from "./compute/runner";
 import Function from "./parsing/functions/function";
 import FunctionFactory, { AsyncDataProvider } from "./parsing/functions/function_factory";
 import {
@@ -14,7 +14,13 @@ import {
     OutputSchema,
     ParameterSchema,
 } from "./parsing/functions/function_metadata";
-import { NodeInfo, RelationshipInfo, StatementInfo } from "./parsing/statement_info_crawler";
+import {
+    ColumnLineage,
+    ColumnReference,
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+} from "./parsing/statement_info_crawler";
 
 /**
  * List all registered functions with their metadata.
@@ -58,4 +64,9 @@ export {
     StatementInfo,
     NodeInfo,
     RelationshipInfo,
+    ColumnLineage,
+    ColumnReference,
+    CellTrace,
+    CellBindingTrace,
+    LineageReport,
 };

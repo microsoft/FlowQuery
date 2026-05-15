@@ -1,3 +1,4 @@
+import { RowProvenance } from "../../compute/provenance";
 import Union from "./union";
 
 /**
@@ -5,11 +6,17 @@ import Union from "./union";
  * without removing duplicates.
  */
 class UnionAll extends Union {
-    protected combine(
+    protected combineWithProvenance(
         left: Record<string, any>[],
         right: Record<string, any>[]
-    ): Record<string, any>[] {
-        return [...left, ...right];
+    ): { rows: Record<string, any>[]; provenance: RowProvenance[] } {
+        const wantProv = this._provenanceSink !== null;
+        const leftProv = this._leftProvenance;
+        const rightProv = this._rightProvenance;
+        const provenance: RowProvenance[] = wantProv
+            ? [...(leftProv ?? []), ...(rightProv ?? [])]
+            : [];
+        return { rows: [...left, ...right], provenance };
     }
 }
 

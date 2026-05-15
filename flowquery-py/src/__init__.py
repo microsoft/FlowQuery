@@ -7,7 +7,23 @@ This module provides the core components for defining, parsing, and executing Fl
 """
 
 from .compute.flowquery import FlowQuery
-from .compute.runner import Runner, RunnerMetadata
+from .compute.provenance import (
+    DataSourceBinding,
+    NodeBinding,
+    ProvenanceSource,
+    RelationshipBinding,
+    RelationshipHop,
+    RowProvenance,
+    RowSegment,
+)
+from .compute.runner import (
+    CellBindingTrace,
+    CellTrace,
+    LineageReport,
+    Runner,
+    RunnerMetadata,
+    RunnerOptions,
+)
 from .io.command_line import CommandLine
 from .parsing.functions.aggregate_function import AggregateFunction
 from .parsing.functions.async_function import AsyncFunction
@@ -21,6 +37,8 @@ from .parsing.functions.predicate_function import PredicateFunction
 from .parsing.functions.reducer_element import ReducerElement
 from .parsing.parser import Parser
 from .parsing.statement_info_crawler import (
+    ColumnLineage,
+    ColumnReference,
     DeclaredEntityInfo,
     DeclaredInfo,
     NodeInfo,
@@ -33,8 +51,21 @@ __all__ = [
     "FlowQuery",
     "Runner",
     "RunnerMetadata",
+    "RunnerOptions",
+    "CellBindingTrace",
+    "CellTrace",
+    "LineageReport",
+    "RowProvenance",
+    "RowSegment",
+    "NodeBinding",
+    "RelationshipBinding",
+    "RelationshipHop",
+    "DataSourceBinding",
+    "ProvenanceSource",
     "StatementInfo",
     "StatementInfoCrawler",
+    "ColumnLineage",
+    "ColumnReference",
     "NodeInfo",
     "RelationshipInfo",
     "DeclaredEntityInfo",

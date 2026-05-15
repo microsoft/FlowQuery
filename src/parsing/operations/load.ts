@@ -1,3 +1,10 @@
+import {
+    DataSourceBinding,
+    ProvenanceSource,
+    RowProvenance,
+    RowSegment,
+} from "../../compute/provenance";
+import { getVirtualSource } from "../../graph/virtual_sources";
 import CSV from "../components/csv";
 import From from "../components/from";
 import Headers from "../components/headers";
@@ -6,6 +13,7 @@ import Post from "../components/post";
 import Text from "../components/text";
 import AssociativeArray from "../data_structures/associative_array";
 import Lookup from "../data_structures/lookup";
+import BindingReference from "../expressions/binding_reference";
 import Expression from "../expressions/expression";
 import Reference from "../expressions/reference";
 import AsyncFunction from "../functions/async_function";
@@ -207,6 +215,72 @@ class Load extends Operation {
     }
     public value(): any {
         return this._value;
+    }
+
+    /**
+     * Resolve a stable label for the data source without throwing.
+     * Returns a URL / file URI for direct `FROM` strings, the function
+     * name for `LOAD ... FROM asyncFn(...)`, or `let://<name>` when the
+     * source is a `LET`-bound binding reference.  Returns `null` when
+     * the source expression cannot be resolved at inspection time
+     * (e.g. an unresolved f-string).
+     */
+    public resolveSourceLabel(): string | null {
+        if (this.isAsyncFunction) {
+            const name = this.asyncFunction?.name;
+            return typeof name === "string" && name.length > 0 ? name : null;
+        }
+        // `LOAD FROM <letName>` parses as an Expression wrapping a
+        // BindingReference; unwrap one level so we can produce a stable
+        // `let://<name>` source label without invoking the binding
+        // lookup at inspection time.
+        let sourceChild = this.fromComponent.firstChild();
+        if (sourceChild !== null && !(sourceChild instanceof BindingReference)) {
+            const inner = sourceChild.firstChild?.();
+            if (inner instanceof BindingReference) sourceChild = inner;
+        }
+        if (sourceChild instanceof BindingReference) {
+            return `let://${sourceChild.name}`;
+        }
+        try {
+            const v = this.from;
+            if (typeof v === "string" && v.length > 0) return v;
+        } catch {
+            // Dynamic source (e.g. f-string with unresolved references).
+        }
+        return null;
+    }
+
+    /**
+     * Expose this `Load` as a row-level provenance source.  Each
+     * snapshot reads the currently-emitted record and produces one
+     * `DataSourceBinding` describing where the row came from.  When the
+     * source is a `LET`-backed dataset and the loaded row carries an
+     * inner `RowProvenance` (registered via `attachVirtualSource` when
+     * the `LET` ran), that inner provenance is threaded through as
+     * `source_provenance` for recursive traceability.
+     */
+    public asProvenanceSource(): ProvenanceSource {
+        const owner = this;
+        return {
+            snapshot(): RowSegment {
+                const label = owner.resolveSourceLabel();
+                if (label === null) {
+                    return { nodes: [], relationships: [] };
+                }
+                const binding: DataSourceBinding = { source: label };
+                const current = owner._value;
+                if (current !== null && typeof current === "object") {
+                    const inner = getVirtualSource(current) as RowProvenance | undefined;
+                    if (inner !== undefined) binding.source_provenance = inner;
+                }
+                return {
+                    nodes: [],
+                    relationships: [],
+                    data_sources: [binding],
+                };
+            },
+        };
     }
 }
 

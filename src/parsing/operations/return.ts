@@ -1,3 +1,9 @@
+import {
+    ProvenanceSource,
+    RowProvenance,
+    RowSegment,
+    mergeProvenanceSegment,
+} from "../../compute/provenance";
 import Limit from "./limit";
 import OrderBy from "./order_by";
 import Projection from "./projection";
@@ -19,6 +25,9 @@ class Return extends Projection {
     protected _results: Record<string, any>[] = [];
     private _limit: Limit | null = null;
     protected _orderBy: OrderBy | null = null;
+    protected _provenanceSources: ProvenanceSource[] | null = null;
+    protected _provenanceSink: RowProvenance[] | null = null;
+    protected _provenanceRows: RowProvenance[] = [];
     public set where(where: Where) {
         this._where = where;
     }
@@ -33,6 +42,28 @@ class Return extends Projection {
     }
     public set orderBy(orderBy: OrderBy) {
         this._orderBy = orderBy;
+    }
+    /**
+     * Direct the runner-owned sink that receives the post-sorted,
+     * post-limited provenance rows.  Once a sink is registered, every
+     * emit captures a snapshot from the registered provenance sources.
+     */
+    public enableProvenance(sink: RowProvenance[]): void {
+        this._provenanceSink = sink;
+    }
+    /**
+     * Append a provenance source.  Sources are snapshotted per emitted
+     * row and their segments are concatenated in registration order.
+     * Multiple MATCHes downstream of the last aggregation register their
+     * `ProvenanceSites` here; upstream aggregations register themselves
+     * as virtual sources that replay the current group's accumulated
+     * provenance.
+     */
+    public addProvenanceSource(source: ProvenanceSource): void {
+        if (this._provenanceSources === null) {
+            this._provenanceSources = [];
+        }
+        this._provenanceSources.push(source);
     }
     public async run(): Promise<void> {
         if (!this.where) {
@@ -63,22 +94,83 @@ class Return extends Projection {
             this._orderBy.captureSortKeys();
         }
         this._results.push(Object.fromEntries(record));
+        if (this._provenanceSink !== null) {
+            const segment = this._snapshotProvenance();
+            // Non-aggregate row: `rows` contains the single input-row segment
+            // so the shape stays uniform with aggregate rows.
+            const row: RowProvenance = {
+                nodes: segment.nodes,
+                relationships: segment.relationships,
+                rows: [segment],
+            };
+            if (segment.data_sources !== undefined) {
+                row.data_sources = segment.data_sources;
+            }
+            this._provenanceRows.push(row);
+        }
         if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();
         }
     }
+    /**
+     * Concatenate all registered provenance sources into a single
+     * {@link RowSegment}.  Called once per emitted row by `run()`, which
+     * wraps the result as a `RowProvenance` with `rows: [segment]`.
+     */
+    protected _snapshotProvenance(): RowSegment {
+        const merged: RowSegment = { nodes: [], relationships: [] };
+        if (this._provenanceSources !== null) {
+            for (const src of this._provenanceSources) {
+                mergeProvenanceSegment(merged, src.snapshot());
+            }
+        }
+        return merged;
+    }
     public async initialize(): Promise<void> {
         this._results = [];
+        this._provenanceRows = [];
     }
     public get results(): Record<string, any>[] {
+        const { results } = this._buildOutput();
+        return results;
+    }
+    public async finish(): Promise<void> {
+        // Materialise final, sort-/limit-aligned provenance into the runner's
+        // sink (when enabled) so `Runner.provenance` reads cheaply.
+        if (this._provenanceSink !== null) {
+            const { provenance } = this._buildOutput();
+            this._provenanceSink.length = 0;
+            for (const p of provenance) this._provenanceSink.push(p);
+        }
+        await super.finish();
+    }
+    /**
+     * Apply ORDER BY permutation and LIMIT slicing to both the result rows
+     * and the parallel provenance array in lockstep.  Provenance is
+     * computed only when a sink is registered.
+     */
+    private _buildOutput(): { results: Record<string, any>[]; provenance: RowProvenance[] } {
         let results = this._results;
+        let provenance = this._provenanceRows;
+        const wantProvenance = this._provenanceSink !== null;
         if (this._orderBy !== null) {
-            results = this._orderBy.sort(results);
+            const indices = this._orderBy.sortIndices(results);
+            results = indices.map((i) => results[i]);
+            if (wantProvenance) {
+                provenance = indices.map((i) => provenance[i]);
+            }
         }
         if (this._orderBy !== null && this._limit !== null) {
             results = results.slice(0, this._limit.limitValue);
+            if (wantProvenance) {
+                provenance = provenance.slice(0, this._limit.limitValue);
+            }
         }
-        return results;
+        return { results, provenance };
+    }
+    /** @internal Direct accessor used by UNION to merge child provenance. */
+    public get provenanceRows(): RowProvenance[] {
+        return this._buildOutput().provenance;
     }
 }
 

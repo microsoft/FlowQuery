@@ -1,5 +1,6 @@
 import type Runner from "../compute/runner";
 import type ASTNode from "../parsing/ast_node";
+import { attachVirtualSource } from "./virtual_sources";
 
 /**
  * One entry in the {@link Bindings} singleton.  Plain bindings store
@@ -166,9 +167,22 @@ class Bindings {
             // Lazy dynamic import to avoid a load-time cycle:
             // bindings -> runner -> parsing -> graph (back to here).
             const RunnerCtor: typeof Runner = (await import("../compute/runner")).default;
-            const runner = new RunnerCtor(null, entry.statement, null);
+            // Capture provenance on refresh so downstream readers can
+            // chase lineage back through this LET binding (symmetric to
+            // initial materialisation in `Let.run`).
+            const runner = new RunnerCtor(null, entry.statement, null, { provenance: true });
             await runner.run();
             entry.value = runner.results;
+            const prov = runner.provenance;
+            if (Array.isArray(entry.value)) {
+                const len = Math.min(prov.length, entry.value.length);
+                for (let i = 0; i < len; i++) {
+                    const row = entry.value[i];
+                    if (row !== null && typeof row === "object") {
+                        attachVirtualSource(row, prov[i]);
+                    }
+                }
+            }
             entry.primed = true;
             entry.cachedAt = Date.now();
         } finally {

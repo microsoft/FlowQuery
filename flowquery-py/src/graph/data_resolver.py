@@ -12,6 +12,7 @@ from .node_reference import NodeReference
 from .physical_relationship import PhysicalRelationship
 from .relationship import Relationship
 from .relationship_data import RelationshipData
+from .virtual_sources import attach_virtual_source, get_virtual_source
 
 
 class DataResolver:
@@ -90,7 +91,11 @@ class DataResolver:
                 for label, physical in db.nodes.items():
                     data = await self._data_cache.get(f"node:{label}", physical, None)
                     for record in data:
-                        all_records.append({**record, "_label": label})
+                        enriched = {**record, "_label": label}
+                        src = get_virtual_source(record)
+                        if src is not None:
+                            attach_virtual_source(enriched, src)
+                        all_records.append(enriched)
                 return NodeData(all_records)
             if len(element.labels) > 1:
                 all_records = []
@@ -99,14 +104,24 @@ class DataResolver:
                     if phys_node:
                         data = await self._data_cache.get(f"node:{lbl}", phys_node, args)
                         for record in data:
-                            all_records.append({**record, "_label": lbl})
+                            enriched = {**record, "_label": lbl}
+                            src = get_virtual_source(record)
+                            if src is not None:
+                                attach_virtual_source(enriched, src)
+                            all_records.append(enriched)
                 return NodeData(all_records)
             node = db.get_node(element)
             if node is None:
                 raise ValueError(f"Physical node not found for label {element.label}")
             data = await self._data_cache.get(f"node:{element.label}", node, args)
             label = element.label or ""
-            records = [{**record, "_label": label} for record in data]
+            records: List[Dict[str, Any]] = []
+            for record in data:
+                enriched = {**record, "_label": label}
+                src = get_virtual_source(record)
+                if src is not None:
+                    attach_virtual_source(enriched, src)
+                records.append(enriched)
             return NodeData(records)
         elif isinstance(element, Relationship):
             args = DataResolver._extract_args(element.properties)
@@ -121,12 +136,16 @@ class DataResolver:
                 )
             all_records = []
             for type_name, phys_rel in entries:
-                src = phys_rel.source.label if phys_rel.source else None
-                tgt = phys_rel.target.label if phys_rel.target else None
-                cache_key = f"rel:{src or ''}:{type_name}:{tgt or ''}"
-                records = await self._data_cache.get(cache_key, phys_rel, args)
-                for record in records:
-                    all_records.append({**record, "_type": type_name})
+                rel_src = phys_rel.source.label if phys_rel.source else None
+                rel_tgt = phys_rel.target.label if phys_rel.target else None
+                cache_key = f"rel:{rel_src or ''}:{type_name}:{rel_tgt or ''}"
+                rel_records = await self._data_cache.get(cache_key, phys_rel, args)
+                for record in rel_records:
+                    enriched = {**record, "_type": type_name}
+                    rec_src = get_virtual_source(record)
+                    if rec_src is not None:
+                        attach_virtual_source(enriched, rec_src)
+                    all_records.append(enriched)
             return RelationshipData(all_records)
         else:
             raise ValueError("Element is neither Node nor Relationship")

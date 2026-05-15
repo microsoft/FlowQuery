@@ -3,6 +3,7 @@
 from typing import Any, List, Optional, cast
 
 from ...graph.bindings import Bindings
+from ...graph.virtual_sources import attach_virtual_source
 from ..ast_node import ASTNode
 from ..expressions.expression import Expression
 from .operation import Operation
@@ -63,10 +64,26 @@ class Let(Operation):
         if self._sub_query is not None:
             first = cast(Operation, self._sub_query.first_child())
             last = cast(Operation, self._sub_query.last_child())
+            # Always capture provenance for sub-query LET RHS: it lets
+            # downstream consumers (e.g. ``LOAD JSON FROM <letName>``)
+            # thread row-level lineage back through this binding.  Cost
+            # is paid once at LET time; downstream readers pay nothing
+            # when they don't ask.
+            from ...compute.provenance import RowProvenance
+            from ...compute.runner import Runner
+
+            sink: List[RowProvenance] = []
+            Runner.wire_provenance(first, sink)
             await first.initialize()
             await first.run()
             await first.finish()
             value = last.results
+            if isinstance(value, list):
+                length = min(len(sink), len(value))
+                for i in range(length):
+                    row = value[i]
+                    if isinstance(row, dict):
+                        attach_virtual_source(row, sink[i])
         elif self._expression is not None:
             value = self._expression.value()
         else:

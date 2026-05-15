@@ -12,11 +12,11 @@ Beyond graphs, FlowQuery provides a full data processing pipeline language with 
 
 The combination of graph querying and pipeline processing makes FlowQuery ideal for the retrieval stage of Retrieval Augmented Generation (RAG). A typical graph RAG flow works as follows:
 
-1. **User query** — The user asks a question in natural language.
-2. **Schema retrieval** — The application retrieves the virtual graph schema via `CALL schema()` and injects it into the system instructions of the query-generation LLM, so it knows which node labels, relationship types, and properties are available.
-3. **Query generation** — The LLM, grounded in the schema, generates a precise OpenCypher query to retrieve the data needed to answer the question.
-4. **Query execution** — The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
-5. **Response formulation** — The LLM formulates a final response informed by the grounding data.
+1. **User query** - The user asks a question in natural language.
+2. **Schema retrieval** - The application retrieves the virtual graph schema via `CALL schema()` and injects it into the system instructions of the query-generation LLM, so it knows which node labels, relationship types, and properties are available.
+3. **Query generation** - The LLM, grounded in the schema, generates a precise OpenCypher query to retrieve the data needed to answer the question.
+4. **Query execution** - The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
+5. **Response formulation** - The LLM formulates a final response informed by the grounding data.
 
 ```
                  ┌───────────────────┐
@@ -37,7 +37,7 @@ The combination of graph querying and pipeline processing makes FlowQuery ideal 
                                                                  └──────────┘
 ```
 
-The schema is retrieved using FlowQuery's built-in `schema()` function, which returns the structure of all registered virtual nodes and relationships — including labels, types, endpoint labels, property names, and sample values. This schema is then included in the LLM's system instructions so it can generate correct queries grounded in the actual graph model:
+The schema is retrieved using FlowQuery's built-in `schema()` function, which returns the structure of all registered virtual nodes and relationships - including labels, types, endpoint labels, property names, and sample values. This schema is then included in the LLM's system instructions so it can generate correct queries grounded in the actual graph model:
 
 ```cypher
 CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
@@ -227,7 +227,7 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 
 #### Multi-Statement Queries
 
-Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
+Multiple statements can be separated by semicolons. Only declaration statements - `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` - may appear before the last statement. The last statement can be any valid query.
 
 ```cypher
 CREATE VIRTUAL (:Person) AS {
@@ -267,7 +267,7 @@ CREATE STATIC VIRTUAL (:Country) AS {
 ```
 
 The sub-query runs once on first access and the result is reused for every
-subsequent query in the same process — across `Runner` instances. STATIC
+subsequent query in the same process - across `Runner` instances. STATIC
 virtual entities are protected: re-running `CREATE STATIC VIRTUAL (:Country)`
 without first dropping the existing entry raises an error. Use
 `DROP VIRTUAL (:Country)` (an alias for `DELETE VIRTUAL`) to remove it.
@@ -343,88 +343,6 @@ DROP BINDING users;
 because the mutation would be invisibly overwritten by the next
 refresh. Use `REFRESH BINDING name` to re-evaluate the source, or
 `DROP BINDING name` and redefine the binding plainly.
-
-#### Statement Info: Labels, Properties, and Source Lineage
-
-`metadata.info` carries a `StatementInfo` describing the _structure_ the
-query touches — independent of execution. It captures:
-
-- The node labels and relationship types referenced.
-- The data sources backing the underlying virtual definitions.
-- The node/relationship properties **consumed** by the query —
-  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
-  `ORDER BY`, or function arguments, plus inline pattern properties
-  like `(u:User {id: 'rick.o'})`.
-- The properties **declared** by each virtual's `RETURN` clause via
-  `info.declared`, so you can validate that a query references only
-  declared properties.
-- Literal values supplied for properties at the call site via
-  `info.nodes[Label].literal_values` — collected from inline pattern
-  properties and from equality / `IN` predicates such as
-  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
-
-This is useful for governance, lineage UIs, query-cost estimation, schema
-validation, or routing decisions before the query runs.
-
-The same `StatementInfoCrawler` can also be used directly on any parsed
-AST without going through a `Runner`:
-
-```javascript
-import { StatementInfoCrawler } from "flowquery";
-
-const crawler = new StatementInfoCrawler();
-const info = crawler.crawl(parsedAst);
-```
-
-For end-to-end lineage from a property to its data source, use the
-per-entity `nodes` and `relationships` maps:
-
-```javascript
-const runner = new FlowQuery(`
-  CREATE VIRTUAL (:City) AS {
-    LOAD JSON FROM "https://example.com/cities" AS c
-    RETURN c.id AS id, c.name AS name, c.country AS country
-  };
-  CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
-    LOAD JSON FROM "https://example.com/flights" AS f
-    RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
-  };
-  MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
-  WHERE b.country IN ['US', 'CA']
-  RETURN a.name AS origin, b.name AS destination, r.airline AS airline
-`);
-const { info } = runner.metadata;
-
-console.log(info.nodes);
-// {
-//   City: {
-//     properties: ["country", "name"],
-//     sources: ["https://example.com/cities"],
-//     literal_values: { country: ["US", "CA"], name: ["NYC"] }
-//   }
-// }
-console.log(info.relationships);
-// {
-//   FLIGHT: {
-//     properties: ["airline"],
-//     sources: ["https://example.com/flights"],
-//     literal_values: {}
-//   }
-// }
-console.log(info.declared.nodes.City);
-// { properties: ["country", "id", "name"], sources: ["https://example.com/cities"] }
-console.log(info.sources);
-// ["https://example.com/cities", "https://example.com/flights"]
-```
-
-`StatementInfo` resolves sources and declared schemas for **any** virtual
-the query touches — both inline `CREATE VIRTUAL` clauses and
-previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
-`node_labels`, `relationship_types`, `sources`, `node_properties`, and
-`relationship_properties` fields stay in sync with the per-entity `nodes` /
-`relationships` maps and are convenient for quick aggregate checks. Only
-purely literal AST subtrees end up in `literal_values` — values that depend
-on parameters, references, f-strings, or subqueries are skipped.
 
 ### WHERE Clause
 
@@ -502,7 +420,7 @@ WITH d WHERE d.id >= threshold OR d.id <= 2
 RETURN d.id AS id, d.name AS name
 ```
 
-`LET` fails if the binding already exists — use `UPDATE` to overwrite.
+`LET` fails if the binding already exists - use `UPDATE` to overwrite.
 
 #### UPDATE
 
@@ -515,7 +433,7 @@ RETURN counter AS counter
 // [{ counter: 1 }]
 ```
 
-`UPDATE` fails if the binding doesn't exist — use `LET` first.
+`UPDATE` fails if the binding doesn't exist - use `LET` first.
 
 #### UPDATE ... AS alias DELETE WHERE ...
 
@@ -589,7 +507,7 @@ Notes:
 - `ON id` is shorthand for the equality predicate `t.id = s.id`; `ON (a, b)` requires equality on every listed key. Anything else is treated as a Boolean predicate evaluated per `(target, source)` pair.
 - `WHEN MATCHED THEN UPDATE SET .field` overwrites only the listed fields, preserving the rest from the existing row. `SET .field = expr` evaluates `expr` per matched pair, with target and source aliases in scope.
 - `WHEN NOT MATCHED THEN INSERT` (no row expression) appends the source row as-is. `INSERT { … }` appends an explicit row expression instead.
-- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent — omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
+- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent - omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
 
 ### Expressions
 
@@ -704,16 +622,16 @@ RETURN sum(n IN [1+2+3, 2, 3] | n^2) AS sum          // 49
 Test list elements against a condition. Follow standard Cypher syntax.
 
 ```cypher
-// any — true if at least one element matches
+// any - true if at least one element matches
 RETURN any(n IN [1, 2, 3] WHERE n > 2)               // true
 
-// all — true if every element matches
+// all - true if every element matches
 RETURN all(n IN [2, 4, 6] WHERE n > 0)               // true
 
-// none — true if no element matches
+// none - true if no element matches
 RETURN none(n IN [1, 2, 3] WHERE n > 5)              // true
 
-// single — true if exactly one element matches
+// single - true if exactly one element matches
 RETURN single(n IN [1, 2, 3] WHERE n > 2)            // true
 
 // In a WHERE clause
@@ -898,7 +816,7 @@ MATCH (a:Person) WHERE NOT (a)-[:KNOWS]->(:Person) RETURN a.name
 **Subquery Expressions:** `EXISTS`, `COUNT`, and `COLLECT` evaluate a full subquery as an expression. The subquery can reference outer-scope variables and supports the complete FlowQuery pipeline (MATCH, WITH, WHERE, UNWIND, LOAD, etc.).
 
 ```cypher
-// EXISTS — returns true if the subquery produces any rows
+// EXISTS - returns true if the subquery produces any rows
 MATCH (p:Person)
 WHERE EXISTS {
     MATCH (p)-[:KNOWS]->(friend:Person)
@@ -906,12 +824,12 @@ WHERE EXISTS {
 }
 RETURN p.name
 
-// NOT EXISTS — negate with NOT
+// NOT EXISTS - negate with NOT
 MATCH (p:Person)
 WHERE NOT EXISTS { MATCH (p)-[:KNOWS]->(:Person) }
 RETURN p.name
 
-// COUNT — returns the number of rows the subquery produces
+// COUNT - returns the number of rows the subquery produces
 MATCH (p:Person)
 WHERE COUNT { MATCH (p)-[:KNOWS]->(:Person) } > 2
 RETURN p.name
@@ -920,7 +838,7 @@ RETURN p.name
 MATCH (p:Person)
 RETURN p.name, COUNT { MATCH (p)-[:KNOWS]->(:Person) } AS friendCount
 
-// COLLECT — returns a list of single-column values from the subquery
+// COLLECT - returns a list of single-column values from the subquery
 MATCH (p:Person)
 RETURN COLLECT {
     MATCH (p)-[:KNOWS]->(friend:Person)
@@ -1296,7 +1214,7 @@ RETURN f.name AS name, f.description AS description, f.category AS category
 
 ### Virtual Org Chart
 
-This single multi-statement query creates a virtual graph for a fictitious company — complete with employees, skills, phone numbers, and a management chain — then queries it to produce an org chart. [Try live!](https://microsoft.github.io/FlowQuery/?rZXPbtNAEMbFhUMOReXAeW4OwkH521ZBQgolrVQlSogDQlRVtdjTeKm9a603Bavqw_AAPEVfDO16s_EmEVElfPHuzGf7N9-M7UN4BfX-MM0SXiC-hkEA9zUAgJdwqc_quKdRH1o-MJJiH7yACAKnMTLP1-kf_PucykSlTocTE6weEWZEyBSZ7IM3_IXhUtI71MIs5kxd-KbV6PV6jWar2fR8yG9pkuR9uPQCKYjEReH54I2QRCjymGZqd0YZYSF6Vw--C9q2oGMiwmUOM3qHgnh-FfTLFPgNDNmCMkRB2ULTuKBOchO03Ww5oAMRxlRiKJdCVeadJnwZqcUYmeT6JlukHUs6FbQgMCUSEw2yRToVPFqG0prrkLrJTdLOBumMkyglWVbW5Q0YSQpJw1xtPn_dpuxayguSYg4fBOe3Sl2lDJBRLqyhBuVJfrYdynmRYRAKmqmyvGkhY67mzTsXJIs_jbYxexZzRBl8i4np6f_G7LhmLnMNGBS5xFR7-BHvJlm-DXhkAQepeoMueMxyXVQF0LQSxoSRxW7Afd12fQxCsUw1FpEEdLNzqjkDSW4x5kmEAsaLVG4TH1viOU8ff-dwTkT4-Ids9p7fyJ9EoGvrk0ztuqYi0fVtDMEcc7nzPTqxnGdE0pTAIGkEpMDI9XYX55Moew7leibHI2vwlGaYUIaq_xrySn1SBYZcRHp_YDZvaaQyNPJXAVWCCqmzDa7wVWK1XlcPsNKt61DK9c7eSFejcnphw2U5Kl6uag_vaofuP6Fx2Z8Np5PZPLieT64a-_8WCd7Ia_MlFnQRl5tWtWtW0tkv6VYl7Z2S3n7JUVXS2Sk5rkq6OyUnruTfHTZXqbRZWttXN9GXmrWy_gXUce1v7RnUt_x_X08XoqI50A_FcnzWxyAANBrfKOwsWYVcjxNWR8ikK2NkNOUUVR9SjpNJm2mqpMtImU8XwqXUvmVcyHzOa88dBN9U9Bc)
+This single multi-statement query creates a virtual graph for a fictitious company - complete with employees, skills, phone numbers, and a management chain - then queries it to produce an org chart. [Try live!](https://microsoft.github.io/FlowQuery/?rZXPbtNAEMbFhUMOReXAeW4OwkH521ZBQgolrVQlSogDQlRVtdjTeKm9a603Bavqw_AAPEVfDO16s_EmEVElfPHuzGf7N9-M7UN4BfX-MM0SXiC-hkEA9zUAgJdwqc_quKdRH1o-MJJiH7yACAKnMTLP1-kf_PucykSlTocTE6weEWZEyBSZ7IM3_IXhUtI71MIs5kxd-KbV6PV6jWar2fR8yG9pkuR9uPQCKYjEReH54I2QRCjymGZqd0YZYSF6Vw--C9q2oGMiwmUOM3qHgnh-FfTLFPgNDNmCMkRB2ULTuKBOchO03Ww5oAMRxlRiKJdCVeadJnwZqcUYmeT6JlukHUs6FbQgMCUSEw2yRToVPFqG0prrkLrJTdLOBumMkyglWVbW5Q0YSQpJw1xtPn_dpuxayguSYg4fBOe3Sl2lDJBRLqyhBuVJfrYdynmRYRAKmqmyvGkhY67mzTsXJIs_jbYxexZzRBl8i4np6f_G7LhmLnMNGBS5xFR7-BHvJlm-DXhkAQepeoMueMxyXVQF0LQSxoSRxW7Afd12fQxCsUw1FpEEdLNzqjkDSW4x5kmEAsaLVG4TH1viOU8ff-dwTkT4-Ids9p7fyJ9EoGvrk0ztuqYi0fVtDMEcc7nzPTqxnGdE0pTAIGkEpMDI9XYX55Moew7leibHI2vwlGaYUIaq_xrySn1SBYZcRHp_YDZvaaQyNPJXAVWCCqmzDa7wVWK1XlcPsNKt61DK9c7eSFejcnphw2U5Kl6uag_vaofuP6Fx2Z8Np5PZPLieT64a-_8WCd7Ia_MlFnQRl5tWtWtW0tkv6VYl7Z2S3n7JUVXS2Sk5rkq6OyUnruTfHTZXqbRZWttXN9GXmrWy_gXUce1v7RnUt_x_X08XoqI50A_FcnzWxyAANBrfKOwsWYVcjxNWR8ikK2NkNOUUVR9SjpNJm2mqpMtImU8XwqXUvmVcyHzOa88dBN9U9Bc)
 
 ```cypher
 CREATE VIRTUAL (:Employee) AS {
@@ -1350,7 +1268,7 @@ Output:
 | Amara Johnson   | Product Manager   | Product     | +1-555-0302 | [Scrum, Data Analysis, Stakeholder Mgmt] | Priya Patel   |
 | Priya Patel     | VP of Product     | Product     | +1-555-0301 | [Roadmapping, Analytics, UX]             | Sara Chen     |
 
-You can further explore the graph — for example, find the full management chain from any employee up to the CEO:
+You can further explore the graph - for example, find the full management chain from any employee up to the CEO:
 
 ```cypher
 MATCH (e:Employee)-[:REPORTS_TO*1..]->(mgr:Employee)
@@ -1408,6 +1326,441 @@ RETURN a.name AS country, count(b) AS neighbor_count
 ORDER BY neighbor_count DESC
 LIMIT 10
 ```
+
+## Lineage and Provenance
+
+FlowQuery exposes two complementary forms of lineage:
+
+- **Structural lineage** (`metadata.info`) - what labels, types,
+  properties, and sources the parsed query touches. Available without
+  running the query and with zero runtime overhead.
+- **Row-level provenance** (`runner.provenance`) - opt-in via
+  `{ provenance: true }`; for every emitted result row, the concrete
+  node ids and relationship hops bound to it, their matched property
+  values, and (for virtual-backed records) the inner sub-query lineage
+  that produced them.
+
+Combined, they let you trace every cell of a result back to the source
+record, the source virtual, and ultimately the URL or call-site that
+backs it.
+
+### Statement Info: Labels, Properties, and Source Lineage
+
+`metadata.info` carries a `StatementInfo` describing the _structure_ the
+query touches - independent of execution. It captures:
+
+- The node labels and relationship types referenced.
+- The data sources backing the underlying virtual definitions.
+- The node/relationship properties **consumed** by the query -
+  `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
+  `ORDER BY`, or function arguments, plus inline pattern properties
+  like `(u:User {id: 'rick.o'})`.
+- The properties **declared** by each virtual's `RETURN` clause via
+  `info.declared`, so you can validate that a query references only
+  declared properties.
+- Literal values supplied for properties at the call site via
+  `info.nodes[Label].literal_values` - collected from inline pattern
+  properties and from equality / `IN` predicates such as
+  `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
+
+This is useful for governance, lineage UIs, query-cost estimation, schema
+validation, or routing decisions before the query runs.
+
+The same `StatementInfoCrawler` can also be used directly on any parsed
+AST without going through a `Runner`:
+
+```javascript
+import { StatementInfoCrawler } from "flowquery";
+
+const crawler = new StatementInfoCrawler();
+const info = crawler.crawl(parsedAst);
+```
+
+For end-to-end lineage from a property to its data source, use the
+per-entity `nodes` and `relationships` maps:
+
+```javascript
+const runner = new FlowQuery(`
+  CREATE VIRTUAL (:City) AS {
+    LOAD JSON FROM "https://example.com/cities" AS c
+    RETURN c.id AS id, c.name AS name, c.country AS country
+  };
+  CREATE VIRTUAL (:City)-[:FLIGHT]-(:City) AS {
+    LOAD JSON FROM "https://example.com/flights" AS f
+    RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+  };
+  MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+  WHERE b.country IN ['US', 'CA']
+  RETURN a.name AS origin, b.name AS destination, r.airline AS airline
+`);
+const { info } = runner.metadata;
+
+console.log(info.nodes);
+// {
+//   City: {
+//     properties: ["country", "name"],
+//     sources: ["https://example.com/cities"],
+//     literal_values: { country: ["US", "CA"], name: ["NYC"] }
+//   }
+// }
+console.log(info.relationships);
+// {
+//   FLIGHT: {
+//     properties: ["airline"],
+//     sources: ["https://example.com/flights"],
+//     literal_values: {}
+//   }
+// }
+console.log(info.declared.nodes.City);
+// { properties: ["country", "id", "name"], sources: ["https://example.com/cities"] }
+console.log(info.sources);
+// ["https://example.com/cities", "https://example.com/flights"]
+```
+
+`StatementInfo` resolves sources and declared schemas for **any** virtual
+the query touches - both inline `CREATE VIRTUAL` clauses and
+previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
+`node_labels`, `relationship_types`, `sources`, `node_properties`, and
+`relationship_properties` fields stay in sync with the per-entity `nodes` /
+`relationships` maps and are convenient for quick aggregate checks. Only
+purely literal AST subtrees end up in `literal_values` - values that depend
+on parameters, references, f-strings, or subqueries are skipped.
+
+### Row-level Provenance: Node and Relationship IDs Behind Each Result
+
+`StatementInfo` describes the _structural_ lineage of a query - which
+labels, types, and sources back it. To get the _row-level_ lineage -
+which concrete node ids and relationship `(left_id, right_id, type)`
+hops actually flowed into each result row - pass `{ provenance: true }`
+when constructing the runner and read `runner.provenance`:
+
+```javascript
+const fq = new FlowQuery(
+    `
+    MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+    RETURN a.name AS origin, b.name AS destination
+    `,
+    null,
+    null,
+    { provenance: true }
+);
+await fq.run();
+
+fq.results;
+// [{ origin: 'NYC', destination: 'LAX' }, { origin: 'NYC', destination: 'YYZ' }]
+
+fq.provenance;
+// [
+//   {
+//     nodes: [
+//       { alias: 'a', label: 'City', id: 'nyc' },
+//       { alias: 'b', label: 'City', id: 'lax' }
+//     ],
+//     relationships: [
+//       { alias: 'r', type: 'FLIGHT',
+//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }],
+//         path: ['nyc', 'lax'] }
+//     ],
+//     rows: [/* per-input-row segments, see below */]
+//   },
+//   { nodes: [...], relationships: [{ alias: 'r', type: 'FLIGHT',
+//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }],
+//     path: ['nyc', 'yyz'] }], rows: [...] }
+// ]
+```
+
+Semantics:
+
+- `runner.provenance` is aligned **by index** with `runner.results`.
+- Each `NodeBinding.id` preserves the original scalar type of the
+  underlying record (a numeric id stays a number).
+- Anonymous nodes / relationships from the pattern are included with
+  `alias: null`.
+- Variable-length matches (`[:T*m..n]`) populate `hops` with every
+  traversed edge in path order.
+- Every `RelationshipBinding` also carries a `path` field listing every
+  visited node id in order: `[hops[0].left_id, hops[0].right_id,
+hops[1].right_id, …]`. For single-hop matches `path` has exactly two
+  entries; for variable-length matches `path.length === hops.length + 1`.
+- `OPTIONAL MATCH` misses surface as `id: null` for the unmatched node
+  and an empty `hops: []` for the unmatched relationship.
+- `ORDER BY` and `LIMIT` permute and truncate `provenance` in lockstep
+  with `results`.
+- Aggregate `RETURN` (e.g. `count`, `collect`, `sum`) unions all
+  contributing bindings into the output group's provenance, deduplicated
+  per `(alias, id)` for nodes and per `(alias, hops)` for relationships.
+- `UNION ALL` concatenates branch provenance; `UNION` keeps the first
+  branch's lineage for deduplicated rows.
+- Aggregating `WITH` clauses carry lineage forward. Inside the group, the
+  contributing bindings (the upstream `MATCH` nodes and relationships)
+  are deduplicated and frozen; any subsequent `MATCH` adds its own
+  live bindings on top, so the final `RETURN` row's provenance shows
+  both the pre-aggregation sources and the post-aggregation bindings.
+  Chained aggregating `WITH` clauses compose transitively - the original
+  ids and hops survive every aggregation hop.
+
+When the option is omitted or set to `false`, the runner has zero
+provenance overhead and `runner.provenance` returns an empty array.
+
+#### Per-Input-Row Segments: Aligning `collect()` with its Sources
+
+Each `RowProvenance` also carries a `rows` array: one **segment** per
+input row that contributed to the result. A segment is just the
+`{ nodes, relationships }` slice for that single contributing row.
+
+For non-aggregate rows `rows` always has length 1 and mirrors the
+top-level `nodes`/`relationships`. For aggregate rows the array
+positionally aligns with array-valued aggregates such as `collect`:
+
+```cypher
+MATCH (a:City)-[:FLIGHT]->(b:City)
+RETURN a.country AS country, collect(b.name) AS destinations
+```
+
+```javascript
+fq.results[0];
+// { country: 'US', destinations: ['LAX', 'YYZ'] }
+fq.provenance[0].rows.length; // 2
+fq.provenance[0].rows[0].nodes; // contributed LAX: includes b = lax
+fq.provenance[0].rows[1].nodes; // contributed YYZ: includes b = yyz
+```
+
+This lets you map each element of a `collect`/`sum`/`avg` result back
+to the exact node / relationship ids that produced it.
+
+#### Property-Level Lineage
+
+Each `NodeBinding` and `RelationshipHop` produced under `{ provenance:
+true }` also carries the matched **property values** alongside the ids:
+
+```javascript
+const fq = new FlowQuery(query, null, null, { provenance: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'a', label: 'City', id: 'nyc',
+//   properties: { name: 'New York', country: 'US' }
+// }
+fq.provenance[0].relationships[0].hops[0];
+// {
+//   left_id: 'nyc', right_id: 'lax', type: 'FLIGHT',
+//   properties: { airline: 'AA' }
+// }
+```
+
+- `NodeBinding.properties` is a shallow copy of the matched record with
+  `id` and `_label` stripped. `RelationshipHop.properties` is a shallow
+  copy of the matched relationship's user-visible properties.
+
+#### Threading Lineage Through Virtual Sub-Queries
+
+A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
+produces the synthesised records exposed under the `:X` label. By
+default, a downstream `MATCH (x:X)` only sees the synthesised row's
+`id` - the upstream query that produced it is opaque.
+
+When `{ provenance: true }` is set, the inner runner's `RowProvenance`
+is threaded onto every binding whose record came from a virtual. Each
+`NodeBinding` and each `RelationshipHop` gains an optional `source:
+RowProvenance` field carrying the inner row's full lineage -
+recursively, when a virtual matches another virtual:
+
+```typescript
+import { Runner } from "flowquery";
+
+// Virtual graph: derived city = US-only subset of SrcCity.
+await new Runner(`
+    CREATE VIRTUAL (:SrcCity) AS {
+        UNWIND [
+            { id: 'nyc', country: 'US' },
+            { id: 'lhr', country: 'UK' }
+        ] AS c
+        RETURN c.id AS id, c.country AS country
+    }
+`).run();
+await new Runner(`
+    CREATE VIRTUAL (:DerivedCity) AS {
+        MATCH (s:SrcCity)
+        WHERE s.country = 'US'
+        RETURN s.id AS id
+    }
+`).run();
+
+const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { provenance: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'd', label: 'DerivedCity', id: 'nyc',
+//   source: {
+//     nodes: [{ alias: 's', label: 'SrcCity', id: 'nyc' }],
+//     relationships: []
+//   }
+// }
+```
+
+Semantics:
+
+- The `source` field is **omitted** when the binding's record did not
+  come from a virtual sub-query (e.g. records from `UNWIND … RETURN`
+  inside the virtual produce a `source` with empty `nodes` and
+  `relationships`, signalling "lineage was threaded but no graph slots
+  were bound at this level").
+- Sub-query lineage is **recursive**: a virtual that matches another
+  virtual carries nested `source` chains all the way down.
+- Provenance mode bypasses the static-virtual cache because each
+  invocation must produce fresh records to back the lineage weak-map.
+  Static caching continues to apply when `provenance` is off.
+
+#### Data Sources and LET Chaining
+
+`LOAD` operations contribute row-level `data_sources` entries on each
+emitted `RowSegment`: one `{ source, source_provenance? }` per loaded
+record. `source` is the URL, file URI, async-function name, or
+`let://<name>` reference; `source_provenance` is the inner
+`RowProvenance` of the source row when the `LOAD` was reading from a
+`LET`-bound dataset whose right-hand side itself produced lineage.
+
+The same chain surfaces structurally. `info.sources` and the per-label
+`info.nodes[Label].sources` arrays follow `LOAD FROM <letName>`
+references and emit a `let://<name>` entry, plus the underlying
+sources the `LET` sub-query touched (when both definitions are
+visible to the crawler in the same query).
+
+```cypher
+LET cities = { LOAD JSON FROM 'file:///data/cities.json' AS c RETURN c.id AS id, c.name AS name };
+CREATE VIRTUAL (:City) AS { LOAD JSON FROM cities AS c RETURN c.id AS id, c.name AS name };
+MATCH (c:City) RETURN c.name AS name
+```
+
+```javascript
+runner.metadata.info.nodes.City.sources;
+// ['file:///data/cities.json', 'let://cities']
+
+runner.provenance[0].nodes[0].source.data_sources[0];
+// {
+//   source: 'let://cities',
+//   source_provenance: {
+//     nodes: [], relationships: [],
+//     data_sources: [{ source: 'file:///data/cities.json' }]
+//   }
+// }
+```
+
+#### Column-Level Lineage: Tracing Each Result Cell to Its Source
+
+`runner.info.returns` (added to `StatementInfo`) maps every output
+column to the `alias.property` accesses that compose it. Combined with
+row provenance it gives you per-cell traceability - value → source
+binding → node id → source URL - without any runtime AST inspection.
+
+For a query
+
+```cypher
+MATCH (c:City)-[f:FLIGHT]->(d:City)
+WHERE c.country = 'US'
+RETURN c.name AS origin, d.name AS destination, f.airline AS airline
+```
+
+`runner.info.returns` is:
+
+```javascript
+{
+  origin: {
+    references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  destination: {
+    references: [{ alias: 'd', kind: 'node', labels: ['City'], property: 'name' }],
+    kind: 'property'
+  },
+  airline: {
+    references: [{
+      alias: 'f', kind: 'relationship',
+      labels: ['FLIGHT'], property: 'airline'
+    }],
+    kind: 'property'
+  }
+}
+```
+
+`kind` summarises how the column was built:
+
+| `kind`         | Meaning                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `'literal'`    | Pure literal expression, no bindings (e.g. `42 AS answer`).               |
+| `'property'`   | Direct `alias.property` projection (or pass-through).                     |
+| `'expression'` | Computed from one or more `alias.property` accesses.                      |
+| `'aggregate'`  | Aggregate function (`count`, `sum`, `collect`, …); see `aggregate` field. |
+
+Notes:
+
+- The map is keyed by the column's output alias (the part after `AS`),
+  falling back to `expr0`, `expr1`, … for unnamed columns.
+- `count(c)` and similar aggregates over a bare binding produce
+  `kind: 'aggregate'`, `aggregate: 'count'`, and an empty `references`
+  list (no specific property is read). Use `count(c.id)` to surface a
+  property reference.
+- Multi-label intersection matches (`MATCH (n:A:B)`) populate every
+  label in `references[i].labels`.
+
+#### Combining Lineage and Provenance: `traceRow()` and `lineage()`
+
+`info.returns` (structural) and `runner.provenance` (runtime) are kept
+as separate streams so each is useful on its own. When you want both
+joined per cell, the `Runner` exposes two convenience methods.
+
+`runner.traceRow(rowIndex)` returns one `CellTrace` per output column
+for a single row, pairing the column's structural lineage with the
+node / relationship bindings whose alias matches it. The matched
+property value is extracted for you (including the built-ins `id`,
+`left_id`, `right_id`, `type`):
+
+```javascript
+const runner = new FlowQuery(
+    `
+    MATCH (c:City)-[f:FLIGHT]->(d:City)
+    WHERE c.country = 'US'
+    RETURN c.name AS origin, d.name AS destination, f.airline AS airline
+`,
+    null,
+    null,
+    { provenance: true }
+);
+await runner.run();
+
+const trace = runner.traceRow(0);
+// trace.origin = {
+//   column: 'origin',
+//   value: 'New York',
+//   lineage: { references: [{ alias: 'c', kind: 'node', labels: ['City'], property: 'name' }], kind: 'property' },
+//   bindings: [{
+//     reference: { alias: 'c', kind: 'node', labels: ['City'], property: 'name' },
+//     value: 'New York',
+//     node: { alias: 'c', label: 'City', id: 'nyc', properties: { name: 'New York', country: 'US' }, source: {...} }
+//   }]
+// }
+// trace.airline.bindings[0].relationship.hops[0].properties.airline === 'AA'
+```
+
+`runner.lineage()` is the one-shot equivalent over the entire result
+set:
+
+```javascript
+const report = runner.lineage();
+// report.columns: same shape as info.returns (structural per-column).
+// report.rows[i]: same shape as traceRow(i) (per-cell trace).
+```
+
+`bindings` is empty for literal columns, when the runner was
+constructed without `{ provenance: true }`, or when a row's bindings
+don't intersect the column's references. Aggregate columns like
+`collect(c.id)` surface one binding per contributing input row, so
+`trace.ids.bindings.map(b => b.value)` aligns with the collected
+array. `info`, `provenance`, and `metadata` remain available unchanged
+
+- `traceRow` / `lineage` are purely additive helpers.
 
 ## Contributing
 

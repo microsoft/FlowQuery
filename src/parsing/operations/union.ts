@@ -1,3 +1,4 @@
+import { RowProvenance } from "../../compute/provenance";
 import Operation from "./operation";
 
 /**
@@ -18,6 +19,9 @@ class Union extends Operation {
     protected _left: Operation | null = null;
     protected _right: Operation | null = null;
     protected _results: Record<string, any>[] = [];
+    protected _leftProvenance: RowProvenance[] | null = null;
+    protected _rightProvenance: RowProvenance[] | null = null;
+    protected _provenanceSink: RowProvenance[] | null = null;
 
     public set left(operation: Operation) {
         this._left = operation;
@@ -36,6 +40,21 @@ class Union extends Operation {
             throw new Error("Right operation is not set");
         }
         return this._right;
+    }
+
+    /**
+     * Wire provenance through this UNION.  The Runner attaches each branch
+     * to its own sink array; `sink` is the merged output array aligned with
+     * `_results`.
+     */
+    public enableProvenance(
+        leftSink: RowProvenance[],
+        rightSink: RowProvenance[],
+        sink: RowProvenance[]
+    ): void {
+        this._leftProvenance = leftSink;
+        this._rightProvenance = rightSink;
+        this._provenanceSink = sink;
     }
 
     private lastInChain(operation: Operation): Operation {
@@ -77,29 +96,52 @@ class Union extends Operation {
             }
         }
 
-        // Combine results
-        this._results = this.combine(leftResults, rightResults);
+        // Combine results (and provenance when enabled)
+        const { rows, provenance } = this.combineWithProvenance(leftResults, rightResults);
+        this._results = rows;
+        if (this._provenanceSink !== null) {
+            this._provenanceSink.length = 0;
+            for (const p of provenance) this._provenanceSink.push(p);
+        }
     }
 
     /**
-     * Combines results from left and right pipelines.
-     * UNION removes duplicates; subclass UnionAll overrides to keep all rows.
+     * Combines results from left and right pipelines and returns both the
+     * merged rows and the merged provenance array (when enabled).  UNION
+     * drops duplicates (first occurrence wins); subclass UnionAll overrides
+     * to keep all rows.
      */
+    protected combineWithProvenance(
+        left: Record<string, any>[],
+        right: Record<string, any>[]
+    ): { rows: Record<string, any>[]; provenance: RowProvenance[] } {
+        const leftProv = this._leftProvenance;
+        const rightProv = this._rightProvenance;
+        const wantProv = this._provenanceSink !== null;
+        const rows: Record<string, any>[] = [...left];
+        const provenance: RowProvenance[] = wantProv && leftProv !== null ? [...leftProv] : [];
+        const serializedSeen = new Set<string>();
+        for (const row of left) serializedSeen.add(JSON.stringify(row));
+        for (let i = 0; i < right.length; i++) {
+            const row = right[i];
+            const serialized = JSON.stringify(row);
+            if (!serializedSeen.has(serialized)) {
+                rows.push(row);
+                if (wantProv && rightProv !== null) {
+                    provenance.push(rightProv[i]);
+                }
+                serializedSeen.add(serialized);
+            }
+        }
+        return { rows, provenance };
+    }
+
+    /** Kept for backwards compatibility with subclasses that override only combine(). */
     protected combine(
         left: Record<string, any>[],
         right: Record<string, any>[]
     ): Record<string, any>[] {
-        const combined = [...left];
-        for (const row of right) {
-            const serialized = JSON.stringify(row);
-            const isDuplicate = combined.some(
-                (existing) => JSON.stringify(existing) === serialized
-            );
-            if (!isDuplicate) {
-                combined.push(row);
-            }
-        }
-        return combined;
+        return this.combineWithProvenance(left, right).rows;
     }
 
     public async finish(): Promise<void> {

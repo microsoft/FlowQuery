@@ -169,11 +169,22 @@ class Bindings:
         Bindings._materializing.add(name)
         try:
             # Lazy import to avoid a load-time cycle.
-            from ..compute.runner import Runner
+            from ..compute.provenance import RowProvenance
+            from ..compute.runner import Runner, RunnerOptions
+            from .virtual_sources import attach_virtual_source
 
-            runner = Runner(None, entry.statement, None)
+            runner = Runner(
+                None, entry.statement, None, options=RunnerOptions(provenance=True)
+            )
             await runner.run()
             entry.value = runner.results
+            prov: Optional[list[RowProvenance]] = runner.provenance
+            if prov is not None and isinstance(entry.value, list):
+                length = min(len(prov), len(entry.value))
+                for i in range(length):
+                    row = entry.value[i]
+                    if isinstance(row, dict):
+                        attach_virtual_source(row, prov[i])
             entry.primed = True
             entry.cached_at = _now_ms()
         finally:

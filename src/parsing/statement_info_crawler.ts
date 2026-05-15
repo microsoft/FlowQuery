@@ -4,6 +4,7 @@ import NodeReference from "../graph/node_reference";
 import Relationship from "../graph/relationship";
 import ASTNode from "./ast_node";
 import Lookup from "./data_structures/lookup";
+import BindingReference from "./expressions/binding_reference";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
@@ -11,12 +12,14 @@ import { Equals, In } from "./expressions/operator";
 import ParameterReference from "./expressions/parameter_reference";
 import Reference from "./expressions/reference";
 import SubqueryExpression from "./expressions/subquery_expression";
+import AggregateFunction from "./functions/aggregate_function";
 import AggregatedReturn from "./operations/aggregated_return";
 import AggregatedWith from "./operations/aggregated_with";
 import CreateNode from "./operations/create_node";
 import CreateRelationship from "./operations/create_relationship";
 import DeleteNode from "./operations/delete_node";
 import DeleteRelationship from "./operations/delete_relationship";
+import Let from "./operations/let";
 import Load from "./operations/load";
 import Match from "./operations/match";
 import Operation from "./operations/operation";
@@ -69,6 +72,54 @@ export interface RelationshipInfo {
 export interface DeclaredEntityInfo {
     properties: string[];
     sources: string[];
+}
+
+/**
+ * A single `alias.property` access that contributes to an output column.
+ */
+export interface ColumnReference {
+    /** The binding name as written in the query (e.g. `'c'` in `c.name`). */
+    alias: string;
+    /** Whether the binding is a node or a relationship. */
+    kind: "node" | "relationship";
+    /**
+     * Node labels (when `kind === 'node'`) or relationship types (when
+     * `kind === 'relationship'`).  Multi-label intersection matches
+     * surface every label.
+     */
+    labels: string[];
+    /** The property name read off the binding (e.g. `'name'` in `c.name`). */
+    property: string;
+}
+
+/**
+ * Per-output-column lineage.  Bridges the AST-level access list with the
+ * runtime row provenance: for each column the runner emits, this tells
+ * you which `alias.property` reads went into it and how they were
+ * combined.
+ */
+export interface ColumnLineage {
+    /**
+     * Every distinct `alias.property` access reachable from the column's
+     * expression tree.  Deduplicated by `(alias, property)`.
+     *
+     * Empty when the column is a pure literal or an aggregate that takes
+     * no `alias.property` arguments (e.g. `count(c) AS n` references the
+     * binding `c` but no specific property).
+     */
+    references: ColumnReference[];
+    /**
+     * - `'literal'`    — the column is a literal expression with no bindings.
+     * - `'property'`   — a single direct `alias.property` access (or a
+     *                    pass-through projection of one).
+     * - `'expression'` — a computed expression over one or more
+     *                    `alias.property` accesses.
+     * - `'aggregate'`  — contains an aggregate function (`count`, `sum`,
+     *                    `collect`, …).
+     */
+    kind: "literal" | "property" | "expression" | "aggregate";
+    /** When `kind === 'aggregate'`: the function name (e.g. `'count'`). */
+    aggregate?: string;
 }
 
 /**
@@ -134,6 +185,18 @@ export interface StatementInfo {
         nodes: Record<string, DeclaredEntityInfo>;
         relationships: Record<string, DeclaredEntityInfo>;
     };
+    /**
+     * Per-output-column lineage for the final `RETURN` clause.  Maps each
+     * result column name to the `alias.property` accesses that compose
+     * it.  Empty (`{}`) when the statement has no `RETURN` (e.g. pure
+     * CREATE / DELETE statements).
+     *
+     * Combine with {@link Runner.provenance} to trace a result-row cell
+     * back to its source node / relationship id, the matched property
+     * value, and the originating virtual sub-query (all available when
+     * the runner is constructed with `{ provenance: true }`).
+     */
+    returns: Record<string, ColumnLineage>;
 }
 
 /**
@@ -168,12 +231,26 @@ class StatementInfoCrawler {
     private _ownCreatedNodeLabels: Set<string> = new Set();
     private _ownCreatedRelTypes: Set<string> = new Set();
     /**
+     * Per-output-column lineage of the most recently visited `RETURN`
+     * clause.  Overwritten each time a `Return` op is visited so the
+     * last RETURN wins (matching the user-visible result shape).
+     */
+    private _returns: Record<string, ColumnLineage> = {};
+    /**
      * For each inline CREATE VIRTUAL clause, the (label or type) it
      * declares and its inner statement AST. The label key receives the
      * sources collected from the statement during {@link resolveRegisteredDefinitions}.
      */
     private _ownNodeCreates: Array<{ label: string; statement: ASTNode }> = [];
     private _ownRelCreates: Array<{ type: string; statement: ASTNode }> = [];
+    /**
+     * Map of `LET name = { ... }` binding name to the data sources its
+     * sub-query right-hand side touches.  Used to follow a downstream
+     * `LOAD JSON FROM name` reference back to the original URL / file /
+     * async-function name when both the LET and the consuming statement
+     * are crawled together.
+     */
+    private _letSources: Map<string, Set<string>> = new Map();
 
     /**
      * Walks one or more statement ASTs and returns the merged structural info.
@@ -183,8 +260,14 @@ class StatementInfoCrawler {
      */
     public crawl(statements: ASTNode | Iterable<ASTNode>): StatementInfo {
         this.reset();
-        const roots = this.toIterable(statements);
-        for (const root of roots) {
+        const rootList = Array.from(this.toIterable(statements));
+        // Pre-pass: collect the sources each LET-bound sub-query
+        // touches so we can follow downstream `LOAD FROM <letName>`
+        // references back to the underlying URL / file / function.
+        for (const root of rootList) {
+            this.collectLetSources(root);
+        }
+        for (const root of rootList) {
             this.crawlStatement(root);
         }
         this.resolveRegisteredDefinitions();
@@ -215,6 +298,37 @@ class StatementInfoCrawler {
         this._ownCreatedRelTypes = new Set();
         this._ownNodeCreates = [];
         this._ownRelCreates = [];
+        this._returns = {};
+        this._letSources = new Map();
+    }
+
+    /**
+     * Pre-pass over a statement to record, for each `LET name = { ... }`
+     * with a sub-query right-hand side, the data sources its sub-query
+     * touches.  Stored in `_letSources` so a downstream
+     * `LOAD JSON FROM name` consumer can union those sources into the
+     * consuming statement's per-label / per-type source set.
+     */
+    private collectLetSources(root: ASTNode): void {
+        let op: Operation | null = null;
+        try {
+            op = root.firstChild() as Operation;
+        } catch {
+            return;
+        }
+        while (op !== null) {
+            if (op instanceof Let && op.subQuery !== null) {
+                const sources = new Set<string>();
+                this.collectSources(op.subQuery, sources);
+                let existing = this._letSources.get(op.name);
+                if (existing === undefined) {
+                    existing = new Set<string>();
+                    this._letSources.set(op.name, existing);
+                }
+                for (const s of sources) existing.add(s);
+            }
+            op = op.next;
+        }
     }
 
     private crawlStatement(root: ASTNode): void {
@@ -296,6 +410,14 @@ class StatementInfoCrawler {
             !(op instanceof DeleteRelationship)
         ) {
             this.collectPropertyAccesses(op);
+        }
+
+        // Capture per-output-column lineage from the final RETURN.  Each
+        // Return op we visit overwrites the previous result so chained
+        // statements end up with the lineage of the last RETURN, which is
+        // what the caller actually sees in `runner.results`.
+        if (op instanceof Return) {
+            this._returns = this.collectReturnColumns(op);
         }
     }
 
@@ -415,6 +537,110 @@ class StatementInfoCrawler {
                 }
             }
         }
+    }
+
+    /**
+     * Builds the per-column lineage map of a single `RETURN` clause.
+     * Mirrors {@link Projection.expressions}'s default-aliasing rule so
+     * unnamed columns are keyed `expr0`, `expr1`, ….
+     */
+    private collectReturnColumns(op: Return): Record<string, ColumnLineage> {
+        const out: Record<string, ColumnLineage> = {};
+        const children = op.getChildren();
+        for (let i = 0; i < children.length; i++) {
+            const expr = children[i];
+            if (!(expr instanceof Expression)) continue;
+            const alias = expr.alias ?? `expr${i}`;
+            out[alias] = this.lineageOfExpression(expr);
+        }
+        return out;
+    }
+
+    /**
+     * Walks an output-column expression and returns the contributing
+     * `alias.property` accesses plus a `kind` summarising how they were
+     * combined (`literal` / `property` / `expression` / `aggregate`).
+     */
+    private lineageOfExpression(expr: Expression): ColumnLineage {
+        const refs: ColumnReference[] = [];
+        const seenKeys = new Set<string>();
+        let hasAggregate = false;
+        let aggregateName: string | undefined;
+        let hasLookup = false;
+
+        const stack: ASTNode[] = [expr];
+        const seen = new Set<ASTNode>();
+        while (stack.length > 0) {
+            const node = stack.pop()!;
+            if (seen.has(node)) continue;
+            seen.add(node);
+
+            if (node instanceof AggregateFunction) {
+                hasAggregate = true;
+                if (aggregateName === undefined) aggregateName = node.name;
+            }
+            if (node instanceof Lookup) {
+                hasLookup = true;
+                const target = this.resolveLookupTarget(node);
+                const aliasName = this.aliasOfLookup(node);
+                if (target !== null && aliasName !== null) {
+                    const key = `${aliasName}\u0000${target.prop}`;
+                    if (!seenKeys.has(key)) {
+                        seenKeys.add(key);
+                        refs.push({
+                            alias: aliasName,
+                            kind: target.kind === "node" ? "node" : "relationship",
+                            labels: target.kind === "node" ? [...target.labels] : [...target.types],
+                            property: target.prop,
+                        });
+                    }
+                }
+            }
+
+            for (const child of node.getChildren()) stack.push(child);
+            if (node instanceof SubqueryExpression) {
+                const inner = (node as any)._subqueryAST as ASTNode | undefined;
+                if (inner !== undefined) stack.push(inner);
+            }
+        }
+
+        let kind: ColumnLineage["kind"];
+        if (hasAggregate) kind = "aggregate";
+        else if (!hasLookup) kind = "literal";
+        else if (refs.length === 1 && this.isSimplePropertyProjection(expr)) kind = "property";
+        else kind = "expression";
+
+        const result: ColumnLineage = { references: refs, kind };
+        if (aggregateName !== undefined) result.aggregate = aggregateName;
+        return result;
+    }
+
+    /**
+     * Returns the user-written identifier of a `Lookup`'s variable side
+     * (e.g. `'c'` in `c.name`), or `null` if the variable isn't a plain
+     * `Reference` to a named binding.
+     */
+    private aliasOfLookup(lookup: Lookup): string | null {
+        const variable = lookup.variable;
+        if (variable instanceof Reference) {
+            return variable.identifier;
+        }
+        return null;
+    }
+
+    /**
+     * True iff the expression is a direct `alias.property` projection
+     * (possibly wrapped in a single-child pass-through `Expression`),
+     * with no operators, functions, or additional references.
+     */
+    private isSimplePropertyProjection(expr: Expression): boolean {
+        let current: ASTNode = expr;
+        while (current instanceof Expression) {
+            const children = current.getChildren();
+            if (children.length !== 1) return false;
+            current = children[0];
+        }
+        return current instanceof Lookup;
     }
 
     private handleLookupAccess(node: Lookup): void {
@@ -668,12 +894,36 @@ class StatementInfoCrawler {
                     const name = op.asyncFunction?.name;
                     if (typeof name === "string" && name.length > 0) target.add(name);
                 } else {
-                    try {
-                        const from = op.from;
-                        if (typeof from === "string" && from.length > 0) target.add(from);
-                    } catch {
-                        // Dynamic source (e.g. f-string with unresolved refs);
-                        // skip rather than fail metadata extraction.
+                    // Inspect the AST directly so a `LOAD FROM <letName>`
+                    // produces a stable `let://<name>` source label
+                    // without invoking the BindingReference's runtime
+                    // lookup (which would either throw or return a
+                    // non-string value).  The parser wraps the
+                    // reference in an Expression so we unwrap one
+                    // level to find the BindingReference itself.
+                    let sourceChild = op.fromComponent.firstChild();
+                    if (sourceChild !== null && !(sourceChild instanceof BindingReference)) {
+                        const inner = sourceChild.firstChild?.();
+                        if (inner instanceof BindingReference) sourceChild = inner;
+                    }
+                    if (sourceChild instanceof BindingReference) {
+                        const bindingName = sourceChild.name;
+                        target.add(`let://${bindingName}`);
+                        // Chase through to the LET's own sources when
+                        // we've seen the binding's definition in the
+                        // same crawl.
+                        const letSources = this._letSources.get(bindingName);
+                        if (letSources !== undefined) {
+                            for (const s of letSources) target.add(s);
+                        }
+                    } else {
+                        try {
+                            const from = op.from;
+                            if (typeof from === "string" && from.length > 0) target.add(from);
+                        } catch {
+                            // Dynamic source (e.g. f-string with unresolved refs);
+                            // skip rather than fail metadata extraction.
+                        }
                     }
                 }
             }
@@ -840,6 +1090,7 @@ class StatementInfoCrawler {
                 nodes: declaredNodes,
                 relationships: declaredRelationships,
             },
+            returns: this.cloneReturns(this._returns),
         };
         for (const [label, props] of this._nodeProps) {
             info.node_properties[label] = Array.from(props).sort();
@@ -905,7 +1156,32 @@ class StatementInfoCrawler {
                 nodes: cloneDeclared(info.declared?.nodes ?? {}),
                 relationships: cloneDeclared(info.declared?.relationships ?? {}),
             },
+            returns: StatementInfoCrawler.cloneReturnsStatic(info.returns ?? {}),
         };
+    }
+
+    private cloneReturns(returns: Record<string, ColumnLineage>): Record<string, ColumnLineage> {
+        return StatementInfoCrawler.cloneReturnsStatic(returns);
+    }
+
+    private static cloneReturnsStatic(
+        returns: Record<string, ColumnLineage>
+    ): Record<string, ColumnLineage> {
+        const out: Record<string, ColumnLineage> = {};
+        for (const [col, lineage] of Object.entries(returns)) {
+            const copy: ColumnLineage = {
+                references: lineage.references.map((r) => ({
+                    alias: r.alias,
+                    kind: r.kind,
+                    labels: [...r.labels],
+                    property: r.property,
+                })),
+                kind: lineage.kind,
+            };
+            if (lineage.aggregate !== undefined) copy.aggregate = lineage.aggregate;
+            out[col] = copy;
+        }
+        return out;
     }
 }
 

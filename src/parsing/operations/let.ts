@@ -1,4 +1,6 @@
+import { RowProvenance } from "../../compute/provenance";
 import Bindings from "../../graph/bindings";
+import { attachVirtualSource } from "../../graph/virtual_sources";
 import ASTNode from "../ast_node";
 import Expression from "../expressions/expression";
 import Operation from "./operation";
@@ -68,10 +70,29 @@ class Let extends Operation {
         if (this._subQuery !== null) {
             const first = this._subQuery.firstChild() as Operation;
             const last = this._subQuery.lastChild() as Operation;
+            // Always capture provenance for sub-query LET RHS: it lets
+            // downstream consumers (e.g. `LOAD JSON FROM <letName>`)
+            // thread row-level lineage back through this binding.  Cost
+            // is paid once at LET time; downstream readers pay nothing
+            // when they don't ask.
+            const sink: RowProvenance[] = [];
+            // Lazy dynamic import to avoid a load-time cycle:
+            // let -> runner -> parser -> let.
+            const { default: Runner } = await import("../../compute/runner");
+            Runner.wireProvenance(first, sink);
             await first.initialize();
             await first.run();
             await first.finish();
             value = last.results;
+            if (Array.isArray(value)) {
+                const len = Math.min(sink.length, value.length);
+                for (let i = 0; i < len; i++) {
+                    const row = value[i];
+                    if (row !== null && typeof row === "object") {
+                        attachVirtualSource(row, sink[i]);
+                    }
+                }
+            }
         } else if (this._expression !== null) {
             value = this._expression.value();
         } else {

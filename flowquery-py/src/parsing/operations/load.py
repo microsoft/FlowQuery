@@ -6,11 +6,18 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
+from ...compute.provenance import (
+    DataSourceBinding,
+    ProvenanceSource,
+    RowSegment,
+)
+from ...graph.virtual_sources import get_virtual_source
 from ..ast_node import ASTNode
 from ..components.headers import Headers
 from ..components.json import JSON as JSONComponent
 from ..components.post import Post
 from ..components.text import Text
+from ..expressions.binding_reference import BindingReference
 from ..functions.async_function import AsyncFunction
 from .operation import Operation
 
@@ -182,3 +189,62 @@ class Load(Operation):
 
     def value(self) -> Any:
         return self._value
+
+    def resolve_source_label(self) -> Optional[str]:
+        """Returns the lineage-friendly identifier for this LOAD's
+        data source.
+
+        Mirrors the TS ``resolveSourceLabel``:
+
+        * async-function source -> the function's ``name``;
+        * a ``BindingReference`` (LET-bound) source -> ``let://<name>``,
+          even when wrapped one level deep inside an ``Expression``;
+        * any string source -> the string itself.
+
+        Returns ``None`` when no stable identifier is available (rare;
+        only when ``from_`` is a non-string runtime value with no
+        binding wrapper).
+        """
+        async_func = self.async_function
+        if async_func is not None:
+            return async_func.name
+        from_component = self.from_component
+        first = from_component.first_child() if from_component else None
+        if isinstance(first, BindingReference):
+            return f"let://{first.name}"
+        # Parser stores `LOAD JSON FROM <name>` as Expression(BindingReference)
+        if first is not None and hasattr(first, "first_child"):
+            inner = first.first_child()
+            if isinstance(inner, BindingReference):
+                return f"let://{inner.name}"
+        src = self.from_
+        if isinstance(src, str):
+            return src
+        return None
+
+    def as_provenance_source(self) -> ProvenanceSource:
+        """Returns a :class:`ProvenanceSource` whose snapshot describes
+        this LOAD's contribution to the row currently being projected.
+
+        The snapshot's ``data_sources`` always contains exactly one
+        :class:`DataSourceBinding`. ``source_provenance`` is populated
+        from :func:`get_virtual_source` so a ``LOAD JSON FROM <let>``
+        threads the inner-runner provenance through to the outer row.
+        """
+        owner = self
+        capture_label = self.resolve_source_label() or ""
+
+        class _LoadSource(ProvenanceSource):
+            def snapshot(self) -> RowSegment:
+                current = owner._value
+                source_prov = get_virtual_source(current)
+                binding = DataSourceBinding(source=capture_label)
+                if source_prov is not None:
+                    binding.source_provenance = source_prov
+                return RowSegment(
+                    nodes=[],
+                    relationships=[],
+                    data_sources=[binding],
+                )
+
+        return _LoadSource()

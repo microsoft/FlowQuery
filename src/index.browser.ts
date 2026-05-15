@@ -6,7 +6,17 @@
  * @packageDocumentation
  */
 import { default as FlowQuery } from "./compute/flowquery";
-import type { RunnerMetadata } from "./compute/runner";
+import type {
+    CellBindingTrace,
+    CellTrace,
+    LineageReport,
+    NodeBinding,
+    RelationshipBinding,
+    RelationshipHop,
+    RowProvenance,
+    RunnerMetadata,
+    RunnerOptions,
+} from "./compute/runner";
 import Function from "./parsing/functions/function";
 import FunctionFactory from "./parsing/functions/function_factory";
 import {
@@ -14,7 +24,13 @@ import {
     OutputSchema,
     ParameterSchema,
 } from "./parsing/functions/function_metadata";
-import type { NodeInfo, RelationshipInfo, StatementInfo } from "./parsing/statement_info_crawler";
+import type {
+    ColumnLineage,
+    ColumnReference,
+    NodeInfo,
+    RelationshipInfo,
+    StatementInfo,
+} from "./parsing/statement_info_crawler";
 
 /**
  * List all registered functions with their metadata.
@@ -46,4 +62,19 @@ FlowQuery.getFunctionMetadata = function (name: string): FunctionMetadata | unde
 FlowQuery.Function = Function;
 
 export default FlowQuery;
-export type { NodeInfo, RelationshipInfo, RunnerMetadata, StatementInfo };
+export type {
+    CellBindingTrace,
+    CellTrace,
+    ColumnLineage,
+    ColumnReference,
+    LineageReport,
+    NodeBinding,
+    NodeInfo,
+    RelationshipBinding,
+    RelationshipHop,
+    RelationshipInfo,
+    RowProvenance,
+    RunnerMetadata,
+    RunnerOptions,
+    StatementInfo,
+};

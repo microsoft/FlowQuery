@@ -44,13 +44,13 @@ print(runner.results)  # [{'result': 2}]
 The `Runner` exposes a `metadata` property that mirrors the TypeScript
 implementation. It reports counts of virtual nodes and relationships
 created/deleted plus an optional `info: StatementInfo` describing the
-_structure_ the query touches — independent of execution.
+_structure_ the query touches - independent of execution.
 
 `StatementInfo` captures:
 
 - The node labels and relationship types referenced.
 - The data sources backing the underlying virtual definitions.
-- The node/relationship properties **consumed** by the query —
+- The node/relationship properties **consumed** by the query -
   `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
   `ORDER BY`, or function arguments, plus inline pattern properties
   like `(u:User {id: 'rick.o'})`.
@@ -58,7 +58,7 @@ _structure_ the query touches — independent of execution.
   `info.declared`, so you can validate that a query references only
   declared properties.
 - Literal values supplied for properties at the call site via
-  `info.nodes[label].literal_values` — collected from inline pattern
+  `info.nodes[label].literal_values` - collected from inline pattern
   properties and from equality / `IN` predicates such as
   `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
 
@@ -105,12 +105,12 @@ print(info.sources)
 ```
 
 `StatementInfo` resolves sources and declared schemas for **any** virtual
-the query touches — both inline `CREATE VIRTUAL` clauses and
+the query touches - both inline `CREATE VIRTUAL` clauses and
 previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
 `node_labels`, `relationship_types`, `sources`, `node_properties`, and
 `relationship_properties` fields stay in sync with the per-entity `nodes`
 and `relationships` maps. Only purely literal AST subtrees end up in
-`literal_values` — values that depend on parameters, references,
+`literal_values` - values that depend on parameters, references,
 f-strings, or subqueries are skipped.
 
 The same `StatementInfoCrawler` can be used directly on any parsed AST
@@ -128,7 +128,7 @@ info = crawler.crawl(parsed_ast)
 - [Quick Cheat Sheet](https://github.com/microsoft/FlowQuery#quick-cheat-sheet)
 - [Full Documentation](https://github.com/microsoft/FlowQuery)
 - [Contributing Guide](https://github.com/microsoft/FlowQuery/blob/main/flowquery-py/CONTRIBUTING.md)
-- [Virtual Graph Demo Notebook](notebooks/TestFlowQuery.ipynb) — a demo of virtual graph capabilities and custom function extensibility
+- [Virtual Graph Demo Notebook](notebooks/TestFlowQuery.ipynb) - a demo of virtual graph capabilities and custom function extensibility
 
 ## Extending FlowQuery with Custom Functions
 

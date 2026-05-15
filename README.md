@@ -12,11 +12,11 @@ Beyond graphs, FlowQuery provides a full data processing pipeline language with 
 
 The combination of graph querying and pipeline processing makes FlowQuery ideal for the retrieval stage of Retrieval Augmented Generation (RAG). A typical graph RAG flow works as follows:
 
-1. **User query** — The user asks a question in natural language.
-2. **Schema retrieval** — The application retrieves the virtual graph schema via `CALL schema()` and injects it into the system instructions of the query-generation LLM, so it knows which node labels, relationship types, and properties are available.
-3. **Query generation** — The LLM, grounded in the schema, generates a precise OpenCypher query to retrieve the data needed to answer the question.
-4. **Query execution** — The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
-5. **Response formulation** — The LLM formulates a final response informed by the grounding data.
+1. **User query** - The user asks a question in natural language.
+2. **Schema retrieval** - The application retrieves the virtual graph schema via `CALL schema()` and injects it into the system instructions of the query-generation LLM, so it knows which node labels, relationship types, and properties are available.
+3. **Query generation** - The LLM, grounded in the schema, generates a precise OpenCypher query to retrieve the data needed to answer the question.
+4. **Query execution** - The FlowQuery engine executes the generated OpenCypher query against the virtual graph and returns the results as grounding data.
+5. **Response formulation** - The LLM formulates a final response informed by the grounding data.
 
 ```
                  ┌───────────────────┐
@@ -37,7 +37,7 @@ The combination of graph querying and pipeline processing makes FlowQuery ideal 
                                                                  └──────────┘
 ```
 
-The schema is retrieved using FlowQuery's built-in `schema()` function, which returns the structure of all registered virtual nodes and relationships — including labels, types, endpoint labels, property names, and sample values. This schema is then included in the LLM's system instructions so it can generate correct queries grounded in the actual graph model:
+The schema is retrieved using FlowQuery's built-in `schema()` function, which returns the structure of all registered virtual nodes and relationships - including labels, types, endpoint labels, property names, and sample values. This schema is then included in the LLM's system instructions so it can generate correct queries grounded in the actual graph model:
 
 ```cypher
 CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
@@ -227,7 +227,7 @@ WITH 1 AS x RETURN x UNION ALL WITH 1 AS x RETURN x
 
 #### Multi-Statement Queries
 
-Multiple statements can be separated by semicolons. Only declaration statements — `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` — may appear before the last statement. The last statement can be any valid query.
+Multiple statements can be separated by semicolons. Only declaration statements - `CREATE VIRTUAL`, `DELETE VIRTUAL` (alias: `DROP VIRTUAL`), `REFRESH VIRTUAL`, `LET`, `UPDATE`, and `MERGE INTO` - may appear before the last statement. The last statement can be any valid query.
 
 ```cypher
 CREATE VIRTUAL (:Person) AS {
@@ -267,7 +267,7 @@ CREATE STATIC VIRTUAL (:Country) AS {
 ```
 
 The sub-query runs once on first access and the result is reused for every
-subsequent query in the same process — across `Runner` instances. STATIC
+subsequent query in the same process - across `Runner` instances. STATIC
 virtual entities are protected: re-running `CREATE STATIC VIRTUAL (:Country)`
 without first dropping the existing entry raises an error. Use
 `DROP VIRTUAL (:Country)` (an alias for `DELETE VIRTUAL`) to remove it.
@@ -420,7 +420,7 @@ WITH d WHERE d.id >= threshold OR d.id <= 2
 RETURN d.id AS id, d.name AS name
 ```
 
-`LET` fails if the binding already exists — use `UPDATE` to overwrite.
+`LET` fails if the binding already exists - use `UPDATE` to overwrite.
 
 #### UPDATE
 
@@ -433,7 +433,7 @@ RETURN counter AS counter
 // [{ counter: 1 }]
 ```
 
-`UPDATE` fails if the binding doesn't exist — use `LET` first.
+`UPDATE` fails if the binding doesn't exist - use `LET` first.
 
 #### UPDATE ... AS alias DELETE WHERE ...
 
@@ -507,7 +507,7 @@ Notes:
 - `ON id` is shorthand for the equality predicate `t.id = s.id`; `ON (a, b)` requires equality on every listed key. Anything else is treated as a Boolean predicate evaluated per `(target, source)` pair.
 - `WHEN MATCHED THEN UPDATE SET .field` overwrites only the listed fields, preserving the rest from the existing row. `SET .field = expr` evaluates `expr` per matched pair, with target and source aliases in scope.
 - `WHEN NOT MATCHED THEN INSERT` (no row expression) appends the source row as-is. `INSERT { … }` appends an explicit row expression instead.
-- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent — omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
+- A `MERGE INTO` must declare at least one `WHEN` clause. Branches are independent - omit `WHEN NOT MATCHED` to skip insertion, omit `WHEN MATCHED` to skip updates/deletes.
 
 ### Expressions
 
@@ -622,16 +622,16 @@ RETURN sum(n IN [1+2+3, 2, 3] | n^2) AS sum          // 49
 Test list elements against a condition. Follow standard Cypher syntax.
 
 ```cypher
-// any — true if at least one element matches
+// any - true if at least one element matches
 RETURN any(n IN [1, 2, 3] WHERE n > 2)               // true
 
-// all — true if every element matches
+// all - true if every element matches
 RETURN all(n IN [2, 4, 6] WHERE n > 0)               // true
 
-// none — true if no element matches
+// none - true if no element matches
 RETURN none(n IN [1, 2, 3] WHERE n > 5)              // true
 
-// single — true if exactly one element matches
+// single - true if exactly one element matches
 RETURN single(n IN [1, 2, 3] WHERE n > 2)            // true
 
 // In a WHERE clause
@@ -816,7 +816,7 @@ MATCH (a:Person) WHERE NOT (a)-[:KNOWS]->(:Person) RETURN a.name
 **Subquery Expressions:** `EXISTS`, `COUNT`, and `COLLECT` evaluate a full subquery as an expression. The subquery can reference outer-scope variables and supports the complete FlowQuery pipeline (MATCH, WITH, WHERE, UNWIND, LOAD, etc.).
 
 ```cypher
-// EXISTS — returns true if the subquery produces any rows
+// EXISTS - returns true if the subquery produces any rows
 MATCH (p:Person)
 WHERE EXISTS {
     MATCH (p)-[:KNOWS]->(friend:Person)
@@ -824,12 +824,12 @@ WHERE EXISTS {
 }
 RETURN p.name
 
-// NOT EXISTS — negate with NOT
+// NOT EXISTS - negate with NOT
 MATCH (p:Person)
 WHERE NOT EXISTS { MATCH (p)-[:KNOWS]->(:Person) }
 RETURN p.name
 
-// COUNT — returns the number of rows the subquery produces
+// COUNT - returns the number of rows the subquery produces
 MATCH (p:Person)
 WHERE COUNT { MATCH (p)-[:KNOWS]->(:Person) } > 2
 RETURN p.name
@@ -838,7 +838,7 @@ RETURN p.name
 MATCH (p:Person)
 RETURN p.name, COUNT { MATCH (p)-[:KNOWS]->(:Person) } AS friendCount
 
-// COLLECT — returns a list of single-column values from the subquery
+// COLLECT - returns a list of single-column values from the subquery
 MATCH (p:Person)
 RETURN COLLECT {
     MATCH (p)-[:KNOWS]->(friend:Person)
@@ -1214,7 +1214,7 @@ RETURN f.name AS name, f.description AS description, f.category AS category
 
 ### Virtual Org Chart
 
-This single multi-statement query creates a virtual graph for a fictitious company — complete with employees, skills, phone numbers, and a management chain — then queries it to produce an org chart. [Try live!](https://microsoft.github.io/FlowQuery/?rZXPbtNAEMbFhUMOReXAeW4OwkH521ZBQgolrVQlSogDQlRVtdjTeKm9a603Bavqw_AAPEVfDO16s_EmEVElfPHuzGf7N9-M7UN4BfX-MM0SXiC-hkEA9zUAgJdwqc_quKdRH1o-MJJiH7yACAKnMTLP1-kf_PucykSlTocTE6weEWZEyBSZ7IM3_IXhUtI71MIs5kxd-KbV6PV6jWar2fR8yG9pkuR9uPQCKYjEReH54I2QRCjymGZqd0YZYSF6Vw--C9q2oGMiwmUOM3qHgnh-FfTLFPgNDNmCMkRB2ULTuKBOchO03Ww5oAMRxlRiKJdCVeadJnwZqcUYmeT6JlukHUs6FbQgMCUSEw2yRToVPFqG0prrkLrJTdLOBumMkyglWVbW5Q0YSQpJw1xtPn_dpuxayguSYg4fBOe3Sl2lDJBRLqyhBuVJfrYdynmRYRAKmqmyvGkhY67mzTsXJIs_jbYxexZzRBl8i4np6f_G7LhmLnMNGBS5xFR7-BHvJlm-DXhkAQepeoMueMxyXVQF0LQSxoSRxW7Afd12fQxCsUw1FpEEdLNzqjkDSW4x5kmEAsaLVG4TH1viOU8ff-dwTkT4-Ids9p7fyJ9EoGvrk0ztuqYi0fVtDMEcc7nzPTqxnGdE0pTAIGkEpMDI9XYX55Moew7leibHI2vwlGaYUIaq_xrySn1SBYZcRHp_YDZvaaQyNPJXAVWCCqmzDa7wVWK1XlcPsNKt61DK9c7eSFejcnphw2U5Kl6uag_vaofuP6Fx2Z8Np5PZPLieT64a-_8WCd7Ia_MlFnQRl5tWtWtW0tkv6VYl7Z2S3n7JUVXS2Sk5rkq6OyUnruTfHTZXqbRZWttXN9GXmrWy_gXUce1v7RnUt_x_X08XoqI50A_FcnzWxyAANBrfKOwsWYVcjxNWR8ikK2NkNOUUVR9SjpNJm2mqpMtImU8XwqXUvmVcyHzOa88dBN9U9Bc)
+This single multi-statement query creates a virtual graph for a fictitious company - complete with employees, skills, phone numbers, and a management chain - then queries it to produce an org chart. [Try live!](https://microsoft.github.io/FlowQuery/?rZXPbtNAEMbFhUMOReXAeW4OwkH521ZBQgolrVQlSogDQlRVtdjTeKm9a603Bavqw_AAPEVfDO16s_EmEVElfPHuzGf7N9-M7UN4BfX-MM0SXiC-hkEA9zUAgJdwqc_quKdRH1o-MJJiH7yACAKnMTLP1-kf_PucykSlTocTE6weEWZEyBSZ7IM3_IXhUtI71MIs5kxd-KbV6PV6jWar2fR8yG9pkuR9uPQCKYjEReH54I2QRCjymGZqd0YZYSF6Vw--C9q2oGMiwmUOM3qHgnh-FfTLFPgNDNmCMkRB2ULTuKBOchO03Ww5oAMRxlRiKJdCVeadJnwZqcUYmeT6JlukHUs6FbQgMCUSEw2yRToVPFqG0prrkLrJTdLOBumMkyglWVbW5Q0YSQpJw1xtPn_dpuxayguSYg4fBOe3Sl2lDJBRLqyhBuVJfrYdynmRYRAKmqmyvGkhY67mzTsXJIs_jbYxexZzRBl8i4np6f_G7LhmLnMNGBS5xFR7-BHvJlm-DXhkAQepeoMueMxyXVQF0LQSxoSRxW7Afd12fQxCsUw1FpEEdLNzqjkDSW4x5kmEAsaLVG4TH1viOU8ff-dwTkT4-Ids9p7fyJ9EoGvrk0ztuqYi0fVtDMEcc7nzPTqxnGdE0pTAIGkEpMDI9XYX55Moew7leibHI2vwlGaYUIaq_xrySn1SBYZcRHp_YDZvaaQyNPJXAVWCCqmzDa7wVWK1XlcPsNKt61DK9c7eSFejcnphw2U5Kl6uag_vaofuP6Fx2Z8Np5PZPLieT64a-_8WCd7Ia_MlFnQRl5tWtWtW0tkv6VYl7Z2S3n7JUVXS2Sk5rkq6OyUnruTfHTZXqbRZWttXN9GXmrWy_gXUce1v7RnUt_x_X08XoqI50A_FcnzWxyAANBrfKOwsWYVcjxNWR8ikK2NkNOUUVR9SjpNJm2mqpMtImU8XwqXUvmVcyHzOa88dBN9U9Bc)
 
 ```cypher
 CREATE VIRTUAL (:Employee) AS {
@@ -1268,7 +1268,7 @@ Output:
 | Amara Johnson   | Product Manager   | Product     | +1-555-0302 | [Scrum, Data Analysis, Stakeholder Mgmt] | Priya Patel   |
 | Priya Patel     | VP of Product     | Product     | +1-555-0301 | [Roadmapping, Analytics, UX]             | Sara Chen     |
 
-You can further explore the graph — for example, find the full management chain from any employee up to the CEO:
+You can further explore the graph - for example, find the full management chain from any employee up to the CEO:
 
 ```cypher
 MATCH (e:Employee)-[:REPORTS_TO*1..]->(mgr:Employee)
@@ -1331,10 +1331,10 @@ LIMIT 10
 
 FlowQuery exposes two complementary forms of lineage:
 
-- **Structural lineage** (`metadata.info`) — what labels, types,
+- **Structural lineage** (`metadata.info`) - what labels, types,
   properties, and sources the parsed query touches. Available without
   running the query and with zero runtime overhead.
-- **Row-level provenance** (`runner.provenance`) — opt-in via
+- **Row-level provenance** (`runner.provenance`) - opt-in via
   `{ provenance: true }`; for every emitted result row, the concrete
   node ids and relationship hops bound to it, their matched property
   values, and (for virtual-backed records) the inner sub-query lineage
@@ -1347,11 +1347,11 @@ backs it.
 ### Statement Info: Labels, Properties, and Source Lineage
 
 `metadata.info` carries a `StatementInfo` describing the _structure_ the
-query touches — independent of execution. It captures:
+query touches - independent of execution. It captures:
 
 - The node labels and relationship types referenced.
 - The data sources backing the underlying virtual definitions.
-- The node/relationship properties **consumed** by the query —
+- The node/relationship properties **consumed** by the query -
   `alias.prop` accesses anywhere in `MATCH`, `WHERE`, `WITH`, `RETURN`,
   `ORDER BY`, or function arguments, plus inline pattern properties
   like `(u:User {id: 'rick.o'})`.
@@ -1359,7 +1359,7 @@ query touches — independent of execution. It captures:
   `info.declared`, so you can validate that a query references only
   declared properties.
 - Literal values supplied for properties at the call site via
-  `info.nodes[Label].literal_values` — collected from inline pattern
+  `info.nodes[Label].literal_values` - collected from inline pattern
   properties and from equality / `IN` predicates such as
   `WHERE u.id = 'rick.o'` or `WHERE u.id IN ['a', 'b']`.
 
@@ -1418,20 +1418,20 @@ console.log(info.sources);
 ```
 
 `StatementInfo` resolves sources and declared schemas for **any** virtual
-the query touches — both inline `CREATE VIRTUAL` clauses and
+the query touches - both inline `CREATE VIRTUAL` clauses and
 previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
 `node_labels`, `relationship_types`, `sources`, `node_properties`, and
 `relationship_properties` fields stay in sync with the per-entity `nodes` /
 `relationships` maps and are convenient for quick aggregate checks. Only
-purely literal AST subtrees end up in `literal_values` — values that depend
+purely literal AST subtrees end up in `literal_values` - values that depend
 on parameters, references, f-strings, or subqueries are skipped.
 
 ### Row-level Provenance: Node and Relationship IDs Behind Each Result
 
-`StatementInfo` describes the _structural_ lineage of a query — which
-labels, types, and sources back it. To get the _row-level_ lineage —
+`StatementInfo` describes the _structural_ lineage of a query - which
+labels, types, and sources back it. To get the _row-level_ lineage -
 which concrete node ids and relationship `(left_id, right_id, type)`
-hops actually flowed into each result row — pass `{ provenance: true }`
+hops actually flowed into each result row - pass `{ provenance: true }`
 when constructing the runner and read `runner.provenance`:
 
 ```javascript
@@ -1496,7 +1496,7 @@ hops[1].right_id, …]`. For single-hop matches `path` has exactly two
   are deduplicated and frozen; any subsequent `MATCH` adds its own
   live bindings on top, so the final `RETURN` row's provenance shows
   both the pre-aggregation sources and the post-aggregation bindings.
-  Chained aggregating `WITH` clauses compose transitively — the original
+  Chained aggregating `WITH` clauses compose transitively - the original
   ids and hops survive every aggregation hop.
 
 When the option is omitted or set to `false`, the runner has zero
@@ -1558,12 +1558,12 @@ fq.provenance[0].relationships[0].hops[0];
 A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
 produces the synthesised records exposed under the `:X` label. By
 default, a downstream `MATCH (x:X)` only sees the synthesised row's
-`id` — the upstream query that produced it is opaque.
+`id` - the upstream query that produced it is opaque.
 
 When `{ provenance: true }` is set, the inner runner's `RowProvenance`
 is threaded onto every binding whose record came from a virtual. Each
 `NodeBinding` and each `RelationshipHop` gains an optional `source:
-RowProvenance` field carrying the inner row's full lineage —
+RowProvenance` field carrying the inner row's full lineage -
 recursively, when a virtual matches another virtual:
 
 ```typescript
@@ -1617,8 +1617,8 @@ Semantics:
 
 `runner.info.returns` (added to `StatementInfo`) maps every output
 column to the `alias.property` accesses that compose it. Combined with
-row provenance it gives you per-cell traceability — value → source
-binding → node id → source URL — without any runtime AST inspection.
+row provenance it gives you per-cell traceability - value → source
+binding → node id → source URL - without any runtime AST inspection.
 
 For a query
 

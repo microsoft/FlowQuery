@@ -503,3 +503,175 @@ test("Provenance composes across chained aggregated WITH clauses", async () => {
     expect(usHops.length).toBe(3);
     await dropCityGraph();
 });
+
+test("Deep mode is off by default: bindings carry no source field", async () => {
+    await createCityGraph();
+    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.id AS id`, null, null, {
+        provenance: true,
+    });
+    await runner.run();
+    for (const row of runner.provenance) {
+        for (const n of row.nodes) {
+            expect(n.source).toBeUndefined();
+        }
+    }
+    await dropCityGraph();
+});
+
+test("Deep mode threads UNWIND-virtual sub-query lineage onto node bindings", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:DeepCity) AS {
+            UNWIND [
+                {id: 'nyc', name: 'New York'},
+                {id: 'lhr', name: 'London'}
+            ] AS c
+            RETURN c.id AS id, c.name AS name
+        }
+    `).run();
+    const runner = new Runner(`MATCH (c:DeepCity) RETURN c.id AS id`, null, null, {
+        deep: true,
+    });
+    await runner.run();
+    expect(runner.results.length).toBe(2);
+    expect(runner.provenance.length).toBe(2);
+    for (const row of runner.provenance) {
+        const binding = row.nodes.find((n) => n.alias === "c");
+        expect(binding).toBeDefined();
+        // UNWIND-sourced virtuals produce empty inner provenance (no
+        // graph slots), but the source field must still be present to
+        // signal that lineage was threaded.
+        expect(binding!.source).toBeDefined();
+        expect(binding!.source!.nodes).toEqual([]);
+        expect(binding!.source!.relationships).toEqual([]);
+    }
+    await new Runner("DELETE VIRTUAL (:DeepCity)").run();
+});
+
+test("Deep mode threads MATCH-virtual sub-query lineage onto node bindings", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:SrcCity) AS {
+            UNWIND [
+                {id: 'nyc', country: 'US'},
+                {id: 'lax', country: 'US'},
+                {id: 'lhr', country: 'UK'}
+            ] AS c
+            RETURN c.id AS id, c.country AS country
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:DerivedCity) AS {
+            MATCH (s:SrcCity)
+            WHERE s.country = 'US'
+            RETURN s.id AS id
+        }
+    `).run();
+    const runner = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, {
+        deep: true,
+    });
+    await runner.run();
+    const ids = runner.results.map((r: Record<string, any>) => r.id).sort();
+    expect(ids).toEqual(["lax", "nyc"]);
+    expect(runner.provenance.length).toBe(2);
+    for (let i = 0; i < runner.results.length; i++) {
+        const d = runner.provenance[i].nodes.find((n) => n.alias === "d");
+        expect(d).toBeDefined();
+        // The inner MATCH bound an `s` slot whose id equals the outer
+        // `d.id` for the contributing row.
+        expect(d!.source).toBeDefined();
+        const sBinding = d!.source!.nodes.find((n) => n.alias === "s");
+        expect(sBinding).toBeDefined();
+        expect(sBinding!.id).toBe(d!.id);
+    }
+    await new Runner("DELETE VIRTUAL (:DerivedCity)").run();
+    await new Runner("DELETE VIRTUAL (:SrcCity)").run();
+});
+
+test("Deep mode threads virtual-relationship sub-query lineage onto hops", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:DeepCity) AS {
+            UNWIND [
+                {id: 'nyc'},
+                {id: 'lax'}
+            ] AS c
+            RETURN c.id AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:DeepCity)-[:DEEP_FLIGHT]-(:DeepCity) AS {
+            UNWIND [
+                {left_id: 'nyc', right_id: 'lax', airline: 'AA'}
+            ] AS f
+            RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+        }
+    `).run();
+    const runner = new Runner(
+        `MATCH (a:DeepCity)-[r:DEEP_FLIGHT]->(b:DeepCity) RETURN a.id, b.id`,
+        null,
+        null,
+        { deep: true }
+    );
+    await runner.run();
+    expect(runner.results.length).toBe(1);
+    expect(runner.provenance.length).toBe(1);
+    const row = runner.provenance[0];
+    const aBinding = row.nodes.find((n) => n.alias === "a");
+    const bBinding = row.nodes.find((n) => n.alias === "b");
+    expect(aBinding!.source).toBeDefined();
+    expect(bBinding!.source).toBeDefined();
+    const rHop = row.relationships.find((rel) => rel.alias === "r")!.hops[0];
+    expect(rHop.source).toBeDefined();
+    // The inner sub-query of the relationship is non-graph
+    // (UNWIND ... RETURN), so its provenance is the empty shape.
+    expect(rHop.source!.nodes).toEqual([]);
+    expect(rHop.source!.relationships).toEqual([]);
+    await new Runner("DELETE VIRTUAL (:DeepCity)-[:DEEP_FLIGHT]-(:DeepCity)").run();
+    await new Runner("DELETE VIRTUAL (:DeepCity)").run();
+});
+
+test("Deep mode recurses through nested virtual sub-queries", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:LevelA) AS {
+            UNWIND [{id: 1}, {id: 2}] AS r
+            RETURN r.id AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:LevelB) AS {
+            MATCH (a:LevelA) RETURN a.id AS id
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:LevelC) AS {
+            MATCH (b:LevelB) RETURN b.id AS id
+        }
+    `).run();
+    const runner = new Runner(`MATCH (c:LevelC) RETURN c.id AS id`, null, null, { deep: true });
+    await runner.run();
+    expect(runner.results.length).toBe(2);
+    for (const row of runner.provenance) {
+        const c = row.nodes.find((n) => n.alias === "c")!;
+        expect(c.source).toBeDefined();
+        const b = c.source!.nodes.find((n) => n.alias === "b")!;
+        expect(b).toBeDefined();
+        expect(b.id).toBe(c.id);
+        // Recursive lineage: c → b → a.
+        expect(b.source).toBeDefined();
+        const a = b.source!.nodes.find((n) => n.alias === "a")!;
+        expect(a).toBeDefined();
+        expect(a.id).toBe(c.id);
+    }
+    await new Runner("DELETE VIRTUAL (:LevelC)").run();
+    await new Runner("DELETE VIRTUAL (:LevelB)").run();
+    await new Runner("DELETE VIRTUAL (:LevelA)").run();
+});
+
+test("Deep mode implies provenance: setting deep alone enables row lineage", async () => {
+    await createCityGraph();
+    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.id AS id`, null, null, {
+        deep: true,
+    });
+    await runner.run();
+    expect(runner.provenance.length).toBe(runner.results.length);
+    expect(runner.results.length).toBeGreaterThan(0);
+    await dropCityGraph();
+});

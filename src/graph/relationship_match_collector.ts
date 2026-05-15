@@ -1,4 +1,5 @@
 import Relationship from "./relationship";
+import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
 export type RelationshipMatchRecord = {
     type: string;
@@ -26,6 +27,13 @@ class RelationshipMatchCollector {
             endNode: null,
             properties: relProperties,
         };
+        // Deep-mode: thread the underlying record's inner provenance onto
+        // the freshly constructed match object so the snapshot can read it
+        // by reference.
+        if (currentRecord != null) {
+            const src = getVirtualSource(currentRecord);
+            if (src !== undefined) attachVirtualSource(match, src);
+        }
         this._matches.push(match);
         this._nodeIds.push(traversalId);
         this._nodeIdSet.add(traversalId);

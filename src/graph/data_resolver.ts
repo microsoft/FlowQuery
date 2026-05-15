@@ -6,6 +6,7 @@ import NodeReference from "./node_reference";
 import PhysicalRelationship from "./physical_relationship";
 import Relationship from "./relationship";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
+import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
 /**
  * Resolves pattern elements (nodes and relationships) to data by querying
@@ -82,7 +83,10 @@ class DataResolver {
                 for (const [label, physical] of db.nodes) {
                     const data = await this._dataCache.get(`node:${label}`, physical, null);
                     for (const record of data as NodeRecord[]) {
-                        allRecords.push({ ...record, _label: label });
+                        const enriched = { ...record, _label: label };
+                        const src = getVirtualSource(record);
+                        if (src !== undefined) attachVirtualSource(enriched, src);
+                        allRecords.push(enriched);
                     }
                 }
                 return new NodeData(allRecords);
@@ -95,7 +99,10 @@ class DataResolver {
                     if (physical) {
                         const data = await this._dataCache.get(`node:${lbl}`, physical, args);
                         for (const record of data as NodeRecord[]) {
-                            allRecords.push({ ...record, _label: lbl });
+                            const enriched = { ...record, _label: lbl };
+                            const src = getVirtualSource(record);
+                            if (src !== undefined) attachVirtualSource(enriched, src);
+                            allRecords.push(enriched);
                         }
                     }
                 }
@@ -107,7 +114,12 @@ class DataResolver {
             }
             const data = await this._dataCache.get(`node:${element.label}`, node, args);
             const label = element.label;
-            const records = (data as NodeRecord[]).map((record) => ({ ...record, _label: label }));
+            const records = (data as NodeRecord[]).map((record) => {
+                const enriched = { ...record, _label: label };
+                const src = getVirtualSource(record);
+                if (src !== undefined) attachVirtualSource(enriched, src);
+                return enriched;
+            });
             return new NodeData(records);
         } else if (element instanceof Relationship) {
             const args = DataResolver.extractArgs(element.properties);
@@ -129,7 +141,10 @@ class DataResolver {
                     args
                 )) as RelationshipRecord[];
                 for (const record of records) {
-                    allRecords.push({ ...record, _type: typeName });
+                    const enriched = { ...record, _type: typeName };
+                    const src = getVirtualSource(record);
+                    if (src !== undefined) attachVirtualSource(enriched, src);
+                    allRecords.push(enriched);
                 }
             }
             return new RelationshipData(allRecords);

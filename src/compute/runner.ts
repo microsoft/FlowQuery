@@ -44,6 +44,18 @@ export interface RunnerOptions {
      * overhead.
      */
     provenance?: boolean;
+
+    /**
+     * When `true`, threads provenance through virtual sub-query lineage:
+     * each {@link NodeBinding} / {@link RelationshipHop} whose record
+     * originated from a `CREATE VIRTUAL (:X) AS { ... }` block also carries
+     * the inner runner's row provenance under `source`.  Recursive — a
+     * virtual that matches another virtual will carry nested `source`
+     * chains.
+     *
+     * Implies `provenance: true`.  Defaults to `false`.
+     */
+    deep?: boolean;
 }
 
 /**
@@ -117,7 +129,7 @@ class Runner {
             throw new Error("Either statement or AST must be provided");
         }
         this._args = args;
-        this._options = options;
+        this._options = options.deep ? { ...options, provenance: true } : options;
 
         if (ast !== null) {
             this._isTopLevel = false;
@@ -177,7 +189,9 @@ class Runner {
         return new Promise<void>(async (resolve, reject) => {
             try {
                 if (this._isTopLevel) {
-                    DataResolver.getInstance().dataCache = new DataCache();
+                    DataResolver.getInstance().dataCache = new DataCache(
+                        this._options.deep === true
+                    );
                 }
                 if (this._options.provenance) {
                     this._provenance = [];

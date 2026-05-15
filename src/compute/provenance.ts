@@ -2,6 +2,7 @@ import Node from "../graph/node";
 import NodeReference from "../graph/node_reference";
 import Relationship from "../graph/relationship";
 import RelationshipReference from "../graph/relationship_reference";
+import { getVirtualSource } from "../graph/virtual_sources";
 
 /**
  * One observation that a particular alias was bound to a particular node id
@@ -20,6 +21,13 @@ export interface NodeBinding {
     label: string | null;
     /** The concrete `id` value of the matched node, preserving scalar type. */
     id: any;
+    /**
+     * Deep-mode lineage: when the matched node came from a virtual
+     * `CREATE VIRTUAL (:X) AS { ... }` sub-query, this is the inner
+     * runner's `RowProvenance` row that produced the record.  Omitted
+     * when deep mode is off or the source is not a virtual.
+     */
+    source?: RowProvenance;
 }
 
 /**
@@ -32,6 +40,12 @@ export interface RelationshipHop {
     /** Resolved relationship type (may differ from the declared type when a
      *  virtual relationship spans multiple underlying types). */
     type: string;
+    /**
+     * Deep-mode lineage: when the traversed edge came from a virtual
+     * relationship's inner sub-query, this is the inner runner's row
+     * provenance for the contributing record.  Omitted otherwise.
+     */
+    source?: RowProvenance;
 }
 
 /**
@@ -143,11 +157,14 @@ export class ProvenanceSites {
         for (let i = 0; i < this.nodes.length; i++) {
             const node = this.nodes[i];
             const v = node.value();
-            nodes[i] = {
+            const binding: NodeBinding = {
                 alias: node.identifier,
                 label: node.label,
                 id: v === null || v === undefined ? null : (v.id ?? null),
             };
+            const src = v == null ? undefined : (getVirtualSource(v) as RowProvenance | undefined);
+            if (src !== undefined) binding.source = src;
+            nodes[i] = binding;
         }
         const relationships: RelationshipBinding[] = new Array(this.relationships.length);
         for (let i = 0; i < this.relationships.length; i++) {
@@ -156,11 +173,14 @@ export class ProvenanceSites {
             const hops: RelationshipHop[] = new Array(matches.length);
             for (let j = 0; j < matches.length; j++) {
                 const m = matches[j];
-                hops[j] = {
+                const hop: RelationshipHop = {
                     left_id: m.startNode == null ? null : (m.startNode.id ?? null),
                     right_id: m.endNode == null ? null : (m.endNode.id ?? null),
                     type: m.type,
                 };
+                const src = getVirtualSource(m) as RowProvenance | undefined;
+                if (src !== undefined) hop.source = src;
+                hops[j] = hop;
             }
             relationships[i] = {
                 alias: rel.identifier,

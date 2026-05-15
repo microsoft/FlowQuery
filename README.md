@@ -495,6 +495,68 @@ Semantics:
 When the option is omitted or set to `false`, the runner has zero
 provenance overhead and `runner.provenance` returns an empty array.
 
+##### Deep Mode: Threading Lineage Through Virtual Sub-Queries
+
+A `CREATE VIRTUAL (:X) AS { ... }` block wraps an inner FlowQuery that
+produces the synthesised records exposed under the `:X` label. By
+default, a downstream `MATCH (x:X)` only sees the synthesised row's
+`id` — the upstream query that produced it is opaque.
+
+Passing `{ deep: true }` (which implies `provenance: true`) threads the
+inner runner's `RowProvenance` onto every binding whose record came
+from a virtual. Each `NodeBinding` and each `RelationshipHop` gains
+an optional `source: RowProvenance` field carrying the inner row's full
+lineage — recursively, when a virtual matches another virtual:
+
+```typescript
+import { Runner } from "flowquery";
+
+// Virtual graph: derived city = US-only subset of SrcCity.
+await new Runner(`
+    CREATE VIRTUAL (:SrcCity) AS {
+        UNWIND [
+            { id: 'nyc', country: 'US' },
+            { id: 'lhr', country: 'UK' }
+        ] AS c
+        RETURN c.id AS id, c.country AS country
+    }
+`).run();
+await new Runner(`
+    CREATE VIRTUAL (:DerivedCity) AS {
+        MATCH (s:SrcCity)
+        WHERE s.country = 'US'
+        RETURN s.id AS id
+    }
+`).run();
+
+const fq = new Runner(`MATCH (d:DerivedCity) RETURN d.id AS id`, null, null, { deep: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'd', label: 'DerivedCity', id: 'nyc',
+//   source: {
+//     nodes: [{ alias: 's', label: 'SrcCity', id: 'nyc' }],
+//     relationships: []
+//   }
+// }
+```
+
+Semantics:
+
+- `deep: true` implies `provenance: true` — setting deep alone enables
+  row-level lineage.
+- The `source` field is **omitted** when the binding's record did not
+  come from a virtual sub-query (e.g. records from `UNWIND … RETURN`
+  inside the virtual produce a `source` with empty `nodes` and
+  `relationships`, signalling "lineage was threaded but no graph slots
+  were bound at this level").
+- Deep mode is **recursive**: a virtual that matches another virtual
+  carries nested `source` chains all the way down.
+- Deep mode bypasses the static-virtual cache because each invocation
+  must produce fresh records to back the lineage weak-map. Static
+  caching continues to apply when `deep: false`.
+
 ### WHERE Clause
 
 Filters rows based on conditions. Supports the following operators:

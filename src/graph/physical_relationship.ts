@@ -1,6 +1,7 @@
 import type Runner from "../compute/runner";
 import ASTNode from "../parsing/ast_node";
 import Relationship from "./relationship";
+import { attachVirtualSource } from "./virtual_sources";
 
 class PhysicalRelationship extends Relationship {
     private _statement: ASTNode | null = null;
@@ -32,13 +33,18 @@ class PhysicalRelationship extends Relationship {
         this._cache = null;
         this._cachedAt = 0;
     }
-    public async data(args: Record<string, any> | null = null): Promise<Record<string, any>[]> {
+    public async data(
+        args: Record<string, any> | null = null,
+        deep: boolean = false
+    ): Promise<Record<string, any>[]> {
         if (this._statement === null) {
             throw new Error("Statement is null");
         }
         // Filter pass-down queries (with args) bypass the persistent cache
-        // because results depend on runtime parameter values.
-        if (args === null && this._isStatic && this._cache !== null) {
+        // because results depend on runtime parameter values.  Deep mode
+        // also bypasses the cache so each invocation produces fresh records
+        // with up-to-date weak-map back-links.
+        if (!deep && args === null && this._isStatic && this._cache !== null) {
             const isFresh =
                 this._refreshEveryMs === null || Date.now() - this._cachedAt < this._refreshEveryMs;
             if (isFresh) {
@@ -49,10 +55,22 @@ class PhysicalRelationship extends Relationship {
         // physical_relationship -> runner -> parsing -> graph (back to here).
         // Python uses the same idiom (function-local import).
         const RunnerCtor: typeof Runner = (await import("../compute/runner")).default;
-        const runner = new RunnerCtor(null, this._statement, args);
+        const runner = new RunnerCtor(
+            null,
+            this._statement,
+            args,
+            deep ? { provenance: true, deep: true } : {}
+        );
         await runner.run();
         const result = runner.results;
-        if (args === null && this._isStatic) {
+        if (deep) {
+            const prov = runner.provenance;
+            const len = Math.min(prov.length, result.length);
+            for (let i = 0; i < len; i++) {
+                attachVirtualSource(result[i], prov[i]);
+            }
+        }
+        if (!deep && args === null && this._isStatic) {
             this._cache = result;
             this._cachedAt = Date.now();
         }

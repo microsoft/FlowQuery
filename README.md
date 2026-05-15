@@ -261,7 +261,7 @@ you can opt in to persistent caching with the `STATIC` keyword:
 
 ```cypher
 CREATE STATIC VIRTUAL (:Country) AS {
-    LOAD JSON FROM 'https://restcountries.com/v3.1/all' AS c
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca2,population' AS c
     RETURN c.cca2 AS code, c.name.common AS name
 };
 ```
@@ -277,7 +277,7 @@ units are `SECOND[S]`, `MINUTE[S]`, `HOUR[S]`, and `DAY[S]`:
 
 ```cypher
 CREATE STATIC VIRTUAL (:Country) AS {
-    LOAD JSON FROM 'https://restcountries.com/v3.1/all' AS c
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca2,population' AS c
     RETURN c.cca2 AS code, c.name.common AS name
 } REFRESH EVERY 1 HOUR;
 ```
@@ -1376,6 +1376,37 @@ WITH a, b, [s IN a.skills WHERE s IN b.skills] AS shared
 WHERE size(shared) > 0
 RETURN a.name AS employee1, b.name AS employee2, shared AS sharedSkills
 ORDER BY size(shared) DESC
+```
+
+### Virtual Country Borders Graph
+
+This example pulls live data from the public [REST Countries](https://restcountries.com/) API and projects it into a `(:Country)-[:BORDERS]-(:Country)` virtual graph in a single semicolon-chained query, then ranks European countries by how many direct neighbors they have. [Try live!](https://microsoft.github.io/FlowQuery/?nZBRa4MwFIXf8yvumx1YXelbRxlWM-qwCtGujDGKxrQVrJFoB2Xsv49Eq3Ure1iekuvxnu8cD0dA-amoRcYqmMMnAgDwAsuB5zDw4YkEK9AOdV1WM9MUrKo7tUH50fyYGhMzzvPHXcbytJoX8ZHplMZTXbB9xgu95OUpj2t5TbhImag0sEKgyofgaE18oIb8A9pjhZClOoL-UEOulX5HXsjvymWoaOy6Da37UNOzKM0V2lDXgl52tU_09YCQTbAVYXhxSbS2PBjNbFXH-U4Kb5bXt_s7dpa2aduIXbY-UJ9lGGDA_zfa-G22CIiDSfg-_h_w2t-4vnPVjGzlVpSc7eqtzJMo8Gx_kE-Ft7Iiewmj-DZW0o3RZokJhvhSwBw0fBK8ZBpqzeKuqwb1rDeXUaJCFSzbHxIutmqIlAUsXn_MwcGhjTx35UYwuf8G)
+
+A single shared `LET` binding fetches the data once. Both virtuals (the `(:Country)` nodes and the `(:Country)-[:BORDERS]-(:Country)` relationships) are projected from the same binding, so there is exactly one HTTP round-trip per Runner invocation. Add `REFRESH EVERY 1 HOUR` to the `LET` if you want the cache to auto-refresh on a schedule.
+
+```cypher
+LET countries = {
+    LOAD JSON FROM 'https://restcountries.com/v3.1/all?fields=name,cca3,region,population,borders' AS c
+    RETURN c.cca3        AS id,
+           c.name.common AS name,
+           c.region      AS region,
+           c.population  AS population,
+           c.borders     AS borders
+};
+CREATE VIRTUAL (:Country) AS {
+    LOAD JSON FROM countries AS c
+    RETURN c.id AS id, c.name AS name, c.region AS region, c.population AS population
+};
+CREATE VIRTUAL (:Country)-[:BORDERS]-(:Country) AS {
+    LOAD JSON FROM countries AS c
+    UNWIND c.borders AS b
+    RETURN c.id AS left_id, b AS right_id
+};
+MATCH (a:Country)-[:BORDERS]-(b:Country)
+WHERE a.region = 'Europe'
+RETURN a.name AS country, count(b) AS neighbor_count
+ORDER BY neighbor_count DESC
+LIMIT 10
 ```
 
 ## Contributing

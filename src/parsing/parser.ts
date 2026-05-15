@@ -882,12 +882,6 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
-        let isStatic = false;
-        if (this.token.isStatic()) {
-            isStatic = true;
-            this.setNextToken();
-            this.expectAndSkipWhitespaceAndComments();
-        }
         if (!this.token.isIdentifierOrKeyword() || this.token.value === null) {
             throw new Error("Expected identifier after LET");
         }
@@ -899,13 +893,11 @@ class Parser extends BaseParser {
         }
         this.setNextToken();
         const { expression, subQuery } = this.parseLetUpdateRhs();
-        if (isStatic && subQuery === null) {
-            throw new Error("LET STATIC requires a sub-query right-hand side");
-        }
-        // Optional trailing REFRESH EVERY <n> <unit> clause.  Only allowed
-        // for STATIC bindings (caching must be enabled to refresh).  Peek
-        // past REFRESH to confirm EVERY follows: a bare `REFRESH BINDING`
-        // is a separate top-level statement.
+        // Optional trailing REFRESH EVERY <n> <unit> clause turns the
+        // binding into a refreshable one.  Requires a sub-query RHS
+        // (there is nothing to re-evaluate for a literal expression).
+        // Peek past REFRESH to confirm EVERY follows: a bare
+        // `REFRESH BINDING` is a separate top-level statement.
         let refreshEveryMs: number | null = null;
         const savedIndex = this.tokenIndex;
         this.skipWhitespaceAndComments();
@@ -915,8 +907,8 @@ class Parser extends BaseParser {
             this.setNextToken();
             this.skipWhitespaceAndComments();
             if (this.token.isEvery()) {
-                if (!isStatic) {
-                    throw new Error("REFRESH EVERY requires STATIC (caching must be enabled)");
+                if (subQuery === null) {
+                    throw new Error("LET REFRESH EVERY requires a sub-query right-hand side");
                 }
                 this.setNextToken();
                 this.expectAndSkipWhitespaceAndComments();
@@ -957,7 +949,7 @@ class Parser extends BaseParser {
         if (!consumedRefreshClause) {
             this.tokenIndex = savedIndex;
         }
-        return new Let(name, expression, subQuery, isStatic, refreshEveryMs);
+        return new Let(name, expression, subQuery, refreshEveryMs);
     }
 
     private parseUpdate(): Update | UpdateDelete | null {

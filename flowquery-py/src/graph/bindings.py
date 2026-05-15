@@ -16,16 +16,16 @@ def _now_ms() -> int:
 class BindingEntry:
     """One entry in the Bindings singleton.
 
-    Eager (non-STATIC) bindings store their materialised ``value``
-    directly; STATIC bindings additionally store the backing
-    ``statement`` and refresh metadata so the value can be (re)computed
-    lazily on read.
+    Plain bindings store their materialised ``value`` directly;
+    refreshable bindings (created by ``LET name = { ... } REFRESH
+    EVERY n unit``) additionally store the backing ``statement`` and
+    TTL so the value can be re-evaluated on read once stale.
     """
 
     __slots__ = (
         "value",
         "statement",
-        "is_static",
+        "is_refreshable",
         "refresh_every_ms",
         "cached_at",
         "primed",
@@ -34,7 +34,7 @@ class BindingEntry:
     def __init__(self) -> None:
         self.value: Any = None
         self.statement: Optional["ASTNode"] = None
-        self.is_static: bool = False
+        self.is_refreshable: bool = False
         self.refresh_every_ms: Optional[int] = None
         self.cached_at: int = 0
         self.primed: bool = False
@@ -47,10 +47,12 @@ class Bindings:
     Database: they are persistent across statements for the lifetime
     of the process.
 
-    ``LET STATIC name = { ... } [REFRESH EVERY n unit]`` registers a
-    deferred provider: the sub-query is stored, not the value, and is
-    (re)evaluated lazily by :meth:`materialize` on first access or
-    after the TTL elapses.
+    ``LET name = { ... } REFRESH EVERY n unit`` registers a
+    refreshable binding: the sub-query is evaluated eagerly and the
+    result is cached, but the TTL causes the next read after expiry
+    to re-execute the sub-query.  Refreshable bindings cannot be
+    silently overwritten by another ``LET``, ``UPDATE``, or
+    ``MERGE``; callers must ``DROP BINDING`` first.
     """
 
     _instance: "Bindings | None" = None
@@ -64,14 +66,23 @@ class Bindings:
         return cls._instance
 
     def set(self, name: str, value: Any) -> None:
-        """Eager set, used by non-STATIC LET, UPDATE, and MERGE INTO."""
-        entry = Bindings._entries.get(name)
+        """Eager set, used by plain LET, UPDATE, and MERGE INTO.
+
+        Raises ``ValueError`` if the name is currently bound to a
+        refreshable binding; the caller must ``DROP BINDING`` first.
+        """
+        existing = Bindings._entries.get(name)
+        if existing is not None and existing.is_refreshable:
+            raise ValueError(
+                f"Binding '{name}' is refreshable; DROP BINDING {name} first"
+            )
+        entry = existing
         if entry is None:
             entry = BindingEntry()
             Bindings._entries[name] = entry
         entry.value = value
         entry.statement = None
-        entry.is_static = False
+        entry.is_refreshable = False
         entry.refresh_every_ms = None
         entry.cached_at = _now_ms()
         entry.primed = True
@@ -92,17 +103,20 @@ class Bindings:
     def get_entry(self, name: str) -> Optional[BindingEntry]:
         return Bindings._entries.get(name)
 
-    def is_static(self, name: str) -> bool:
+    def is_refreshable(self, name: str) -> bool:
         entry = Bindings._entries.get(name)
-        return entry is not None and entry.is_static
+        return entry is not None and entry.is_refreshable
 
-    def register_static(
+    def register_refreshable(
         self,
         name: str,
+        value: Any,
         statement: "ASTNode",
-        refresh_every_ms: Optional[int],
+        refresh_every_ms: int,
     ) -> None:
-        """Register a STATIC binding with a deferred sub-query.
+        """Register a refreshable binding with an eagerly evaluated
+        value and a backing sub-query that is re-executed when the
+        TTL has elapsed.
 
         Raises ``ValueError`` if a binding with the same name already
         exists; callers must ``DROP BINDING`` first.
@@ -112,41 +126,45 @@ class Bindings:
                 f"Binding '{name}' already exists; DROP BINDING {name} first"
             )
         entry = BindingEntry()
+        entry.value = value
         entry.statement = statement
-        entry.is_static = True
+        entry.is_refreshable = True
         entry.refresh_every_ms = refresh_every_ms
-        entry.primed = False
+        entry.primed = True
+        entry.cached_at = _now_ms()
         Bindings._entries[name] = entry
 
     def invalidate(self, name: str) -> None:
-        """Clear the cached value for a STATIC binding so the next
-        :meth:`materialize` call re-executes the backing sub-query.
-        No-op for non-STATIC bindings.
+        """Clear the cached value of a refreshable binding so the
+        next :meth:`materialize` call re-executes the backing
+        sub-query.  No-op for plain bindings.
         """
         entry = Bindings._entries.get(name)
-        if entry is None or not entry.is_static:
+        if entry is None or not entry.is_refreshable:
             return
         entry.value = None
         entry.primed = False
         entry.cached_at = 0
 
     async def materialize(self, name: str) -> None:
-        """Lazily evaluate a STATIC binding's backing sub-query if it
-        has never been primed or the TTL has elapsed.  No-op for
-        non-STATIC bindings or for STATIC bindings that are still fresh.
+        """Re-evaluate a refreshable binding's backing sub-query if
+        the cached value is stale (TTL elapsed or invalidated).
+        No-op for plain bindings or for refreshable bindings that are
+        still fresh.
         """
         entry = Bindings._entries.get(name)
-        if entry is None or not entry.is_static or entry.statement is None:
+        if entry is None or not entry.is_refreshable or entry.statement is None:
             return
-        is_fresh = entry.primed and (
-            entry.refresh_every_ms is None
-            or _now_ms() - entry.cached_at < entry.refresh_every_ms
+        is_fresh = (
+            entry.primed
+            and entry.refresh_every_ms is not None
+            and _now_ms() - entry.cached_at < entry.refresh_every_ms
         )
         if is_fresh:
             return
         if name in Bindings._materializing:
             raise ValueError(
-                f"Cyclic STATIC binding dependency detected while materialising '{name}'"
+                f"Cyclic refreshable binding dependency detected while materialising '{name}'"
             )
         Bindings._materializing.add(name)
         try:

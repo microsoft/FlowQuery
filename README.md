@@ -297,50 +297,52 @@ MATCH (c:Country) RETURN c.name
 `REFRESH VIRTUAL` works on both nodes and relationships and clears the cache
 so that the next access re-executes the backing sub-query.
 
-#### Caching `LET` Bindings: `STATIC LET`, `REFRESH BINDING`, `DROP BINDING`
+#### Refreshable `LET` Bindings: `REFRESH EVERY`, `REFRESH BINDING`, `DROP BINDING`
 
 `LET` bindings live for the lifetime of the process, just like virtual
-nodes and relationships, and the same caching primitives apply. A regular
-`LET name = { ... }` evaluates the sub-query eagerly each time the
-statement runs. `LET STATIC name = { ... }` instead registers a deferred
-provider: the sub-query is stored, and is (re)evaluated lazily on the
-first read or after the TTL elapses.
+nodes and relationships, and the same caching primitives apply. A plain
+`LET name = { ... }` evaluates the sub-query once, when the `LET`
+statement executes, and stores the result in the global binding store;
+all subsequent reads return that cached value without re-running the
+sub-query. To opt into TTL-based re-evaluation, add a trailing
+`REFRESH EVERY <n> <unit>` clause:
 
 ```cypher
-LET STATIC users = {
-    LOAD JSON FROM 'https://example.com/users.json' AS u
-    RETURN u.id AS id, u.name AS name
-};
-LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name
-```
-
-STATIC bindings are protected the same way STATIC virtual entities are:
-re-running `LET STATIC users = { ... }` without first dropping the existing
-binding raises an error. `LET STATIC` requires a sub-query right-hand side
-(an expression like `42` is rejected). Use `DROP BINDING users` to remove
-the binding so it can be redefined.
-
-To refresh on a schedule, add a `REFRESH EVERY <n> <unit>` clause:
-
-```cypher
-LET STATIC users = {
+LET users = {
     LOAD JSON FROM 'https://example.com/users.json' AS u
     RETURN u.id AS id, u.name AS name
 } REFRESH EVERY 5 MINUTES;
+LOAD JSON FROM users AS u RETURN u.id AS id, u.name AS name
 ```
 
-`REFRESH EVERY` requires `STATIC`. To force an immediate refresh, use
-`REFRESH BINDING name`:
+The sub-query still runs eagerly at `LET` time and the result is cached
+just like a plain binding; the `REFRESH EVERY` clause additionally
+arranges for the next read after the TTL has elapsed to re-execute the
+sub-query.
+
+Refreshable bindings (those with a `REFRESH EVERY` clause) cannot be
+silently overwritten: re-running `LET name = { ... } REFRESH EVERY ...`
+without first dropping the existing binding raises an error, and so
+does `UPDATE name = ...` or `MERGE INTO name ...` against the same
+name. `LET ... REFRESH EVERY` requires a sub-query right-hand side
+(an expression like `42 REFRESH EVERY 1 MINUTE` is rejected). To force
+an immediate refresh outside the TTL schedule, use `REFRESH BINDING`:
 
 ```cypher
 REFRESH BINDING users;
 LOAD JSON FROM users AS u RETURN u.id AS id
 ```
 
-`UPDATE` and `MERGE INTO` are not allowed against a STATIC binding;
-mutation would be invisibly overwritten by the next refresh. Use
-`REFRESH BINDING name` to re-evaluate the source, or `DROP BINDING name`
-and redefine the binding eagerly.
+To remove any binding (plain or refreshable), use `DROP BINDING`:
+
+```cypher
+DROP BINDING users;
+```
+
+`UPDATE` and `MERGE INTO` against a refreshable binding are blocked
+because the mutation would be invisibly overwritten by the next
+refresh. Use `REFRESH BINDING name` to re-evaluate the source, or
+`DROP BINDING name` and redefine the binding plainly.
 
 #### Statement Info: Labels, Properties, and Source Lineage
 

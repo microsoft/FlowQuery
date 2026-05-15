@@ -7,9 +7,9 @@ from .operation import Operation
 
 
 class RefreshBinding(Operation):
-    """``REFRESH BINDING name``: clear the cached value of a STATIC
-    binding so the next read re-executes the backing sub-query.  No-op
-    for non-STATIC bindings.
+    """``REFRESH BINDING name``: clear the cached value of a
+    refreshable binding so the next read re-executes the backing
+    sub-query.  No-op for plain bindings.
     """
 
     def __init__(self, name: str):

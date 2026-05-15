@@ -7,9 +7,9 @@ from .operation import Operation
 
 
 class DropBinding(Operation):
-    """``DROP BINDING name``: remove a LET-bound entry (STATIC or
-    eager) from the :class:`Bindings` singleton.  No-op if the binding
-    does not exist.
+    """``DROP BINDING name``: remove a LET-bound entry (plain or
+    refreshable) from the :class:`Bindings` singleton.  No-op if the
+    binding does not exist.
     """
 
     def __init__(self, name: str):

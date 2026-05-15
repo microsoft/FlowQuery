@@ -144,10 +144,11 @@ class Runner {
                 }
                 for (const stmt of this._statements) {
                     this.bindParameters(stmt.ast);
-                    // Pre-materialise any STATIC bindings referenced by this
-                    // statement.  Sub-query evaluation is async, but
-                    // BindingReference.value() is sync; populating the
-                    // cache up-front keeps reads cheap and synchronous.
+                    // Refresh any stale refreshable bindings referenced
+                    // by this statement.  Sub-query evaluation is
+                    // async, but BindingReference.value() is sync;
+                    // populating the cache up-front keeps reads cheap
+                    // and synchronous.
                     const bindingNames = new Set<string>();
                     this.collectBindingNames(stmt.ast, bindingNames);
                     const bindings = Bindings.getInstance();
@@ -188,8 +189,8 @@ class Runner {
 
     /**
      * Recursively walks the AST to collect the names of all
-     * `BindingReference`s.  Used to pre-materialise STATIC bindings
-     * before statement execution begins.
+     * `BindingReference`s.  Used to refresh stale refreshable
+     * bindings before statement execution begins.
      */
     private collectBindingNames(node: ASTNode, names: Set<string>): void {
         if (node instanceof BindingReference) {

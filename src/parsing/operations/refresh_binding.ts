@@ -2,9 +2,9 @@ import Bindings from "../../graph/bindings";
 import Operation from "./operation";
 
 /**
- * `REFRESH BINDING name`: clear the cached value of a STATIC binding
- * so the next read re-executes the backing sub-query.  No-op for
- * non-STATIC bindings.
+ * `REFRESH BINDING name`: clear the cached value of a refreshable
+ * binding so the next read re-executes the backing sub-query.  No-op
+ * for plain bindings.
  */
 class RefreshBinding extends Operation {
     private _name: string;

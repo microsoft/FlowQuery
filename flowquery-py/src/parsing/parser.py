@@ -818,11 +818,6 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
-        is_static = False
-        if self.token.is_static():
-            is_static = True
-            self.set_next_token()
-            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_identifier_or_keyword() or self.token.value is None:
             raise ValueError("Expected identifier after LET")
         name = self.token.value
@@ -832,10 +827,10 @@ class Parser(BaseParser):
             raise ValueError("Expected '=' after LET identifier")
         self.set_next_token()
         expression, sub_query = self._parse_let_update_rhs()
-        if is_static and sub_query is None:
-            raise ValueError("LET STATIC requires a sub-query right-hand side")
 
-        # Optional trailing REFRESH EVERY <n> <unit> clause.  Requires STATIC.
+        # Optional trailing REFRESH EVERY <n> <unit> clause turns the
+        # binding into a refreshable one.  Requires a sub-query RHS
+        # (there is nothing to re-evaluate for a literal expression).
         refresh_every_ms: Optional[int] = None
         saved_index = self._token_index
         self._skip_whitespace_and_comments()
@@ -845,9 +840,9 @@ class Parser(BaseParser):
             self.set_next_token()
             self._skip_whitespace_and_comments()
             if self.token.is_every():
-                if not is_static:
+                if sub_query is None:
                     raise ValueError(
-                        "REFRESH EVERY requires STATIC (caching must be enabled)"
+                        "LET REFRESH EVERY requires a sub-query right-hand side"
                     )
                 self.set_next_token()
                 self._expect_and_skip_whitespace_and_comments()
@@ -885,7 +880,7 @@ class Parser(BaseParser):
         if not consumed_refresh_clause:
             self._token_index = saved_index
 
-        return Let(name, expression, sub_query, is_static, refresh_every_ms)
+        return Let(name, expression, sub_query, refresh_every_ms)
 
     def _parse_update(self) -> Optional[Operation]:
         if not self.token.is_update():

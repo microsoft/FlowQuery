@@ -134,9 +134,10 @@ class Runner:
         bindings_singleton = Bindings.get_instance()
         for stmt in self._statements:
             self._bind_parameters(stmt.ast)
-            # Pre-materialise STATIC bindings referenced by this statement.
-            # Sub-query evaluation is async but BindingReference.value() is
-            # sync, so the cache must be populated up-front.
+            # Refresh any stale refreshable bindings referenced by
+            # this statement.  Sub-query evaluation is async but
+            # BindingReference.value() is sync, so the cache must be
+            # populated up-front.
             names: set[str] = set()
             self._collect_binding_names(stmt.ast, names)
             for name in names:

@@ -2,9 +2,9 @@ import Bindings from "../../graph/bindings";
 import Operation from "./operation";
 
 /**
- * `DROP BINDING name`: remove a `LET`-bound entry (STATIC or eager)
- * from the {@link Bindings} singleton.  No-op if the binding does not
- * exist.
+ * `DROP BINDING name`: remove a `LET`-bound entry (plain or
+ * refreshable) from the {@link Bindings} singleton.  No-op if the
+ * binding does not exist.
  */
 class DropBinding extends Operation {
     private _name: string;

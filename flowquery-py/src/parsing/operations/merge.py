@@ -213,9 +213,9 @@ class Merge(Operation):
             raise RuntimeError(
                 f"Binding '{self._name}' is not defined; use LET to create it"
             )
-        if bindings.is_static(self._name):
+        if bindings.is_refreshable(self._name):
             raise RuntimeError(
-                f"Binding '{self._name}' is STATIC; use REFRESH BINDING "
+                f"Binding '{self._name}' is refreshable; use REFRESH BINDING "
                 f"{self._name} to re-evaluate or DROP BINDING {self._name} first"
             )
         existing = bindings.get(self._name)

@@ -2,15 +2,16 @@ import type Runner from "../compute/runner";
 import type ASTNode from "../parsing/ast_node";
 
 /**
- * One entry in the {@link Bindings} singleton.  Eager (non-STATIC)
- * bindings store their materialised `value` directly; STATIC bindings
- * additionally store the backing `statement` and refresh metadata so
- * the value can be (re)computed lazily on read.
+ * One entry in the {@link Bindings} singleton.  Plain bindings store
+ * their materialised `value` directly; refreshable bindings (created
+ * by `LET name = { ... } REFRESH EVERY n unit`) additionally store
+ * the backing `statement` and TTL so the value can be re-evaluated on
+ * read once stale.
  */
 class BindingEntry {
     public value: any = undefined;
     public statement: ASTNode | null = null;
-    public isStatic: boolean = false;
+    public isRefreshable: boolean = false;
     public refreshEveryMs: number | null = null;
     public cachedAt: number = 0;
     public primed: boolean = false;
@@ -29,10 +30,12 @@ class BindingEntry {
  * `UPDATE` statement replaces an existing binding wholesale, while
  * `MERGE INTO ... USING ...` upserts per row.
  *
- * `LET STATIC name = { ... } [REFRESH EVERY n unit]` registers a
- * deferred provider: the sub-query is stored, not the value, and is
- * (re)evaluated lazily by {@link materialize} on first access or after
- * the TTL elapses.
+ * `LET name = { ... } REFRESH EVERY n unit` registers a refreshable
+ * binding: the sub-query is evaluated eagerly and the result is
+ * cached, but the TTL causes the next read after expiry to re-execute
+ * the sub-query.  Refreshable bindings cannot be silently overwritten
+ * by another `LET`, `UPDATE`, or `MERGE`; callers must `DROP BINDING`
+ * first.
  */
 class Bindings {
     private static instance: Bindings;
@@ -46,16 +49,24 @@ class Bindings {
         return Bindings.instance;
     }
 
-    /** Eager set, used by non-STATIC `LET`, `UPDATE`, and `MERGE INTO`. */
+    /**
+     * Eager set, used by plain `LET`, `UPDATE`, and `MERGE INTO`.
+     * Throws if the name is currently bound to a refreshable binding;
+     * the caller must `DROP BINDING` first.
+     */
     public set(name: string, value: any): void {
-        let entry = this._entries.get(name);
+        const existing = this._entries.get(name);
+        if (existing !== undefined && existing.isRefreshable) {
+            throw new Error(`Binding '${name}' is refreshable; DROP BINDING ${name} first`);
+        }
+        let entry = existing;
         if (entry === undefined) {
             entry = new BindingEntry();
             this._entries.set(name, entry);
         }
         entry.value = value;
         entry.statement = null;
-        entry.isStatic = false;
+        entry.isRefreshable = false;
         entry.refreshEveryMs = null;
         entry.cachedAt = Date.now();
         entry.primed = true;
@@ -84,35 +95,43 @@ class Bindings {
         return this._entries.get(name);
     }
 
-    public isStatic(name: string): boolean {
-        return this._entries.get(name)?.isStatic === true;
+    public isRefreshable(name: string): boolean {
+        return this._entries.get(name)?.isRefreshable === true;
     }
 
     /**
-     * Register a STATIC binding with a deferred sub-query.  Throws if a
-     * binding with the same name already exists; callers must
-     * `DROP BINDING` first.
+     * Register a refreshable binding with an eagerly evaluated value
+     * and a backing sub-query that is re-executed when the TTL has
+     * elapsed.  Throws if a binding with the same name already exists;
+     * callers must `DROP BINDING` first.
      */
-    public registerStatic(name: string, statement: ASTNode, refreshEveryMs: number | null): void {
+    public registerRefreshable(
+        name: string,
+        value: any,
+        statement: ASTNode,
+        refreshEveryMs: number
+    ): void {
         if (this._entries.has(name)) {
             throw new Error(`Binding '${name}' already exists; DROP BINDING ${name} first`);
         }
         const entry = new BindingEntry();
+        entry.value = value;
         entry.statement = statement;
-        entry.isStatic = true;
+        entry.isRefreshable = true;
         entry.refreshEveryMs = refreshEveryMs;
-        entry.primed = false;
+        entry.primed = true;
+        entry.cachedAt = Date.now();
         this._entries.set(name, entry);
     }
 
     /**
-     * Clear the cached value for a STATIC binding so the next
+     * Clear the cached value of a refreshable binding so the next
      * {@link materialize} call re-executes the backing sub-query.
-     * No-op for non-STATIC bindings.
+     * No-op for plain bindings.
      */
     public invalidate(name: string): void {
         const entry = this._entries.get(name);
-        if (entry === undefined || !entry.isStatic) {
+        if (entry === undefined || !entry.isRefreshable) {
             return;
         }
         entry.value = undefined;
@@ -121,24 +140,25 @@ class Bindings {
     }
 
     /**
-     * Lazily evaluate a STATIC binding's backing sub-query if it has
-     * never been primed or the TTL has elapsed.  No-op for non-STATIC
-     * bindings or for STATIC bindings that are still fresh.
+     * Re-evaluate a refreshable binding's backing sub-query if the
+     * cached value is stale (TTL elapsed or invalidated).  No-op for
+     * plain bindings or for refreshable bindings that are still fresh.
      */
     public async materialize(name: string): Promise<void> {
         const entry = this._entries.get(name);
-        if (entry === undefined || !entry.isStatic || entry.statement === null) {
+        if (entry === undefined || !entry.isRefreshable || entry.statement === null) {
             return;
         }
         const isFresh =
             entry.primed &&
-            (entry.refreshEveryMs === null || Date.now() - entry.cachedAt < entry.refreshEveryMs);
+            entry.refreshEveryMs !== null &&
+            Date.now() - entry.cachedAt < entry.refreshEveryMs;
         if (isFresh) {
             return;
         }
         if (this._materializing.has(name)) {
             throw new Error(
-                `Cyclic STATIC binding dependency detected while materialising '${name}'`
+                `Cyclic refreshable binding dependency detected while materialising '${name}'`
             );
         }
         this._materializing.add(name);

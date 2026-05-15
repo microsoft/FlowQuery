@@ -7221,13 +7221,13 @@ test("Test REFRESH EVERY re-executes sub-query after TTL elapses", async () => {
     await new Runner("DROP VIRTUAL (:TtlRefresh)").run();
 });
 
-// ===== STATIC LET / REFRESH BINDING / DROP BINDING =====
+// ===== Refreshable LET / REFRESH BINDING / DROP BINDING =====
 
 const _letCacheCounter = { count: 0 };
 const _letRefreshCounter = { count: 0 };
 
 @FunctionDef({
-    description: "Counter generator for STATIC LET cache test",
+    description: "Counter generator for LET cache test",
     category: "async",
     parameters: [],
     output: { description: "Yields one record per call", type: "any" },
@@ -7260,11 +7260,9 @@ class RefreshLetCounterGen extends AsyncFunction {
     }
 }
 
-test("Test STATIC LET caches across queries", async () => {
+test("Test plain LET sub-query caches the result", async () => {
     _letCacheCounter.count = 0;
-    await new Runner(
-        `LET STATIC letCacheA = { CALL staticletcountergen() YIELD id RETURN id }`
-    ).run();
+    await new Runner(`LET letCacheA = { CALL staticletcountergen() YIELD id RETURN id }`).run();
     const r1 = new Runner("LOAD JSON FROM letCacheA AS x RETURN x.id AS id");
     await r1.run();
     const r2 = new Runner("LOAD JSON FROM letCacheA AS x RETURN x.id AS id");
@@ -7274,31 +7272,28 @@ test("Test STATIC LET caches across queries", async () => {
     await new Runner("DROP BINDING letCacheA").run();
 });
 
-test("Test STATIC LET re-create without DROP throws", async () => {
-    await new Runner(`LET STATIC letDup = { UNWIND [{id:1}] AS r RETURN r.id AS id }`).run();
+test("Test refreshable LET re-create without DROP throws", async () => {
+    await new Runner(
+        `LET letDup = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
     await expect(
-        new Runner(`LET STATIC letDup = { UNWIND [{id:2}] AS r RETURN r.id AS id }`).run()
+        new Runner(
+            `LET letDup = { UNWIND [{id:2}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+        ).run()
     ).rejects.toThrow(/already exists/);
     await new Runner("DROP BINDING letDup").run();
 });
 
-test("Test LET REFRESH EVERY without STATIC throws", () => {
-    expect(
-        () =>
-            new Runner(
-                `LET noStatic = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
-            )
-    ).toThrow(/REFRESH EVERY requires STATIC/);
-});
-
-test("Test LET STATIC with expression RHS throws", () => {
-    expect(() => new Runner(`LET STATIC bad = 42`)).toThrow(/LET STATIC requires a sub-query/);
+test("Test LET REFRESH EVERY with expression RHS throws", () => {
+    expect(() => new Runner(`LET bad = 42 REFRESH EVERY 1 MINUTE`)).toThrow(
+        /LET REFRESH EVERY requires a sub-query/
+    );
 });
 
 test("Test REFRESH BINDING invalidates cache", async () => {
     _letRefreshCounter.count = 0;
     await new Runner(
-        `LET STATIC letRefreshTest = { CALL refreshletcountergen() YIELD id RETURN id }`
+        `LET letRefreshTest = { CALL refreshletcountergen() YIELD id RETURN id } REFRESH EVERY 1 MINUTE`
     ).run();
     await new Runner("LOAD JSON FROM letRefreshTest AS x RETURN x.id AS id").run();
     await new Runner("LOAD JSON FROM letRefreshTest AS x RETURN x.id AS id").run();
@@ -7317,20 +7312,24 @@ test("Test DROP BINDING removes the binding", async () => {
     );
 });
 
-test("Test UPDATE on STATIC binding throws", async () => {
-    await new Runner(`LET STATIC staticUpd = { UNWIND [{id:1}] AS r RETURN r.id AS id }`).run();
-    await expect(new Runner(`UPDATE staticUpd = 9`).run()).rejects.toThrow(/is STATIC/);
-    await new Runner("DROP BINDING staticUpd").run();
+test("Test UPDATE on refreshable binding throws", async () => {
+    await new Runner(
+        `LET refreshableUpd = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
+    await expect(new Runner(`UPDATE refreshableUpd = 9`).run()).rejects.toThrow(/is refreshable/);
+    await new Runner("DROP BINDING refreshableUpd").run();
 });
 
-test("Test MERGE on STATIC binding throws", async () => {
-    await new Runner(`LET STATIC staticMerge = { UNWIND [{id:1}] AS r RETURN r.id AS id }`).run();
+test("Test MERGE on refreshable binding throws", async () => {
+    await new Runner(
+        `LET refreshableMerge = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY 1 MINUTE`
+    ).run();
     await expect(
         new Runner(
-            `MERGE INTO staticMerge AS t USING [{id:2}] AS s ON id WHEN MATCHED THEN UPDATE SET .id = s.id`
+            `MERGE INTO refreshableMerge AS t USING [{id:2}] AS s ON id WHEN MATCHED THEN UPDATE SET .id = s.id`
         ).run()
-    ).rejects.toThrow(/is STATIC/);
-    await new Runner("DROP BINDING staticMerge").run();
+    ).rejects.toThrow(/is refreshable/);
+    await new Runner("DROP BINDING refreshableMerge").run();
 });
 
 test("Test LET REFRESH EVERY parses all supported units to milliseconds", async () => {
@@ -7348,11 +7347,11 @@ test("Test LET REFRESH EVERY parses all supported units to milliseconds", async 
     for (const { unit, amount, expected } of cases) {
         const name = `letRefreshUnit_${unit}_${amount}`;
         await new Runner(
-            `LET STATIC ${name} = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY ${amount} ${unit}`
+            `LET ${name} = { UNWIND [{id:1}] AS r RETURN r.id AS id } REFRESH EVERY ${amount} ${unit}`
         ).run();
         const entry = bindings.getEntry(name);
         expect(entry).toBeDefined();
-        expect(entry!.isStatic).toBe(true);
+        expect(entry!.isRefreshable).toBe(true);
         expect(entry!.refreshEveryMs).toBe(expected);
         await new Runner(`DROP BINDING ${name}`).run();
     }
@@ -7361,7 +7360,7 @@ test("Test LET REFRESH EVERY parses all supported units to milliseconds", async 
 test("Test LET REFRESH EVERY re-executes sub-query after TTL elapses", async () => {
     _letRefreshCounter.count = 0;
     await new Runner(
-        `LET STATIC letTtlRefresh = { CALL refreshletcountergen() YIELD id RETURN id } REFRESH EVERY 1 SECOND`
+        `LET letTtlRefresh = { CALL refreshletcountergen() YIELD id RETURN id } REFRESH EVERY 1 SECOND`
     ).run();
 
     await new Runner("LOAD JSON FROM letTtlRefresh AS x RETURN x.id AS id").run();

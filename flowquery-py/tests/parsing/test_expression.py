@@ -246,3 +246,58 @@ class TestExpression:
         expression.add_node(ObjectValue(obj))
         expression.finish()
         assert expression.value() == 1
+
+    # =========================================================================
+    # Deep-equality semantics (mirrors TS ``deepEquals`` helper tests). In
+    # Python, ``==`` already performs structural equality on dicts and lists,
+    # which is what ``Equals.value()`` ultimately delegates to.
+    # =========================================================================
+
+    def test_deep_equals_with_identical_primitives(self):
+        """Identical primitive values compare equal."""
+        assert (1 == 1) is True
+        assert ("abc" == "abc") is True
+        assert (None == None) is True  # noqa: E711
+
+    def test_deep_equals_with_different_primitives(self):
+        """Different primitive values (incl. cross-type) compare unequal."""
+        assert (1 == 2) is False
+        assert ("abc" == "def") is False
+        assert (None == 1) is False
+        assert (1 == "1") is False
+
+    def test_deep_equals_with_identical_objects(self):
+        """An object compared to itself is equal."""
+        obj = {"id": "1", "name": "Alice"}
+        assert (obj == obj) is True
+
+    def test_deep_equals_with_structurally_equal_objects(self):
+        """Distinct objects with the same shape compare equal."""
+        a = {"id": "1", "name": "Alice"}
+        b = {"id": "1", "name": "Alice"}
+        assert (a == b) is True
+
+    def test_deep_equals_with_different_objects(self):
+        """Objects with different values compare unequal."""
+        a = {"id": "1", "name": "Alice"}
+        b = {"id": "2", "name": "Bob"}
+        assert (a == b) is False
+
+    def test_deep_equals_with_nested_objects(self):
+        """Nested-object equality recurses into inner structures."""
+        a = {"id": "1", "data": {"x": 1, "y": [2, 3]}}
+        b = {"id": "1", "data": {"x": 1, "y": [2, 3]}}
+        c = {"id": "1", "data": {"x": 1, "y": [2, 4]}}
+        assert (a == b) is True
+        assert (a == c) is False
+
+    def test_deep_equals_with_arrays(self):
+        """Array equality requires same length and same per-index values."""
+        assert ([1, 2, 3] == [1, 2, 3]) is True
+        assert ([1, 2, 3] == [1, 2]) is False
+        assert ([1, 2] == [1, 2, 3]) is False
+
+    def test_deep_equals_with_objects_having_different_keys(self):
+        """Objects with mismatched key sets compare unequal."""
+        assert ({"a": 1} == {"b": 1}) is False
+        assert ({"a": 1} == {"a": 1, "b": 2}) is False

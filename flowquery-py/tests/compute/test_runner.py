@@ -4087,6 +4087,106 @@ class TestRunner:
         assert results[1]["rtype"] == "OR_TRAIN"
 
     @pytest.mark.asyncio
+    async def test_unlabeled_node_match_returns_all_nodes(self):
+        """MATCH (n) RETURN n returns nodes from all registered labels."""
+        await Runner("""
+            CREATE VIRTUAL (:Fruit) AS {
+                UNWIND [
+                    {id: 1, name: 'Apple'},
+                    {id: 2, name: 'Banana'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Color) AS {
+                UNWIND [
+                    {id: 3, name: 'Red'},
+                    {id: 4, name: 'Blue'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        runner = Runner("MATCH (n) RETURN n ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) >= 4
+        names = [r["n"].get("name") for r in results]
+        assert "Apple" in names
+        assert "Banana" in names
+        assert "Red" in names
+        assert "Blue" in names
+
+    @pytest.mark.asyncio
+    async def test_unlabeled_node_match_with_property_filter(self):
+        """MATCH (n {prop: val}) filters across all labels by property."""
+        runner = Runner("MATCH (n {name: 'Apple'}) RETURN n.name AS name")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["name"] == "Apple"
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels(self):
+        """MATCH (n:A|B) unions nodes from labels A and B."""
+        await Runner("""
+            CREATE VIRTUAL (:Cat) AS {
+                UNWIND [
+                    {id: 1, name: 'Whiskers'},
+                    {id: 2, name: 'Mittens'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Dog) AS {
+                UNWIND [
+                    {id: 3, name: 'Rex'},
+                    {id: 4, name: 'Buddy'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Fish) AS {
+                UNWIND [
+                    {id: 5, name: 'Nemo'}
+                ] AS record
+                RETURN record.id AS id, record.name AS name
+            }
+        """).run()
+        runner = Runner("MATCH (n:Cat|Dog) RETURN n ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        names = [r["n"]["name"] for r in results]
+        assert "Whiskers" in names
+        assert "Mittens" in names
+        assert "Rex" in names
+        assert "Buddy" in names
+        assert "Nemo" not in names
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels_returns_correct_label(self):
+        """ORed node labels: ``labels(n)`` reports the matched label per row."""
+        runner = Runner(
+            "MATCH (n:Cat|Dog) RETURN n.name AS name, labels(n) AS lbls ORDER BY n.id"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+        assert results[0] == {"name": "Whiskers", "lbls": ["Cat"]}
+        assert results[2] == {"name": "Rex", "lbls": ["Dog"]}
+
+    @pytest.mark.asyncio
+    async def test_match_with_ored_node_labels_with_optional_colon_syntax(self):
+        """``MATCH (n:A|:B)`` accepts an extra colon before the second label."""
+        runner = Runner("MATCH (n:Cat|:Dog) RETURN n ORDER BY n.id")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 4
+
+    @pytest.mark.asyncio
     async def test_match_with_untyped_relationship_unions_all_relationship_types(self):
         """Test match with untyped relationship unions all relationship types."""
         await Runner(

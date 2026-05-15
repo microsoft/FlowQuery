@@ -87,6 +87,145 @@ class TestColumnLineageMetadata:
         assert "injected" not in info2.returns
         assert info2.returns["y"].references == []
 
+    @pytest.mark.asyncio
+    async def test_maps_each_output_column_to_its_alias_property_reference(self):
+        """Each RETURN column exposes its alias/labels/property reference."""
+        await Runner("""
+            CREATE VIRTUAL (:ColLinCity) AS {
+                UNWIND [{id: 'nyc', name: 'New York', country: 'US'}] AS c
+                RETURN c.id AS id, c.name AS name, c.country AS country
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (c:ColLinCity)
+                RETURN c.name AS origin, c.country AS region
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            assert set(info.returns.keys()) == {"origin", "region"}
+            origin = info.returns["origin"]
+            assert origin.kind == "property"
+            assert len(origin.references) == 1
+            assert origin.references[0].alias == "c"
+            assert origin.references[0].kind == "node"
+            assert origin.references[0].labels == ["ColLinCity"]
+            assert origin.references[0].property == "name"
+            region = info.returns["region"]
+            assert region.kind == "property"
+            assert len(region.references) == 1
+            assert region.references[0].alias == "c"
+            assert region.references[0].kind == "node"
+            assert region.references[0].labels == ["ColLinCity"]
+            assert region.references[0].property == "country"
+        finally:
+            await Runner("DELETE VIRTUAL (:ColLinCity)").run()
+
+    def test_kind_literal_for_pure_literal_columns(self):
+        """Pure literal RETURN columns report ``kind='literal'`` with no refs."""
+        runner = Runner("WITH 1 AS x RETURN 42 AS answer, 'hi' AS greeting")
+        info = runner.metadata.info
+        assert info is not None
+        assert info.returns["answer"].kind == "literal"
+        assert info.returns["answer"].references == []
+        assert info.returns["greeting"].kind == "literal"
+        assert info.returns["greeting"].references == []
+
+    @pytest.mark.asyncio
+    async def test_kind_expression_when_column_combines_multiple_references(self):
+        """A column combining multiple lookups reports ``kind='expression'``."""
+        await Runner("""
+            CREATE VIRTUAL (:ColLinPerson) AS {
+                UNWIND [{id: 1, first: 'Ada', last: 'Lovelace'}] AS r
+                RETURN r.id AS id, r.first AS first, r.last AS last
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (p:ColLinPerson)
+                RETURN p.first + ' ' + p.last AS fullName
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            full = info.returns["fullName"]
+            assert full.kind == "expression"
+            assert len(full.references) == 2
+            props = sorted(ref.property for ref in full.references)
+            assert props == ["first", "last"]
+            for ref in full.references:
+                assert ref.alias == "p"
+                assert ref.kind == "node"
+                assert ref.labels == ["ColLinPerson"]
+        finally:
+            await Runner("DELETE VIRTUAL (:ColLinPerson)").run()
+
+    @pytest.mark.asyncio
+    async def test_kind_aggregate_surfaces_function_name_and_inner_references(self):
+        """Aggregate columns report ``kind='aggregate'`` with function name."""
+        await Runner("""
+            CREATE VIRTUAL (:ColLinAggCity) AS {
+                UNWIND [{id: 'a', country: 'US'}, {id: 'b', country: 'US'}] AS r
+                RETURN r.id AS id, r.country AS country
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (c:ColLinAggCity)
+                RETURN c.country AS country, count(c) AS n, collect(c.id) AS ids
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            assert info.returns["country"].kind == "property"
+            n_col = info.returns["n"]
+            assert n_col.kind == "aggregate"
+            assert n_col.aggregate == "count"
+            assert n_col.references == []
+            ids_col = info.returns["ids"]
+            assert ids_col.kind == "aggregate"
+            assert ids_col.aggregate == "collect"
+            assert len(ids_col.references) == 1
+            assert ids_col.references[0].alias == "c"
+            assert ids_col.references[0].kind == "node"
+            assert ids_col.references[0].labels == ["ColLinAggCity"]
+            assert ids_col.references[0].property == "id"
+        finally:
+            await Runner("DELETE VIRTUAL (:ColLinAggCity)").run()
+
+    @pytest.mark.asyncio
+    async def test_covers_relationship_references(self):
+        """Relationship variables in RETURN are tracked with ``kind='relationship'``."""
+        await Runner("""
+            CREATE VIRTUAL (:ColLinRelCity) AS {
+                UNWIND [{id: 'nyc'}, {id: 'lax'}] AS c RETURN c.id AS id
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:ColLinRelCity)-[:COL_LIN_FLIGHT]-(:ColLinRelCity) AS {
+                UNWIND [{left_id: 'nyc', right_id: 'lax', airline: 'AA'}] AS f
+                RETURN f.left_id AS left_id, f.right_id AS right_id, f.airline AS airline
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (a:ColLinRelCity)-[r:COL_LIN_FLIGHT]->(b:ColLinRelCity)
+                RETURN r.airline AS airline
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            airline = info.returns["airline"]
+            assert airline.kind == "property"
+            assert len(airline.references) == 1
+            ref = airline.references[0]
+            assert ref.alias == "r"
+            assert ref.kind == "relationship"
+            assert ref.labels == ["COL_LIN_FLIGHT"]
+            assert ref.property == "airline"
+        finally:
+            await Runner(
+                "DELETE VIRTUAL (:ColLinRelCity)-[:COL_LIN_FLIGHT]-(:ColLinRelCity)"
+            ).run()
+            await Runner("DELETE VIRTUAL (:ColLinRelCity)").run()
+
 
 class TestTraceRow:
     """:meth:`Runner.trace_row` bundles structural lineage with row provenance."""

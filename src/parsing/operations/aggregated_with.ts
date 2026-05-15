@@ -31,7 +31,7 @@ class AggregatedWith extends With {
     public asProvenanceSource(): ProvenanceSource {
         return {
             snapshot: (): RowProvenance =>
-                this._currentGroupProvenance ?? { nodes: [], relationships: [] },
+                this._currentGroupProvenance ?? { nodes: [], relationships: [], rows: [] },
         };
     }
     public async finish(): Promise<void> {

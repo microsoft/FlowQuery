@@ -22,6 +22,12 @@ export interface NodeBinding {
     /** The concrete `id` value of the matched node, preserving scalar type. */
     id: any;
     /**
+     * Shallow snapshot of the matched record's property values (excluding
+     * `id` and internal `_label`).  Present only when the runner was
+     * constructed with `{ properties: true }`.
+     */
+    properties?: Record<string, any>;
+    /**
      * Deep-mode lineage: when the matched node came from a virtual
      * `CREATE VIRTUAL (:X) AS { ... }` sub-query, this is the inner
      * runner's `RowProvenance` row that produced the record.  Omitted
@@ -41,6 +47,12 @@ export interface RelationshipHop {
      *  virtual relationship spans multiple underlying types). */
     type: string;
     /**
+     * Shallow snapshot of the relationship record's property values.
+     * Present only when the runner was constructed with
+     * `{ properties: true }`.
+     */
+    properties?: Record<string, any>;
+    /**
      * Deep-mode lineage: when the traversed edge came from a virtual
      * relationship's inner sub-query, this is the inner runner's row
      * provenance for the contributing record.  Omitted otherwise.
@@ -59,41 +71,60 @@ export interface RelationshipBinding {
     type: string | null;
     /** The traversed edges in path order. */
     hops: RelationshipHop[];
+    /**
+     * The ordered chain of node ids visited along the relationship match:
+     * `[hops[0].left_id, ...hops.map(h => h.right_id)]`.  Always present.
+     * Empty for OPTIONAL-MATCH misses and zero-hop variable-length matches.
+     */
+    path: any[];
 }
 
 /**
- * Row-level lineage: the concrete node ids and relationship hops that
- * contributed to a single row of `Runner.results`.  Aligned by index with
- * `Runner.results` when provenance is enabled.
+ * One flat slice of bindings — either a single non-aggregate row's
+ * contribution, or one input row's contribution to an aggregate group.
+ * Sources (`ProvenanceSource.snapshot`) and the entries in
+ * `RowProvenance.rows` are all `RowSegment`s.
  */
-export interface RowProvenance {
+export interface RowSegment {
     nodes: NodeBinding[];
     relationships: RelationshipBinding[];
 }
 
 /**
- * Anything that can produce a `RowProvenance` segment for the row currently
- * being emitted.  Two implementations exist today:
+ * Row-level lineage aligned by index with `Runner.results`.  Extends a
+ * single segment (the union of contributing bindings) with `rows`, the
+ * ordered per-input-row segments.  For non-aggregate rows `rows.length`
+ * is 1; for aggregates it equals the number of input rows that fed the
+ * group, so `result.collectField[k]` aligns positionally with
+ * `provenance.rows[k]`.
+ */
+export interface RowProvenance extends RowSegment {
+    rows: RowSegment[];
+}
+
+/**
+ * Anything that can produce a `RowSegment` for the row currently being
+ * emitted.  Two implementations exist today:
  *
  *  - {@link ProvenanceSites} — snapshots the live bindings of a MATCH's
  *    `Node` / `Relationship` slots at the moment of the emit.
  *  - `AggregatedWith` (in `aggregated_with.ts`) — replays the pre-computed
- *    provenance of the group it is currently flushing downstream.
+ *    segment of the group it is currently flushing downstream.
  *
  * The terminal `Return` (and intermediate `AggregatedWith` /
  * `AggregatedReturn` operations) iterate their registered sources per row
- * and concatenate the segments into a single `RowProvenance`.
+ * and concatenate the segments into a single `RowSegment`.
  */
 export interface ProvenanceSource {
-    snapshot(): RowProvenance;
+    snapshot(): RowSegment;
 }
 
 /**
- * Concatenate one segment into a destination row.  Lives here so the
- * merge order and dedup behaviour stay consistent across consumers
- * (`Return`, `GroupBy`, `AggregatedWith`).
+ * Concatenate one segment into a destination segment.  Lives here so the
+ * merge order stays consistent across consumers (`Return`, `GroupBy`,
+ * `AggregatedWith`).
  */
-export function mergeProvenanceSegment(into: RowProvenance, segment: RowProvenance): void {
+export function mergeProvenanceSegment(into: RowSegment, segment: RowSegment): void {
     for (const n of segment.nodes) into.nodes.push(n);
     for (const r of segment.relationships) into.relationships.push(r);
 }
@@ -112,6 +143,15 @@ export class ProvenanceSites {
     public readonly relationships: Relationship[] = [];
     private readonly _seenNodeIdentifiers: Set<string> = new Set();
     private readonly _seenRelationshipIdentifiers: Set<string> = new Set();
+    private _captureProperties: boolean = false;
+
+    /**
+     * Enable property-level capture for snapshots produced by this collector.
+     * Set by the Runner when constructed with `{ properties: true }`.
+     */
+    public set captureProperties(value: boolean) {
+        this._captureProperties = value;
+    }
 
     /**
      * Register a node slot.  `NodeReference`s (re-bindings of a previously
@@ -152,7 +192,8 @@ export class ProvenanceSites {
      * Returns `null` for ids of slots that are not currently matched (e.g.
      * OPTIONAL MATCH misses).
      */
-    public snapshot(): RowProvenance {
+    public snapshot(): RowSegment {
+        const captureProps = this._captureProperties;
         const nodes: NodeBinding[] = new Array(this.nodes.length);
         for (let i = 0; i < this.nodes.length; i++) {
             const node = this.nodes[i];
@@ -162,6 +203,9 @@ export class ProvenanceSites {
                 label: node.label,
                 id: v === null || v === undefined ? null : (v.id ?? null),
             };
+            if (captureProps && v !== null && v !== undefined) {
+                binding.properties = extractNodeProperties(v);
+            }
             const src = v == null ? undefined : (getVirtualSource(v) as RowProvenance | undefined);
             if (src !== undefined) binding.source = src;
             nodes[i] = binding;
@@ -178,18 +222,73 @@ export class ProvenanceSites {
                     right_id: m.endNode == null ? null : (m.endNode.id ?? null),
                     type: m.type,
                 };
+                if (captureProps) {
+                    hop.properties = extractRelationshipProperties(m);
+                }
                 const src = getVirtualSource(m) as RowProvenance | undefined;
                 if (src !== undefined) hop.source = src;
                 hops[j] = hop;
+            }
+            const path: any[] = hops.length === 0 ? [] : new Array(hops.length + 1);
+            if (hops.length > 0) {
+                path[0] = hops[0].left_id;
+                for (let k = 0; k < hops.length; k++) {
+                    path[k + 1] = hops[k].right_id;
+                }
             }
             relationships[i] = {
                 alias: rel.identifier,
                 type: rel.type,
                 hops,
+                path,
             };
         }
         return { nodes, relationships };
     }
+}
+
+/**
+ * Shallow-copy a node record's user-visible property values, stripping
+ * `id` and the internal `_label` injected by `DataResolver`.
+ */
+function extractNodeProperties(record: Record<string, any>): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const key of Object.keys(record)) {
+        if (key === "id" || key === "_label") continue;
+        out[key] = record[key];
+    }
+    return out;
+}
+
+/**
+ * Shallow-copy a relationship match record's property values, stripping
+ * the structural fields (`type`, `startNode`, `endNode`, `properties`,
+ * `left_id`, `right_id`, `_type`) so what remains are the user-declared
+ * edge properties.
+ */
+function extractRelationshipProperties(match: Record<string, any>): Record<string, any> {
+    // The match's nested `properties` field already holds the user-declared
+    // edge properties (set in `RelationshipMatchCollector.push`).  Prefer
+    // that source when present; otherwise filter the structural fields.
+    if (match.properties && typeof match.properties === "object") {
+        return { ...match.properties };
+    }
+    const out: Record<string, any> = {};
+    for (const key of Object.keys(match)) {
+        if (
+            key === "type" ||
+            key === "startNode" ||
+            key === "endNode" ||
+            key === "properties" ||
+            key === "left_id" ||
+            key === "right_id" ||
+            key === "_type"
+        ) {
+            continue;
+        }
+        out[key] = match[key];
+    }
+    return out;
 }
 
 /**

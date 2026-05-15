@@ -1,4 +1,9 @@
-import { ProvenanceSource, RowProvenance, mergeProvenanceSegment } from "../../compute/provenance";
+import {
+    ProvenanceSource,
+    RowProvenance,
+    RowSegment,
+    mergeProvenanceSegment,
+} from "../../compute/provenance";
 import Limit from "./limit";
 import OrderBy from "./order_by";
 import Projection from "./projection";
@@ -90,7 +95,14 @@ class Return extends Projection {
         }
         this._results.push(Object.fromEntries(record));
         if (this._provenanceSink !== null) {
-            this._provenanceRows.push(this._snapshotProvenance());
+            const segment = this._snapshotProvenance();
+            // Non-aggregate row: `rows` contains the single input-row segment
+            // so the shape stays uniform with aggregate rows.
+            this._provenanceRows.push({
+                nodes: segment.nodes,
+                relationships: segment.relationships,
+                rows: [segment],
+            });
         }
         if (this._orderBy === null && this._limit !== null) {
             this._limit.increment();
@@ -98,10 +110,11 @@ class Return extends Projection {
     }
     /**
      * Concatenate all registered provenance sources into a single
-     * `RowProvenance`.  Called once per emitted row.
+     * {@link RowSegment}.  Called once per emitted row by `run()`, which
+     * wraps the result as a `RowProvenance` with `rows: [segment]`.
      */
-    protected _snapshotProvenance(): RowProvenance {
-        const merged: RowProvenance = { nodes: [], relationships: [] };
+    protected _snapshotProvenance(): RowSegment {
+        const merged: RowSegment = { nodes: [], relationships: [] };
         if (this._provenanceSources !== null) {
             for (const src of this._provenanceSources) {
                 mergeProvenanceSegment(merged, src.snapshot());

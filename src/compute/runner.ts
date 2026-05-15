@@ -56,6 +56,15 @@ export interface RunnerOptions {
      * Implies `provenance: true`.  Defaults to `false`.
      */
     deep?: boolean;
+
+    /**
+     * When `true`, each `NodeBinding` and `RelationshipHop` in the
+     * provenance also carries a `properties` field with a shallow copy of
+     * the matched record's user-visible property values.
+     *
+     * Implies `provenance: true`.  Defaults to `false`.
+     */
+    properties?: boolean;
 }
 
 /**
@@ -129,7 +138,11 @@ class Runner {
             throw new Error("Either statement or AST must be provided");
         }
         this._args = args;
-        this._options = options.deep ? { ...options, provenance: true } : options;
+        // Both `deep` and `properties` are heavier extensions of provenance
+        // and imply it; normalise here so the rest of the runner only checks
+        // a single flag.
+        this._options =
+            options.deep || options.properties ? { ...options, provenance: true } : options;
 
         if (ast !== null) {
             this._isTopLevel = false;
@@ -190,7 +203,8 @@ class Runner {
             try {
                 if (this._isTopLevel) {
                     DataResolver.getInstance().dataCache = new DataCache(
-                        this._options.deep === true
+                        this._options.deep === true,
+                        this._options.properties === true
                     );
                 }
                 if (this._options.provenance) {
@@ -247,7 +261,13 @@ class Runner {
      * re-publishes itself as the single active source going forward.
      */
     private attachProvenance(first: Operation, sink: RowProvenance[]): void {
-        let activeSites: ProvenanceSites = new ProvenanceSites();
+        const captureProps = this._options.properties === true;
+        const makeSites = (): ProvenanceSites => {
+            const s = new ProvenanceSites();
+            s.captureProperties = captureProps;
+            return s;
+        };
+        let activeSites: ProvenanceSites = makeSites();
         // Extra (non-site) sources contributed by upstream aggregations.
         let activeAggregations: AggregatedWith[] = [];
         let op: Operation | null = first;
@@ -266,7 +286,7 @@ class Runner {
                 for (const a of activeAggregations) {
                     op.addProvenanceSource(a.asProvenanceSource());
                 }
-                activeSites = new ProvenanceSites();
+                activeSites = makeSites();
                 activeAggregations = [op];
             }
             if (op.next === null) {

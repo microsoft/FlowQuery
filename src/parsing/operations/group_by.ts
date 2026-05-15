@@ -3,6 +3,7 @@ import {
     ProvenanceSource,
     RelationshipBinding,
     RowProvenance,
+    RowSegment,
     nodeBindingKey,
     relationshipBindingKey,
 } from "../../compute/provenance";
@@ -18,6 +19,7 @@ class Node {
     private _elements: AggregationElement[] | null = null;
     private _provenanceNodes: Map<string, NodeBinding> | null = null;
     private _provenanceRels: Map<string, RelationshipBinding> | null = null;
+    private _provenanceRows: RowSegment[] | null = null;
     constructor(value: any = null) {
         this._value = value;
     }
@@ -46,6 +48,18 @@ class Node {
             this._provenanceRels = new Map();
         }
         return this._provenanceRels;
+    }
+    /**
+     * Per-input-row contribution segments in arrival order.  One entry is
+     * appended per `GroupBy.run()` call that lands in this group, so an
+     * aggregate row's `provenance.rows` aligns positionally with
+     * `collect(...)` outputs from the same group.
+     */
+    public get provenanceRows(): RowSegment[] {
+        if (this._provenanceRows === null) {
+            this._provenanceRows = [];
+        }
+        return this._provenanceRows;
     }
 }
 
@@ -81,17 +95,22 @@ class GroupBy extends Projection {
         if (this._provenanceSources === null) return;
         const nodeMap = this.current.provenanceNodes;
         const relMap = this.current.provenanceRelationships;
+        // Per-input-row segment: a single merged contribution for THIS run().
+        const rowSegment: RowSegment = { nodes: [], relationships: [] };
         for (const src of this._provenanceSources) {
             const snap = src.snapshot();
             for (const b of snap.nodes) {
+                rowSegment.nodes.push(b);
                 const k = nodeBindingKey(b);
                 if (!nodeMap.has(k)) nodeMap.set(k, b);
             }
             for (const b of snap.relationships) {
+                rowSegment.relationships.push(b);
                 const k = relationshipBindingKey(b);
                 if (!relMap.has(k)) relMap.set(k, b);
             }
         }
+        this.current.provenanceRows.push(rowSegment);
     }
     private get root(): Node {
         return this._root;
@@ -209,6 +228,7 @@ class GroupBy extends Projection {
             yield {
                 nodes: Array.from(node.provenanceNodes.values()),
                 relationships: Array.from(node.provenanceRelationships.values()),
+                rows: node.provenanceRows,
             };
         }
     }

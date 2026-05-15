@@ -458,11 +458,14 @@ fq.provenance;
 //     ],
 //     relationships: [
 //       { alias: 'r', type: 'FLIGHT',
-//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }] }
-//     ]
+//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }],
+//         path: ['nyc', 'lax'] }
+//     ],
+//     rows: [/* per-input-row segments, see below */]
 //   },
 //   { nodes: [...], relationships: [{ alias: 'r', type: 'FLIGHT',
-//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }] }] }
+//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }],
+//     path: ['nyc', 'yyz'] }], rows: [...] }
 // ]
 ```
 
@@ -475,6 +478,10 @@ Semantics:
   `alias: null`.
 - Variable-length matches (`[:T*m..n]`) populate `hops` with every
   traversed edge in path order.
+- Every `RelationshipBinding` also carries a `path` field listing every
+  visited node id in order: `[hops[0].left_id, hops[0].right_id,
+hops[1].right_id, …]`. For single-hop matches `path` has exactly two
+  entries; for variable-length matches `path.length === hops.length + 1`.
 - `OPTIONAL MATCH` misses surface as `id: null` for the unmatched node
   and an empty `hops: []` for the unmatched relationship.
 - `ORDER BY` and `LIMIT` permute and truncate `provenance` in lockstep
@@ -494,6 +501,62 @@ Semantics:
 
 When the option is omitted or set to `false`, the runner has zero
 provenance overhead and `runner.provenance` returns an empty array.
+
+##### Per-Input-Row Segments: Aligning `collect()` with its Sources
+
+Each `RowProvenance` also carries a `rows` array: one **segment** per
+input row that contributed to the result. A segment is just the
+`{ nodes, relationships }` slice for that single contributing row.
+
+For non-aggregate rows `rows` always has length 1 and mirrors the
+top-level `nodes`/`relationships`. For aggregate rows the array
+positionally aligns with array-valued aggregates such as `collect`:
+
+```cypher
+MATCH (a:City)-[:FLIGHT]->(b:City)
+RETURN a.country AS country, collect(b.name) AS destinations
+```
+
+```javascript
+fq.results[0];
+// { country: 'US', destinations: ['LAX', 'YYZ'] }
+fq.provenance[0].rows.length; // 2
+fq.provenance[0].rows[0].nodes; // contributed LAX: includes b = lax
+fq.provenance[0].rows[1].nodes; // contributed YYZ: includes b = yyz
+```
+
+This lets you map each element of a `collect`/`sum`/`avg` result back
+to the exact node / relationship ids that produced it.
+
+##### Property-Level Lineage: `{ properties: true }`
+
+When you also want the matched property **values** alongside the ids,
+add `{ properties: true }`:
+
+```javascript
+const fq = new FlowQuery(query, null, null, { provenance: true, properties: true });
+await fq.run();
+
+fq.provenance[0].nodes[0];
+// {
+//   alias: 'a', label: 'City', id: 'nyc',
+//   properties: { name: 'New York', country: 'US' }
+// }
+fq.provenance[0].relationships[0].hops[0];
+// {
+//   left_id: 'nyc', right_id: 'lax', type: 'FLIGHT',
+//   properties: { airline: 'AA' }
+// }
+```
+
+Semantics:
+
+- `properties: true` implies `provenance: true`.
+- `NodeBinding.properties` is a shallow copy of the matched record with
+  `id` and `_label` stripped. `RelationshipHop.properties` is a shallow
+  copy of the matched relationship's user-visible properties.
+- Without the option the `properties` field is omitted, keeping the
+  default lineage payload minimal.
 
 ##### Deep Mode: Threading Lineage Through Virtual Sub-Queries
 

@@ -234,7 +234,9 @@ test("Provenance is empty for non-graph queries (WITH/RETURN)", async () => {
     });
     await runner.run();
     expect(runner.results).toEqual([{ sum: 3 }]);
-    expect(runner.provenance).toEqual([{ nodes: [], relationships: [] }]);
+    expect(runner.provenance).toEqual([
+        { nodes: [], relationships: [], rows: [{ nodes: [], relationships: [] }] },
+    ]);
 });
 
 test("Provenance for OPTIONAL MATCH yields null ids on misses", async () => {
@@ -673,5 +675,193 @@ test("Deep mode implies provenance: setting deep alone enables row lineage", asy
     await runner.run();
     expect(runner.provenance.length).toBe(runner.results.length);
     expect(runner.results.length).toBeGreaterThan(0);
+    await dropCityGraph();
+});
+
+// ============================================================================
+// path-level lineage (always-on)
+// ============================================================================
+
+test("Relationship lineage exposes a `path` field listing every node id in order", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity {name: 'New York'})-[r:PROV_FLIGHT]->(b:ProvCity)
+        RETURN a.name AS origin, b.name AS destination
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    for (const p of runner.provenance) {
+        const rel = p.relationships[0];
+        expect(rel.path).toBeDefined();
+        expect(Array.isArray(rel.path)).toBe(true);
+        // Single-hop: path = [left_id, right_id].
+        expect(rel.path).toEqual([rel.hops[0].left_id, rel.hops[0].right_id]);
+    }
+    await dropCityGraph();
+});
+
+test("Variable-length relationship `path` lists every visited node id", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity {name: 'New York'})-[r:PROV_FLIGHT*1..2]->(b:ProvCity)
+        RETURN a.name AS origin, b.name AS destination
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    for (const p of runner.provenance) {
+        const rel = p.relationships[0];
+        // path length = hops + 1.
+        expect(rel.path.length).toBe(rel.hops.length + 1);
+        // Path = [hops[0].left_id, hops[0].right_id, hops[1].right_id, ...]
+        const expected: any[] = [rel.hops[0].left_id];
+        for (const h of rel.hops) expected.push(h.right_id);
+        expect(rel.path).toEqual(expected);
+    }
+    await dropCityGraph();
+});
+
+// ============================================================================
+// row-level lineage (always-on)
+// ============================================================================
+
+test("Non-aggregate rows expose a single-segment `rows` array", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity)
+        WHERE a.country = 'US'
+        RETURN a.name AS name
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    for (const p of runner.provenance) {
+        expect(Array.isArray(p.rows)).toBe(true);
+        expect(p.rows.length).toBe(1);
+        expect(p.rows[0].nodes).toEqual(p.nodes);
+        expect(p.rows[0].relationships).toEqual(p.relationships);
+    }
+    await dropCityGraph();
+});
+
+test("Aggregate rows expose one segment per contributing input row, aligned with collect()", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity)-[:PROV_FLIGHT]->(b:ProvCity)
+        RETURN a.country AS country, collect(b.name) AS destinations
+    `,
+        null,
+        null,
+        { provenance: true }
+    );
+    await runner.run();
+    expect(runner.results.length).toBe(runner.provenance.length);
+    for (let i = 0; i < runner.results.length; i++) {
+        const result = runner.results[i];
+        const prov = runner.provenance[i];
+        const destinations: string[] = result.destinations;
+        // One segment per contributing input row.
+        expect(prov.rows.length).toBe(destinations.length);
+        // Each row segment must include the `b` node whose name appears at the
+        // corresponding index in collect(b.name).  Look it up via id.
+        for (let k = 0; k < destinations.length; k++) {
+            const segment = prov.rows[k];
+            const bBinding = segment.nodes.find((n) => n.alias === "b");
+            expect(bBinding).toBeDefined();
+            // The contributing `a` must also be in the same segment.
+            const aBinding = segment.nodes.find((n) => n.alias === "a");
+            expect(aBinding).toBeDefined();
+        }
+    }
+    await dropCityGraph();
+});
+
+// ============================================================================
+// property-level lineage (opt-in via {properties: true})
+// ============================================================================
+
+test("{properties: true} attaches matched property values onto NodeBinding", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity)
+        WHERE a.country = 'US'
+        RETURN a.name AS name
+    `,
+        null,
+        null,
+        { provenance: true, properties: true }
+    );
+    await runner.run();
+    for (const p of runner.provenance) {
+        const a = p.nodes[0];
+        expect(a.properties).toBeDefined();
+        expect(a.properties!.name).toBeDefined();
+        expect(a.properties!.country).toBe("US");
+        // The id field should NOT be duplicated under properties.
+        expect(a.properties!.id).toBeUndefined();
+        // The _label field should not leak through either.
+        expect(a.properties!._label).toBeUndefined();
+    }
+    await dropCityGraph();
+});
+
+test("{properties: true} attaches matched property values onto RelationshipHop", async () => {
+    await createCityGraph();
+    const runner = new Runner(
+        `
+        MATCH (a:ProvCity {name: 'New York'})-[r:PROV_FLIGHT]->(b:ProvCity)
+        RETURN a.name AS origin, b.name AS destination
+    `,
+        null,
+        null,
+        { provenance: true, properties: true }
+    );
+    await runner.run();
+    for (const p of runner.provenance) {
+        const hop = p.relationships[0].hops[0];
+        expect(hop.properties).toBeDefined();
+        expect(hop.properties!.airline).toBeDefined();
+        // Structural fields not duplicated.
+        expect(hop.properties!.left_id).toBeUndefined();
+        expect(hop.properties!.right_id).toBeUndefined();
+    }
+    await dropCityGraph();
+});
+
+test("{properties: true} without {provenance: true} is a no-op", async () => {
+    await createCityGraph();
+    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.name AS name`, null, null, {
+        properties: true,
+    });
+    await runner.run();
+    // properties alone implies provenance (matches deep semantics).
+    expect(runner.provenance.length).toBe(runner.results.length);
+    for (const p of runner.provenance) {
+        expect(p.nodes[0].properties).toBeDefined();
+    }
+    await dropCityGraph();
+});
+
+test("Without {properties: true}, NodeBinding has no properties field", async () => {
+    await createCityGraph();
+    const runner = new Runner(`MATCH (a:ProvCity) RETURN a.name AS name`, null, null, {
+        provenance: true,
+    });
+    await runner.run();
+    for (const p of runner.provenance) {
+        expect(p.nodes[0].properties).toBeUndefined();
+    }
     await dropCityGraph();
 });

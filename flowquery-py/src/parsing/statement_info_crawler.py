@@ -12,6 +12,7 @@ from ..graph.node_reference import NodeReference
 from ..graph.relationship import Relationship
 from .ast_node import ASTNode
 from .data_structures.lookup import Lookup
+from .expressions.binding_reference import BindingReference
 from .expressions.expression import Expression
 from .expressions.f_string import FString
 from .expressions.identifier import Identifier
@@ -19,12 +20,14 @@ from .expressions.operator import Equals, In
 from .expressions.parameter_reference import ParameterReference
 from .expressions.reference import Reference
 from .expressions.subquery_expression import SubqueryExpression
+from .functions.aggregate_function import AggregateFunction
 from .operations.aggregated_return import AggregatedReturn
 from .operations.aggregated_with import AggregatedWith
 from .operations.create_node import CreateNode
 from .operations.create_relationship import CreateRelationship
 from .operations.delete_node import DeleteNode
 from .operations.delete_relationship import DeleteRelationship
+from .operations.let import Let
 from .operations.load import Load
 from .operations.match import Match
 from .operations.operation import Operation
@@ -90,6 +93,49 @@ class DeclaredInfo:
 
 
 @dataclass
+class ColumnReference:
+    """A single ``alias.property`` access that contributes to an output
+    column.
+    """
+
+    #: The binding name as written in the query (e.g. ``'c'`` in ``c.name``).
+    alias: str
+    #: Whether the binding is a node or a relationship.
+    kind: str  # "node" | "relationship"
+    #: Node labels (when ``kind == 'node'``) or relationship types (when
+    #: ``kind == 'relationship'``).  Multi-label intersection matches
+    #: surface every label.
+    labels: List[str] = field(default_factory=list)
+    #: The property name read off the binding (e.g. ``'name'`` in
+    #: ``c.name``).
+    property: str = ""
+
+
+@dataclass
+class ColumnLineage:
+    """Per-output-column lineage.
+
+    Bridges the AST-level access list with the runtime row provenance:
+    for each column the runner emits, this tells you which
+    ``alias.property`` reads went into it and how they were combined.
+
+    ``kind`` summarises the column expression:
+
+    * ``'literal'`` - the column is a literal expression with no bindings.
+    * ``'property'`` - a single direct ``alias.property`` access (or a
+      pass-through projection of one).
+    * ``'expression'`` - a computed expression over one or more
+      ``alias.property`` accesses.
+    * ``'aggregate'`` - contains an aggregate function (``count``,
+      ``sum``, ``collect``, ...).
+    """
+
+    references: List[ColumnReference] = field(default_factory=list)
+    kind: str = "literal"  # "literal" | "property" | "expression" | "aggregate"
+    aggregate: Optional[str] = None
+
+
+@dataclass
 class StatementInfo:
     """Structural information extracted from a parsed FlowQuery statement.
 
@@ -136,6 +182,16 @@ class StatementInfo:
     #: (or final WITH if no RETURN is present) — independent of whether
     #: the crawled statement actually consumes them.
     declared: DeclaredInfo = field(default_factory=DeclaredInfo)
+    #: Per-output-column lineage for the final ``RETURN`` clause.  Maps
+    #: each result column name to the ``alias.property`` accesses that
+    #: compose it.  Empty (``{}``) when the statement has no ``RETURN``
+    #: (e.g. pure CREATE / DELETE statements).
+    #:
+    #: Combine with :attr:`Runner.provenance` to trace a result-row cell
+    #: back to its source node / relationship id, the matched property
+    #: value, and the originating virtual sub-query (all available when
+    #: the runner is constructed with ``RunnerOptions(provenance=True)``).
+    returns: Dict[str, ColumnLineage] = field(default_factory=dict)
 
 
 class StatementInfoCrawler:
@@ -171,6 +227,16 @@ class StatementInfoCrawler:
         self._own_node_creates: List[Tuple[str, ASTNode]] = []
         # (type, statement) for inline CREATE VIRTUAL relationship clauses.
         self._own_rel_creates: List[Tuple[str, ASTNode]] = []
+        # Per-output-column lineage of the most recently visited
+        # ``RETURN`` clause.  Overwritten each time a ``Return`` op is
+        # visited so the last RETURN wins (matching the user-visible
+        # result shape).
+        self._returns: Dict[str, ColumnLineage] = {}
+        # Map of ``LET name = { ... }`` binding name to the data sources
+        # its sub-query right-hand side touches.  Used to follow a
+        # downstream ``LOAD JSON FROM name`` reference back to the
+        # original URL / file / async-function name.
+        self._let_sources: Dict[str, Set[str]] = {}
 
     def crawl(self, statements: Union[ASTNode, Iterable[ASTNode]]) -> StatementInfo:
         """Walks one or more statement ASTs and returns the merged structural info.
@@ -180,11 +246,16 @@ class StatementInfoCrawler:
                 (for multi-statement queries).
         """
         self._reset()
-        roots: Iterable[ASTNode]
+        roots: List[ASTNode]
         if isinstance(statements, ASTNode):
             roots = [statements]
         else:
-            roots = statements
+            roots = list(statements)
+        # Pre-pass: collect the sources each LET-bound sub-query touches
+        # so we can follow downstream ``LOAD FROM <letName>`` references
+        # back to the underlying URL / file / function.
+        for root in roots:
+            self._collect_let_sources(root)
         for root in roots:
             self._crawl_statement(root)
         self._resolve_registered_definitions()
@@ -207,6 +278,28 @@ class StatementInfoCrawler:
         self._own_created_rel_types = set()
         self._own_node_creates = []
         self._own_rel_creates = []
+        self._returns = {}
+        self._let_sources = {}
+
+    def _collect_let_sources(self, root: ASTNode) -> None:
+        """Pre-pass over a statement to record, for each ``LET name =
+        { ... }`` with a sub-query right-hand side, the data sources
+        its sub-query touches.
+        """
+        try:
+            op = root.first_child()
+        except Exception:
+            return
+        if not isinstance(op, Operation):
+            return
+        current: Optional[Operation] = op
+        while current is not None:
+            if isinstance(current, Let) and current.sub_query is not None:
+                sources: Set[str] = set()
+                self._collect_sources(current.sub_query, sources)
+                existing = self._let_sources.setdefault(current.name, set())
+                existing.update(sources)
+            current = current.next
 
     def _crawl_statement(self, root: ASTNode) -> None:
         try:
@@ -284,6 +377,13 @@ class StatementInfoCrawler:
             op, (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)
         ):
             self._collect_property_accesses(op)
+
+        # Capture per-output-column lineage from the final RETURN.  Each
+        # Return op we visit overwrites the previous result so chained
+        # statements end up with the lineage of the last RETURN, which is
+        # what the caller actually sees in ``runner.results``.
+        if isinstance(op, Return):
+            self._returns = self._collect_return_columns(op)
 
     def _resolve_registered_definitions(self) -> None:
         # Sources and declared properties from inline CREATE VIRTUAL clauses
@@ -607,6 +707,108 @@ class StatementInfoCrawler:
             if isinstance(alias, str) and alias:
                 yield alias
 
+    def _collect_return_columns(self, op: Return) -> Dict[str, ColumnLineage]:
+        """Build the per-column lineage map of a single ``RETURN`` clause.
+
+        Mirrors :meth:`Projection.expressions`'s default-aliasing rule
+        so unnamed columns are keyed ``expr0``, ``expr1``, ...
+        """
+        out: Dict[str, ColumnLineage] = {}
+        children = op.get_children()
+        for i, expr in enumerate(children):
+            if not isinstance(expr, Expression):
+                continue
+            alias = getattr(expr, "alias", None) or f"expr{i}"
+            out[alias] = self._lineage_of_expression(expr)
+        return out
+
+    def _lineage_of_expression(self, expr: Expression) -> ColumnLineage:
+        """Walk an output-column expression and return the contributing
+        ``alias.property`` accesses plus a ``kind`` summarising how
+        they were combined.
+        """
+        refs: List[ColumnReference] = []
+        seen_keys: Set[str] = set()
+        has_aggregate = False
+        aggregate_name: Optional[str] = None
+        has_lookup = False
+
+        stack: List[ASTNode] = [expr]
+        seen: Set[int] = set()
+        while stack:
+            node = stack.pop()
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+
+            if isinstance(node, AggregateFunction):
+                has_aggregate = True
+                if aggregate_name is None:
+                    aggregate_name = getattr(node, "name", None)
+            if isinstance(node, Lookup):
+                has_lookup = True
+                target = self._resolve_lookup_target(node)
+                alias_name = self._alias_of_lookup(node)
+                if target is not None and alias_name is not None:
+                    kind, names, prop = target
+                    key = f"{alias_name}\x00{prop}"
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        refs.append(
+                            ColumnReference(
+                                alias=alias_name,
+                                kind="node" if kind == "node" else "relationship",
+                                labels=list(names),
+                                property=prop,
+                            )
+                        )
+
+            for child in node.get_children():
+                stack.append(child)
+            if isinstance(node, SubqueryExpression):
+                inner = getattr(node, "_subquery_ast", None)
+                if isinstance(inner, ASTNode):
+                    stack.append(inner)
+
+        if has_aggregate:
+            kind_str = "aggregate"
+        elif not has_lookup:
+            kind_str = "literal"
+        elif len(refs) == 1 and self._is_simple_property_projection(expr):
+            kind_str = "property"
+        else:
+            kind_str = "expression"
+
+        return ColumnLineage(
+            references=refs,
+            kind=kind_str,
+            aggregate=aggregate_name if has_aggregate else None,
+        )
+
+    def _alias_of_lookup(self, lookup: Lookup) -> Optional[str]:
+        """Return the user-written identifier of a ``Lookup``'s
+        variable side (e.g. ``'c'`` in ``c.name``), or ``None`` if the
+        variable isn't a plain :class:`Reference` to a named binding.
+        """
+        variable = lookup.variable
+        if isinstance(variable, Reference):
+            return variable.identifier
+        return None
+
+    def _is_simple_property_projection(self, expr: Expression) -> bool:
+        """True iff the expression is a direct ``alias.property``
+        projection (possibly wrapped in a single-child pass-through
+        :class:`Expression`), with no operators, functions, or
+        additional references.
+        """
+        current: ASTNode = expr
+        while isinstance(current, Expression):
+            children = current.get_children()
+            if len(children) != 1:
+                return False
+            current = children[0]
+        return isinstance(current, Lookup)
+
     def _collect_sources(self, statement: ASTNode, target: Set[str]) -> None:
         try:
             op = statement.first_child()
@@ -623,12 +825,45 @@ class StatementInfoCrawler:
                     if isinstance(name, str) and name:
                         target.add(name)
                 else:
-                    try:
-                        from_ = current.from_
-                    except Exception:
-                        from_ = None
-                    if isinstance(from_, str) and from_:
-                        target.add(from_)
+                    # Inspect the AST directly so a ``LOAD FROM
+                    # <letName>`` produces a stable ``let://<name>``
+                    # source label without invoking the
+                    # ``BindingReference``'s runtime lookup (which would
+                    # either throw or return a non-string value).  The
+                    # parser wraps the reference in an ``Expression``
+                    # so we unwrap one level to find the
+                    # ``BindingReference`` itself.
+                    source_child: Optional[ASTNode] = (
+                        current.from_component.first_child()
+                        if current.from_component is not None
+                        else None
+                    )
+                    if source_child is not None and not isinstance(
+                        source_child, BindingReference
+                    ):
+                        inner = (
+                            source_child.first_child()
+                            if hasattr(source_child, "first_child")
+                            else None
+                        )
+                        if isinstance(inner, BindingReference):
+                            source_child = inner
+                    if isinstance(source_child, BindingReference):
+                        binding_name = source_child.name
+                        target.add(f"let://{binding_name}")
+                        # Chase through to the LET's own sources when
+                        # we've seen the binding's definition in the
+                        # same crawl.
+                        let_sources = self._let_sources.get(binding_name)
+                        if let_sources is not None:
+                            target.update(let_sources)
+                    else:
+                        try:
+                            from_ = current.from_
+                        except Exception:
+                            from_ = None
+                        if isinstance(from_, str) and from_:
+                            target.add(from_)
             current = current.next
 
     def _add_node_prop(self, labels: Iterable[str], prop: str) -> None:
@@ -745,6 +980,7 @@ class StatementInfoCrawler:
                 nodes=declared_nodes,
                 relationships=declared_relationships,
             ),
+            returns=StatementInfoCrawler._clone_returns_static(self._returns),
         )
         return info
 
@@ -789,7 +1025,29 @@ class StatementInfoCrawler:
                     for type_, entry in info.declared.relationships.items()
                 },
             ),
+            returns=StatementInfoCrawler._clone_returns_static(info.returns),
         )
+
+    @staticmethod
+    def _clone_returns_static(
+        returns: Dict[str, ColumnLineage],
+    ) -> Dict[str, ColumnLineage]:
+        out: Dict[str, ColumnLineage] = {}
+        for col, lineage in returns.items():
+            out[col] = ColumnLineage(
+                references=[
+                    ColumnReference(
+                        alias=r.alias,
+                        kind=r.kind,
+                        labels=list(r.labels),
+                        property=r.property,
+                    )
+                    for r in lineage.references
+                ],
+                kind=lineage.kind,
+                aggregate=lineage.aggregate,
+            )
+        return out
 
 
 # Sentinel used internally to distinguish "evaluation succeeded with value

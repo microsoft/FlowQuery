@@ -41,6 +41,14 @@ class RelationshipMatchCollector:
             "endNode": None,
             "properties": rel_props,
         }
+        # Thread inner virtual sub-query lineage through to the match
+        # record so :class:`ProvenanceSites` can attach it to the hop.
+        if current_record is not None:
+            from .virtual_sources import attach_virtual_source, get_virtual_source
+
+            src = get_virtual_source(current_record)
+            if src is not None:
+                attach_virtual_source(match, src)
         self._matches.append(match)
         self._node_ids.append(traversal_id)
         self._node_id_set.add(traversal_id)

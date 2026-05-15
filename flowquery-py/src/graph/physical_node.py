@@ -57,12 +57,23 @@ class PhysicalNode(Node):
         self._cache = None
         self._cached_at = 0.0
 
-    async def data(self, args: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def data(
+        self,
+        args: Optional[Dict[str, Any]] = None,
+        provenance: bool = False,
+    ) -> List[Dict[str, Any]]:
         if self._statement is None:
             raise ValueError("Statement is null")
         # Filter pass-down queries (with args) bypass the persistent cache
-        # because results depend on runtime parameter values.
-        if args is None and self._is_static and self._cache is not None:
+        # because results depend on runtime parameter values.  Provenance
+        # mode also bypasses the cache so each outer-row read carries
+        # fresh per-row provenance attached to the inner records.
+        if (
+            not provenance
+            and args is None
+            and self._is_static
+            and self._cache is not None
+        ):
             fresh = (
                 self._refresh_every_ms is None
                 or (time.monotonic() * 1000 - self._cached_at) < self._refresh_every_ms
@@ -70,11 +81,25 @@ class PhysicalNode(Node):
             if fresh:
                 return self._cache
         # Import at runtime to avoid circular dependency
-        from ..compute.runner import Runner
-        runner = Runner(ast=self._statement, args=args)
+        from ..compute.runner import Runner, RunnerOptions
+        runner = Runner(
+            ast=self._statement,
+            args=args,
+            options=RunnerOptions(provenance=provenance),
+        )
         await runner.run()
         result = runner.results
-        if args is None and self._is_static:
+        if provenance:
+            from .virtual_sources import attach_virtual_source
+
+            prov = runner.provenance
+            if prov is not None:
+                length = min(len(prov), len(result))
+                for i in range(length):
+                    row = result[i]
+                    if isinstance(row, dict):
+                        attach_virtual_source(row, prov[i])
+        if not provenance and args is None and self._is_static:
             self._cache = result
             self._cached_at = time.monotonic() * 1000
         return result

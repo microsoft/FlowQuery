@@ -53,6 +53,15 @@ class OrderBy(Operation):
         accumulation.  When no keys have been captured (e.g. aggregated
         returns), falls back to looking up simple reference identifiers
         in each record."""
+        indices = self.sort_indices(records)
+        return [records[i] for i in indices]
+
+    def sort_indices(self, records: List[Dict[str, Any]]) -> List[int]:
+        """Return the index permutation that ``sort`` would apply.
+
+        Useful for sorting a parallel array (e.g. row-level provenance)
+        in lockstep with the result records.
+        """
         from ..expressions.reference import Reference
 
         use_keys = len(self._sort_keys) == len(records)
@@ -96,7 +105,7 @@ class OrderBy(Operation):
             return 0
 
         indices.sort(key=functools.cmp_to_key(compare))
-        return [records[i] for i in indices]
+        return indices
 
     async def run(self) -> None:
         """When used as a standalone operation, passes through to next."""

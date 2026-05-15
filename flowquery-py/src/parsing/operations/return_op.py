@@ -1,8 +1,14 @@
 """Represents a RETURN operation that produces the final query results."""
 
 import copy
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from ...compute.provenance import (
+    ProvenanceSource,
+    RowProvenance,
+    RowSegment,
+    merge_provenance_segment,
+)
 from ..ast_node import ASTNode
 from .limit import Limit
 from .order_by import OrderBy
@@ -28,6 +34,9 @@ class Return(Projection):
         self._results: List[Dict[str, Any]] = []
         self._limit: Optional[Limit] = None
         self._order_by: Optional[OrderBy] = None
+        self._provenance_sources: Optional[List[ProvenanceSource]] = None
+        self._provenance_sink: Optional[List[RowProvenance]] = None
+        self._provenance_rows: List[RowProvenance] = []
 
     @property
     def where(self) -> Any:
@@ -55,6 +64,25 @@ class Return(Projection):
     def order_by(self, order_by: OrderBy) -> None:
         self._order_by = order_by
 
+    def enable_provenance(self, sink: List[RowProvenance]) -> None:
+        """Direct the runner-owned sink that receives the post-sorted,
+        post-limited provenance rows.  Once a sink is registered, every
+        emit captures a snapshot from the registered provenance sources.
+        """
+        self._provenance_sink = sink
+
+    def add_provenance_source(self, source: ProvenanceSource) -> None:
+        """Append a provenance source.  Sources are snapshotted per
+        emitted row and their segments are concatenated in registration
+        order.  Multiple MATCHes downstream of the last aggregation
+        register their :class:`ProvenanceSites` here; upstream
+        aggregations register themselves as virtual sources that replay
+        the current group's accumulated provenance.
+        """
+        if self._provenance_sources is None:
+            self._provenance_sources = []
+        self._provenance_sources.append(source)
+
     async def run(self) -> None:
         if not self.where:
             return
@@ -80,17 +108,75 @@ class Return(Projection):
         if self._order_by is not None:
             self._order_by.capture_sort_keys()
         self._results.append(record)
+        if self._provenance_sink is not None:
+            segment = self._snapshot_provenance()
+            # Non-aggregate row: `rows` contains the single input-row
+            # segment so the shape stays uniform with aggregate rows.
+            row = RowProvenance(
+                nodes=segment.nodes,
+                relationships=segment.relationships,
+                data_sources=segment.data_sources,
+                rows=[segment],
+            )
+            self._provenance_rows.append(row)
         if self._order_by is None and self._limit is not None:
             self._limit.increment()
 
+    def _snapshot_provenance(self) -> RowSegment:
+        """Concatenate all registered provenance sources into a single
+        :class:`RowSegment`.  Called once per emitted row by
+        :meth:`run`, which wraps the result as a :class:`RowProvenance`
+        with ``rows=[segment]``.
+        """
+        merged = RowSegment(nodes=[], relationships=[], data_sources=None)
+        if self._provenance_sources is not None:
+            for src in self._provenance_sources:
+                merge_provenance_segment(merged, src.snapshot())
+        return merged
+
     async def initialize(self) -> None:
         self._results = []
+        self._provenance_rows = []
 
     @property
     def results(self) -> List[Dict[str, Any]]:
-        result = self._results
+        results, _ = self._build_output()
+        return results
+
+    async def finish(self) -> None:
+        # Materialise final, sort-/limit-aligned provenance into the
+        # runner's sink (when enabled) so ``Runner.provenance`` reads
+        # cheaply.
+        if self._provenance_sink is not None:
+            _, provenance = self._build_output()
+            self._provenance_sink.clear()
+            for p in provenance:
+                self._provenance_sink.append(p)
+        await super().finish()
+
+    def _build_output(
+        self,
+    ) -> Tuple[List[Dict[str, Any]], List[RowProvenance]]:
+        """Apply ORDER BY permutation and LIMIT slicing to both the
+        result rows and the parallel provenance array in lockstep.
+        Provenance is computed only when a sink is registered.
+        """
+        results = self._results
+        provenance = self._provenance_rows
+        want_provenance = self._provenance_sink is not None
         if self._order_by is not None:
-            result = self._order_by.sort(result)
+            indices = self._order_by.sort_indices(results)
+            results = [results[i] for i in indices]
+            if want_provenance:
+                provenance = [provenance[i] for i in indices]
         if self._order_by is not None and self._limit is not None:
-            result = result[:self._limit.limit_value]
-        return result
+            results = results[: self._limit.limit_value]
+            if want_provenance:
+                provenance = provenance[: self._limit.limit_value]
+        return results, provenance
+
+    @property
+    def provenance_rows(self) -> List[RowProvenance]:
+        """Direct accessor used by UNION to merge child provenance."""
+        _, provenance = self._build_output()
+        return provenance

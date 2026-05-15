@@ -1,3 +1,11 @@
+import {
+    NodeBinding,
+    ProvenanceSites,
+    RelationshipBinding,
+    RowProvenance,
+    nodeBindingKey,
+    relationshipBindingKey,
+} from "../../compute/provenance";
 import Expression from "../expressions/expression";
 import AggregateFunction from "../functions/aggregate_function";
 import AggregationElement from "../functions/reducer_element";
@@ -8,6 +16,8 @@ class Node {
     private _value: any;
     private _children: Map<string, Node> = new Map();
     private _elements: AggregationElement[] | null = null;
+    private _provenanceNodes: Map<string, NodeBinding> | null = null;
+    private _provenanceRels: Map<string, RelationshipBinding> | null = null;
     constructor(value: any = null) {
         this._value = value;
     }
@@ -23,6 +33,20 @@ class Node {
     public set elements(elements: AggregationElement[]) {
         this._elements = elements;
     }
+    /** Per-group dedup map for contributing node bindings (lazy). */
+    public get provenanceNodes(): Map<string, NodeBinding> {
+        if (this._provenanceNodes === null) {
+            this._provenanceNodes = new Map();
+        }
+        return this._provenanceNodes;
+    }
+    /** Per-group dedup map for contributing relationship bindings (lazy). */
+    public get provenanceRelationships(): Map<string, RelationshipBinding> {
+        if (this._provenanceRels === null) {
+            this._provenanceRels = new Map();
+        }
+        return this._provenanceRels;
+    }
 }
 
 class GroupBy extends Projection {
@@ -31,10 +55,36 @@ class GroupBy extends Projection {
     private _mappers: Expression[] | null = null;
     private _reducers: AggregateFunction[] | null = null;
     protected _where: Where | null = null;
+    private _provenanceSites: ProvenanceSites | null = null;
     public async run(): Promise<void> {
         this.resetTree();
         this.map();
         this.reduce();
+        this.recordProvenance();
+    }
+    /**
+     * Register the provenance collector so each `run()` (one per match)
+     * folds the current bindings into the active group's dedup maps.
+     */
+    public enableProvenance(sites: ProvenanceSites): void {
+        this._provenanceSites = sites;
+    }
+    public get provenanceEnabled(): boolean {
+        return this._provenanceSites !== null;
+    }
+    private recordProvenance(): void {
+        if (this._provenanceSites === null) return;
+        const snap = this._provenanceSites.snapshot();
+        const nodeMap = this.current.provenanceNodes;
+        for (const b of snap.nodes) {
+            const k = nodeBindingKey(b);
+            if (!nodeMap.has(k)) nodeMap.set(k, b);
+        }
+        const relMap = this.current.provenanceRelationships;
+        for (const b of snap.relationships) {
+            const k = relationshipBindingKey(b);
+            if (!relMap.has(k)) relMap.set(k, b);
+        }
     }
     private get root(): Node {
         return this._root;
@@ -121,6 +171,38 @@ class GroupBy extends Projection {
             if (this.where) {
                 yield record;
             }
+        }
+    }
+    /**
+     * Walks the group tree in the same traversal order as
+     * {@link generate_results}, yielding the materialised {@link
+     * RowProvenance} for each emitted group.  When provenance is
+     * disabled, yields empty entries so callers can still zip cleanly.
+     */
+    public *generate_provenance(
+        mapperIndex: number = 0,
+        node: Node = this.root
+    ): Generator<RowProvenance> {
+        if (mapperIndex === 0 && node.children.size === 0 && this.mappers.length > 0) {
+            return;
+        }
+        if (node.children.size > 0) {
+            for (const child of node.children.values()) {
+                this.mappers[mapperIndex].overridden = child.value;
+                yield* this.generate_provenance(mapperIndex + 1, child);
+            }
+        } else {
+            if (node.elements === null) {
+                node.elements = this.reducers.map((reducer) => reducer.element());
+            }
+            node.elements.forEach((element, reducerIndex) => {
+                this.reducers[reducerIndex].overridden = element.value;
+            });
+            if (!this.where) return;
+            yield {
+                nodes: Array.from(node.provenanceNodes.values()),
+                relationships: Array.from(node.provenanceRelationships.values()),
+            };
         }
     }
     public set where(where: Where) {

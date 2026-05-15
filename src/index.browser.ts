@@ -6,7 +6,14 @@
  * @packageDocumentation
  */
 import { default as FlowQuery } from "./compute/flowquery";
-import type { RunnerMetadata } from "./compute/runner";
+import type {
+    NodeBinding,
+    RelationshipBinding,
+    RelationshipHop,
+    RowProvenance,
+    RunnerMetadata,
+    RunnerOptions,
+} from "./compute/runner";
 import Function from "./parsing/functions/function";
 import FunctionFactory from "./parsing/functions/function_factory";
 import {
@@ -46,4 +53,14 @@ FlowQuery.getFunctionMetadata = function (name: string): FunctionMetadata | unde
 FlowQuery.Function = Function;
 
 export default FlowQuery;
-export type { NodeInfo, RelationshipInfo, RunnerMetadata, StatementInfo };
+export type {
+    NodeBinding,
+    NodeInfo,
+    RelationshipBinding,
+    RelationshipHop,
+    RelationshipInfo,
+    RowProvenance,
+    RunnerMetadata,
+    RunnerOptions,
+    StatementInfo,
+};

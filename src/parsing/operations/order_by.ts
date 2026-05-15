@@ -57,6 +57,16 @@ class OrderBy extends Operation {
      * identifiers in each record.
      */
     public sort(records: Record<string, any>[]): Record<string, any>[] {
+        const indices = this.sortIndices(records);
+        return indices.map((i) => records[i]);
+    }
+
+    /**
+     * Returns the permutation that {@link sort} applies, without
+     * materialising the sorted records.  Used by callers that need to
+     * permute a parallel array (e.g. row-level provenance) in lockstep.
+     */
+    public sortIndices(records: Record<string, any>[]): number[] {
         const useKeys = this._sortKeys.length === records.length;
         // Build an index array so we can sort records and keys together.
         const indices = records.map((_, i) => i);
@@ -98,7 +108,7 @@ class OrderBy extends Operation {
             }
             return 0;
         });
-        return indices.map((i) => records[i]);
+        return indices;
     }
 
     /**

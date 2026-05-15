@@ -426,6 +426,68 @@ previously-registered virtuals reached via `MATCH` or `DELETE`. The flat
 purely literal AST subtrees end up in `literal_values` — values that depend
 on parameters, references, f-strings, or subqueries are skipped.
 
+#### Row-level Provenance: Node and Relationship IDs Behind Each Result
+
+`StatementInfo` describes the _structural_ lineage of a query — which
+labels, types, and sources back it. To get the _row-level_ lineage —
+which concrete node ids and relationship `(left_id, right_id, type)`
+hops actually flowed into each result row — pass `{ provenance: true }`
+when constructing the runner and read `runner.provenance`:
+
+```javascript
+const fq = new FlowQuery(
+    `
+    MATCH (a:City {name: 'NYC'})-[r:FLIGHT]->(b:City)
+    RETURN a.name AS origin, b.name AS destination
+    `,
+    null,
+    null,
+    { provenance: true }
+);
+await fq.run();
+
+fq.results;
+// [{ origin: 'NYC', destination: 'LAX' }, { origin: 'NYC', destination: 'YYZ' }]
+
+fq.provenance;
+// [
+//   {
+//     nodes: [
+//       { alias: 'a', label: 'City', id: 'nyc' },
+//       { alias: 'b', label: 'City', id: 'lax' }
+//     ],
+//     relationships: [
+//       { alias: 'r', type: 'FLIGHT',
+//         hops: [{ left_id: 'nyc', right_id: 'lax', type: 'FLIGHT' }] }
+//     ]
+//   },
+//   { nodes: [...], relationships: [{ alias: 'r', type: 'FLIGHT',
+//     hops: [{ left_id: 'nyc', right_id: 'yyz', type: 'FLIGHT' }] }] }
+// ]
+```
+
+Semantics:
+
+- `runner.provenance` is aligned **by index** with `runner.results`.
+- Each `NodeBinding.id` preserves the original scalar type of the
+  underlying record (a numeric id stays a number).
+- Anonymous nodes / relationships from the pattern are included with
+  `alias: null`.
+- Variable-length matches (`[:T*m..n]`) populate `hops` with every
+  traversed edge in path order.
+- `OPTIONAL MATCH` misses surface as `id: null` for the unmatched node
+  and an empty `hops: []` for the unmatched relationship.
+- `ORDER BY` and `LIMIT` permute and truncate `provenance` in lockstep
+  with `results`.
+- Aggregate `RETURN` (e.g. `count`, `collect`, `sum`) unions all
+  contributing bindings into the output group's provenance, deduplicated
+  per `(alias, id)` for nodes and per `(alias, hops)` for relationships.
+- `UNION ALL` concatenates branch provenance; `UNION` keeps the first
+  branch's lineage for deduplicated rows.
+
+When the option is omitted or set to `false`, the runner has zero
+provenance overhead and `runner.provenance` returns an empty array.
+
 ### WHERE Clause
 
 Filters rows based on conditions. Supports the following operators:

@@ -1,6 +1,9 @@
 import Bindings from "../graph/bindings";
 import DataCache from "../graph/data_cache";
 import DataResolver from "../graph/data_resolver";
+import Node from "../graph/node";
+import Pattern from "../graph/pattern";
+import Relationship from "../graph/relationship";
 import ASTNode from "../parsing/ast_node";
 import BindingReference from "../parsing/expressions/binding_reference";
 import ParameterReference from "../parsing/expressions/parameter_reference";
@@ -8,11 +11,38 @@ import CreateNode from "../parsing/operations/create_node";
 import CreateRelationship from "../parsing/operations/create_relationship";
 import DeleteNode from "../parsing/operations/delete_node";
 import DeleteRelationship from "../parsing/operations/delete_relationship";
+import Match from "../parsing/operations/match";
 import Operation from "../parsing/operations/operation";
+import Return from "../parsing/operations/return";
+import Union from "../parsing/operations/union";
 import Parser from "../parsing/parser";
 import StatementInfoCrawler, { StatementInfo } from "../parsing/statement_info_crawler";
+import { ProvenanceSites, RowProvenance } from "./provenance";
 
 export type { StatementInfo } from "../parsing/statement_info_crawler";
+export type {
+    NodeBinding,
+    RelationshipBinding,
+    RelationshipHop,
+    RowProvenance,
+} from "./provenance";
+
+/**
+ * Optional configuration for a {@link Runner} or {@link FlowQuery}
+ * invocation.
+ */
+export interface RunnerOptions {
+    /**
+     * When `true`, the runner records row-level data lineage alongside the
+     * results: for each emitted row, which concrete node ids and
+     * relationship `(left_id, right_id, type)` hops were bound while the
+     * row was being projected.  Access via {@link Runner.provenance}.
+     *
+     * Defaults to `false`; when disabled the runner has zero provenance
+     * overhead.
+     */
+    provenance?: boolean;
+}
 
 /**
  * Metadata about the operations performed by a Runner execution.
@@ -63,6 +93,8 @@ class Runner {
     private _args: Record<string, any> | null = null;
     private _isTopLevel: boolean;
     private _metadata: RunnerMetadata;
+    private _options: RunnerOptions;
+    private _provenance: RowProvenance[] | null = null;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.
@@ -70,17 +102,20 @@ class Runner {
      * @param statement - The FlowQuery statement to execute (may contain semicolon-separated statements)
      * @param ast - An optional pre-parsed AST to use instead of parsing the statement
      * @param args - Optional parameters to inject into $-prefixed parameter references
+     * @param options - Optional configuration (e.g. `{ provenance: true }`)
      * @throws {Error} If the statement is null, empty, or contains syntax errors
      */
     constructor(
         statement: string | null = null,
         ast: ASTNode | null = null,
-        args: Record<string, any> | null = null
+        args: Record<string, any> | null = null,
+        options: RunnerOptions = {}
     ) {
         if ((statement === null || statement === "") && ast === null) {
             throw new Error("Either statement or AST must be provided");
         }
         this._args = args;
+        this._options = options;
 
         if (ast !== null) {
             this._isTopLevel = false;
@@ -142,6 +177,10 @@ class Runner {
                 if (this._isTopLevel) {
                     DataResolver.getInstance().dataCache = new DataCache();
                 }
+                if (this._options.provenance) {
+                    this._provenance = [];
+                    this.enableProvenance();
+                }
                 for (const stmt of this._statements) {
                     this.bindParameters(stmt.ast);
                     // Refresh any stale refreshable bindings referenced
@@ -164,6 +203,68 @@ class Runner {
                 reject(e);
             }
         });
+    }
+
+    /**
+     * Walks the terminal statement's operation chain (and into UNION
+     * sub-pipelines) to register every MATCH-bound `Node` and
+     * `Relationship` slot with the terminal operation's provenance
+     * collector(s).  Called once per `run()` when the `provenance`
+     * option is enabled.
+     *
+     * Only the last statement may produce rows; preceding statements
+     * are limited to CREATE / DELETE / REFRESH / DROP and never need
+     * row-level provenance.
+     */
+    private enableProvenance(): void {
+        if (this._statements.length === 0) return;
+        const stmt = this._statements[this._statements.length - 1];
+        this.attachProvenance(stmt.first, this._provenance!);
+    }
+
+    /**
+     * Collect all MATCH-bound elements reachable from `first` up to (and
+     * including) the terminal Return / Union.  For Union, recurse into
+     * the left and right sub-pipelines so each branch carries its own
+     * site list.
+     */
+    private attachProvenance(first: Operation, sink: RowProvenance[]): void {
+        const sites = new ProvenanceSites();
+        let op: Operation | null = first;
+        let terminal: Operation | null = null;
+        while (op !== null) {
+            if (op instanceof Match) {
+                for (const pattern of op.patterns) {
+                    Runner.collectSitesFromPattern(pattern, sites);
+                }
+            }
+            if (op.next === null) {
+                terminal = op;
+            }
+            op = op.next;
+        }
+        if (terminal === null) return;
+        if (terminal instanceof Union) {
+            // UNION composes results from two independent sub-pipelines;
+            // wire each branch separately and let Union merge.
+            const leftSink: RowProvenance[] = [];
+            const rightSink: RowProvenance[] = [];
+            this.attachProvenance(terminal.left, leftSink);
+            this.attachProvenance(terminal.right, rightSink);
+            terminal.enableProvenance(leftSink, rightSink, sink);
+        } else if (terminal instanceof Return) {
+            terminal.enableProvenance(sites, sink);
+        }
+    }
+
+    private static collectSitesFromPattern(pattern: Pattern, sites: ProvenanceSites): void {
+        for (const element of pattern.chain) {
+            if (element instanceof Node) {
+                sites.addNode(element);
+            } else if (element instanceof Relationship) {
+                sites.addRelationship(element);
+            }
+        }
     }
 
     /**
@@ -225,6 +326,21 @@ class Runner {
             virtual_relationships_deleted: m.virtual_relationships_deleted,
             info: m.info ? StatementInfoCrawler.clone(m.info) : undefined,
         };
+    }
+
+    /**
+     * Row-level data lineage aligned by index with {@link results}.
+     *
+     * Each {@link RowProvenance} entry lists the concrete `id` values of the
+     * node slots and the `(left_id, right_id, type)` hops of the
+     * relationship slots that were bound while the corresponding result row
+     * was being projected.
+     *
+     * Returns an empty array unless the runner was constructed with
+     * `{ provenance: true }` or the query produced no rows.
+     */
+    public get provenance(): RowProvenance[] {
+        return this._provenance ?? [];
     }
 }
 

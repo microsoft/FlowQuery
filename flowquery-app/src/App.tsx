@@ -1,15 +1,18 @@
 import {
     FluentProvider,
     Input,
+    Spinner,
     Text,
     Toolbar,
     ToolbarButton,
     webLightTheme,
 } from "@fluentui/react-components";
+import { DataScatter24Regular } from "@fluentui/react-icons";
 import React from "react";
 import FlowQuery from "../../src/index.browser";
 import { Compression } from "./compression";
 import { CypherEditor } from "./CypherEditor";
+import { GraphView } from "./GraphView";
 import { ResultsTable } from "./ResultsTable";
 
 function formatMetadataKey(key: string): string {
@@ -25,6 +28,8 @@ interface AppState {
     metadata: Record<string, unknown> | null;
     error: string | null;
     shareLink: string;
+    graphOpen: boolean;
+    running: boolean;
 }
 
 export class App extends React.Component<Record<string, never>, AppState> {
@@ -34,6 +39,8 @@ export class App extends React.Component<Record<string, never>, AppState> {
         metadata: null,
         error: null,
         shareLink: "",
+        graphOpen: false,
+        running: false,
     };
 
     componentDidMount() {
@@ -42,7 +49,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
             const compressed = query.substring(1);
             Compression.decompress(compressed)
                 .then((statement) => {
-                    this.setState({ input: statement });
+                    this.setState({ input: statement, running: true });
                     const fq = new FlowQuery(statement);
                     fq.run()
                         .then(() => {
@@ -50,6 +57,9 @@ export class App extends React.Component<Record<string, never>, AppState> {
                         })
                         .catch((e: unknown) => {
                             this.setState({ error: e instanceof Error ? e.message : String(e) });
+                        })
+                        .finally(() => {
+                            this.setState({ running: false });
                         });
                 })
                 .catch((e) => {
@@ -59,13 +69,16 @@ export class App extends React.Component<Record<string, never>, AppState> {
     }
 
     run = async () => {
-        this.setState({ error: null, results: [], metadata: null });
+        if (this.state.running) return;
+        this.setState({ error: null, results: [], metadata: null, running: true });
         try {
             const fq = new FlowQuery(this.state.input);
             await fq.run();
             this.setState({ results: fq.results, metadata: fq.metadata });
         } catch (e: unknown) {
             this.setState({ error: e instanceof Error ? e.message : String(e) });
+        } finally {
+            this.setState({ running: false });
         }
     };
 
@@ -83,7 +96,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
     };
 
     render() {
-        const { input, results, metadata, error, shareLink } = this.state;
+        const { input, results, metadata, error, shareLink, graphOpen, running } = this.state;
 
         return (
             <FluentProvider
@@ -103,11 +116,22 @@ export class App extends React.Component<Record<string, never>, AppState> {
                     placeholder="Type your FlowQuery statement here and press Shift+Enter to run it."
                 />
                 <Toolbar style={{ padding: "8px 0", gap: 4 }}>
-                    <ToolbarButton appearance="primary" onClick={this.run}>
-                        ▶ Run (Shift+Enter)
+                    <ToolbarButton
+                        appearance="primary"
+                        onClick={this.run}
+                        disabled={running}
+                        icon={running ? <Spinner size="tiny" /> : undefined}
+                    >
+                        {running ? "Running\u2026" : "\u25B6 Run (Shift+Enter)"}
                     </ToolbarButton>
                     <ToolbarButton onClick={this.share}>
                         Share
+                    </ToolbarButton>
+                    <ToolbarButton
+                        icon={<DataScatter24Regular />}
+                        onClick={() => this.setState({ graphOpen: true })}
+                    >
+                        Visualize Graph
                     </ToolbarButton>
                     <ToolbarButton onClick={this.clear}>
                         Clear
@@ -147,6 +171,10 @@ export class App extends React.Component<Record<string, never>, AppState> {
                 <div style={{ flexGrow: 1, overflowY: "auto", marginTop: 8 }}>
                     <ResultsTable results={results} />
                 </div>
+                <GraphView
+                    open={graphOpen}
+                    onClose={() => this.setState({ graphOpen: false })}
+                />
             </FluentProvider>
         );
     }

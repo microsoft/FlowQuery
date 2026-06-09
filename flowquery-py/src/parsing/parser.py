@@ -359,6 +359,11 @@ class Parser(BaseParser):
         expressions = self._parse_expressions(AliasOption.REQUIRED)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
+        # Bare identifiers left unresolved by the parser scope refer to
+        # LET-bound values, resolved at run-time against the global
+        # Bindings store (lenient: unknown names stay None).
+        for expression in expressions:
+            self._convert_unresolved_references_to_bindings(expression, True)
         if distinct or any(expr.has_reducers() for expr in expressions):
             return AggregatedWith(expressions)  # type: ignore[return-value]
         return With(expressions)
@@ -401,6 +406,11 @@ class Parser(BaseParser):
         expressions = self._parse_expressions(AliasOption.OPTIONAL)
         if len(expressions) == 0:
             raise ValueError("Expected expression")
+        # Bare identifiers left unresolved by the parser scope refer to
+        # LET-bound values, resolved at run-time against the global
+        # Bindings store (lenient: unknown names stay None).
+        for expression in expressions:
+            self._convert_unresolved_references_to_bindings(expression, True)
         if distinct or any(expr.has_reducers() for expr in expressions):
             return AggregatedReturn(expressions)
         self._state.increment_returns()
@@ -1165,20 +1175,38 @@ class Parser(BaseParser):
         update_delete.set_predicate(predicate)
         return update_delete
 
-    def _convert_unresolved_references_to_bindings(self, node: ASTNode) -> None:
+    def _convert_unresolved_references_to_bindings(
+        self, node: ASTNode, optional: bool = False
+    ) -> None:
         """Recursively replaces unresolved ``Reference`` nodes with
         ``BindingReference``, used to support cross-binding references
-        inside ``UPDATE … AS u DELETE WHERE …`` predicates."""
+        inside ``UPDATE … AS u DELETE WHERE …`` predicates and to resolve
+        bare ``LET`` bindings in ``RETURN`` / ``WITH`` projections.
+
+        When ``optional`` is True, the produced ``BindingReference``
+        yields None (rather than raising) for names absent from the
+        bindings store.  Projection conversions pass ``optional`` so that
+        an unresolved bare identifier in ``RETURN`` / ``WITH`` keeps its
+        historical "silently None" behaviour for unknown names while
+        still resolving real ``LET`` bindings."""
         from .expressions.binding_reference import BindingReference
         for child in list(node.get_children()):
+            # Scope-introducing constructs manage their own variable
+            # bindings (the iteration-variable declaration of a predicate
+            # function / list comprehension, or a nested sub-query's own
+            # scope).  Their inner references are either binders or
+            # resolved within that inner scope, so rewriting them here
+            # would corrupt the binding wiring.  Skip them.
+            if child.introduces_scope():
+                continue
             if (
                 isinstance(child, Reference)
                 and child.referred is None
                 and not child.identifier.startswith("$")
             ):
-                node.replace_child(child, BindingReference(child.identifier))
+                node.replace_child(child, BindingReference(child.identifier, optional))
             else:
-                self._convert_unresolved_references_to_bindings(child)
+                self._convert_unresolved_references_to_bindings(child, optional)
 
     def _parse_union(self) -> Optional[Union]:
         """Parse a UNION or UNION ALL keyword."""

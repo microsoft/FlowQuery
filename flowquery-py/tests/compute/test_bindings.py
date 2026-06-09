@@ -98,6 +98,66 @@ async def test_let_binds_scalar():
 
 
 # ---------------------------------------------------------------------------
+# LET — projection references
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_return_resolves_bare_let_binding():
+    runner = Runner(
+        """
+        LET greeting = 'hello';
+        RETURN greeting
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"greeting": "hello"}]
+
+
+@pytest.mark.asyncio
+async def test_return_can_alias_let_binding():
+    runner = Runner(
+        """
+        LET greeting = 'hello';
+        RETURN greeting AS g
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"g": "hello"}]
+
+
+@pytest.mark.asyncio
+async def test_let_binding_usable_in_projection_expression():
+    runner = Runner(
+        """
+        LET n = 3;
+        RETURN n + 1 AS m
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"m": 4}]
+
+
+@pytest.mark.asyncio
+async def test_with_resolves_bare_let_binding():
+    runner = Runner(
+        """
+        LET n = 3;
+        WITH n AS x
+        RETURN x
+        """
+    )
+    await runner.run()
+    assert runner.results == [{"x": 3}]
+
+
+@pytest.mark.asyncio
+async def test_unknown_bare_identifier_stays_none():
+    runner = Runner("RETURN nope")
+    await runner.run()
+    assert runner.results == [{"nope": None}]
+
+
+# ---------------------------------------------------------------------------
 # LET — query bindings
 # ---------------------------------------------------------------------------
 

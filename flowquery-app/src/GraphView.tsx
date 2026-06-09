@@ -524,7 +524,7 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                         style={{ marginLeft: "auto" }}
                     />
                 </div>
-                <div style={{ overflow: "auto", padding: "4px 0" }}>
+                <div style={{ overflow: "auto", paddingBottom: 4 }}>
                     {sampleLoading && (
                         <div style={{ padding: 24, textAlign: "center" }}>
                             <Spinner size="small" label="Loading data…" />
@@ -566,6 +566,7 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                                                 borderBottom: "1px solid #ddd",
                                                 position: "sticky",
                                                 top: 0,
+                                                zIndex: 1,
                                                 background: "#fafafa",
                                                 whiteSpace: "nowrap",
                                             }}

@@ -10,6 +10,7 @@ import {
 import { DataScatter24Regular } from "@fluentui/react-icons";
 import React from "react";
 import FlowQuery from "../../src/index.browser";
+import type { LineageReport, RowProvenance } from "../../src/index.browser";
 import { Compression } from "./compression";
 import { CypherEditor } from "./CypherEditor";
 import { GraphView } from "./GraphView";
@@ -26,6 +27,8 @@ interface AppState {
     input: string;
     results: Record<string, unknown>[];
     metadata: Record<string, unknown> | null;
+    lineage: LineageReport | null;
+    provenance: RowProvenance[];
     error: string | null;
     shareLink: string;
     graphOpen: boolean;
@@ -37,6 +40,8 @@ export class App extends React.Component<Record<string, never>, AppState> {
         input: "",
         results: [],
         metadata: null,
+        lineage: null,
+        provenance: [],
         error: null,
         shareLink: "",
         graphOpen: false,
@@ -50,10 +55,15 @@ export class App extends React.Component<Record<string, never>, AppState> {
             Compression.decompress(compressed)
                 .then((statement) => {
                     this.setState({ input: statement, running: true });
-                    const fq = new FlowQuery(statement);
+                    const fq = new FlowQuery(statement, null, null, { provenance: true });
                     fq.run()
                         .then(() => {
-                            this.setState({ results: fq.results, metadata: fq.metadata });
+                            this.setState({
+                                results: fq.results,
+                                metadata: fq.metadata,
+                                lineage: fq.lineage(),
+                                provenance: fq.provenance,
+                            });
                         })
                         .catch((e: unknown) => {
                             this.setState({ error: e instanceof Error ? e.message : String(e) });
@@ -70,11 +80,23 @@ export class App extends React.Component<Record<string, never>, AppState> {
 
     run = async () => {
         if (this.state.running) return;
-        this.setState({ error: null, results: [], metadata: null, running: true });
+        this.setState({
+            error: null,
+            results: [],
+            metadata: null,
+            lineage: null,
+            provenance: [],
+            running: true,
+        });
         try {
-            const fq = new FlowQuery(this.state.input);
+            const fq = new FlowQuery(this.state.input, null, null, { provenance: true });
             await fq.run();
-            this.setState({ results: fq.results, metadata: fq.metadata });
+            this.setState({
+                results: fq.results,
+                metadata: fq.metadata,
+                lineage: fq.lineage(),
+                provenance: fq.provenance,
+            });
         } catch (e: unknown) {
             this.setState({ error: e instanceof Error ? e.message : String(e) });
         } finally {
@@ -92,11 +114,20 @@ export class App extends React.Component<Record<string, never>, AppState> {
 
     clear = () => {
         window.history.replaceState(null, "", window.location.pathname);
-        this.setState({ input: "", results: [], metadata: null, error: null, shareLink: "" });
+        this.setState({
+            input: "",
+            results: [],
+            metadata: null,
+            lineage: null,
+            provenance: [],
+            error: null,
+            shareLink: "",
+        });
     };
 
     render() {
-        const { input, results, metadata, error, shareLink, graphOpen, running } = this.state;
+        const { input, results, metadata, lineage, provenance, error, shareLink, graphOpen, running } =
+            this.state;
 
         return (
             <FluentProvider
@@ -169,7 +200,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
                     </Text>
                 )}
                 <div style={{ flexGrow: 1, overflowY: "auto", marginTop: 8 }}>
-                    <ResultsTable results={results} />
+                    <ResultsTable results={results} lineage={lineage} provenance={provenance} />
                 </div>
                 <GraphView
                     open={graphOpen}

@@ -55,6 +55,27 @@ function toStringList(value: unknown): string[] {
     return [];
 }
 
+/** Backtick-quotes an identifier (label) for safe interpolation into a query. */
+function escapeIdent(name: string): string {
+    return "`" + String(name).replace(/`/g, "``") + "`";
+}
+
+/** Maximum number of data rows to display when a node label is selected. */
+const SAMPLE_LIMIT = 50;
+
+/**
+ * Fetches the rows backing a given node label by matching all of its instances
+ * and returning their properties. Returns a bounded sample plus the total count.
+ */
+async function fetchLabelData(
+    label: string
+): Promise<{ rows: Record<string, unknown>[]; total: number }> {
+    const q = new FlowQuery(`MATCH (n:${escapeIdent(label)}) RETURN properties(n) AS props`);
+    await q.run();
+    const rows = q.results.map((r) => (r.props ?? {}) as Record<string, unknown>);
+    return { rows: rows.slice(0, SAMPLE_LIMIT), total: rows.length };
+}
+
 /**
  * Builds the virtual graph *schema* from the global FlowQuery database via the
  * built-in schema() function: each registered node label becomes a node and
@@ -127,6 +148,11 @@ interface GraphViewState {
     data: GraphData | null;
     tick: number;
     transform: { scale: number; tx: number; ty: number };
+    selectedLabel: string | null;
+    sampleLoading: boolean;
+    sampleError: string | null;
+    sampleRows: Record<string, unknown>[] | null;
+    sampleTotal: number;
 }
 
 export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
@@ -136,14 +162,23 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
         data: null,
         tick: 0,
         transform: { scale: 1, tx: 0, ty: 0 },
+        selectedLabel: null,
+        sampleLoading: false,
+        sampleError: null,
+        sampleRows: null,
+        sampleTotal: 0,
     };
 
     private animationFrame: number | null = null;
     private colorMap = new Map<string, string>();
-    private svgRef = React.createRef<SVGSVGElement>();
+    private svgEl: SVGSVGElement | null = null;
     private dragKey: string | null = null;
+    private downNodeKey: string | null = null;
+    private pointerDownPos = { x: 0, y: 0 };
+    private dragMoved = false;
     private panning = false;
     private lastPointer = { x: 0, y: 0 };
+    private selectToken = 0;
 
     componentDidUpdate(prev: GraphViewProps) {
         if (this.props.open && !prev.open) {
@@ -156,7 +191,24 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
 
     componentWillUnmount() {
         this.stopSimulation();
+        if (this.svgEl) {
+            this.svgEl.removeEventListener("wheel", this.onWheel);
+        }
     }
+
+    // Callback ref: attach a *non-passive* wheel listener so we can preventDefault.
+    // React's synthetic onWheel is passive, which blocks preventDefault and would
+    // let the dialog body scroll while zooming.
+    private setSvgRef = (el: SVGSVGElement | null) => {
+        if (this.svgEl === el) return;
+        if (this.svgEl) {
+            this.svgEl.removeEventListener("wheel", this.onWheel);
+        }
+        this.svgEl = el;
+        if (el) {
+            el.addEventListener("wheel", this.onWheel, { passive: false });
+        }
+    };
 
     private colorFor(label: string): string {
         if (!this.colorMap.has(label)) {
@@ -171,6 +223,11 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
             error: null,
             data: null,
             transform: { scale: 1, tx: 0, ty: 0 },
+            selectedLabel: null,
+            sampleLoading: false,
+            sampleError: null,
+            sampleRows: null,
+            sampleTotal: 0,
         });
         try {
             const data = await fetchGraph();
@@ -286,7 +343,7 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
     }
 
     private toSvgPoint(clientX: number, clientY: number): { x: number; y: number } {
-        const svg = this.svgRef.current;
+        const svg = this.svgEl;
         if (!svg) return { x: clientX, y: clientY };
         const ctm = svg.getScreenCTM();
         if (!ctm) return { x: clientX, y: clientY };
@@ -298,10 +355,26 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
         return { x: (local.x - tx) / scale, y: (local.y - ty) / scale };
     }
 
+    /** Converts client coordinates to SVG viewBox coordinates (before the pan/zoom group transform). */
+    private toViewBoxPoint(clientX: number, clientY: number): { x: number; y: number } {
+        const svg = this.svgEl;
+        if (!svg) return { x: clientX, y: clientY };
+        const ctm = svg.getScreenCTM();
+        if (!ctm) return { x: clientX, y: clientY };
+        const pt = svg.createSVGPoint();
+        pt.x = clientX;
+        pt.y = clientY;
+        const local = pt.matrixTransform(ctm.inverse());
+        return { x: local.x, y: local.y };
+    }
+
     private onNodePointerDown = (e: React.PointerEvent, key: string) => {
         e.stopPropagation();
         (e.target as Element).setPointerCapture?.(e.pointerId);
         this.dragKey = key;
+        this.downNodeKey = key;
+        this.pointerDownPos = { x: e.clientX, y: e.clientY };
+        this.dragMoved = false;
         const node = this.state.data?.nodes.find((n) => n.key === key);
         if (node) node.fixed = true;
     };
@@ -314,6 +387,11 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
 
     private onPointerMove = (e: React.PointerEvent) => {
         if (this.dragKey) {
+            if (!this.dragMoved) {
+                const dx = e.clientX - this.pointerDownPos.x;
+                const dy = e.clientY - this.pointerDownPos.y;
+                if (dx * dx + dy * dy > 16) this.dragMoved = true;
+            }
             const node = this.state.data?.nodes.find((n) => n.key === this.dragKey);
             if (node) {
                 const p = this.toSvgPoint(e.clientX, e.clientY);
@@ -335,20 +413,220 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
     };
 
     private onPointerUp = () => {
+        const clickedKey = this.downNodeKey;
+        const wasClick = clickedKey !== null && !this.dragMoved;
         if (this.dragKey) {
             const node = this.state.data?.nodes.find((n) => n.key === this.dragKey);
             if (node) node.fixed = false;
             this.dragKey = null;
             if (this.animationFrame === null) this.startSimulation();
         }
+        this.downNodeKey = null;
         this.panning = false;
+        if (wasClick) {
+            const node = this.state.data?.nodes.find((n) => n.key === clickedKey);
+            if (node) this.selectNode(node.label);
+        }
     };
 
-    private onWheel = (e: React.WheelEvent) => {
+    private async selectNode(label: string) {
+        const token = ++this.selectToken;
+        this.setState({
+            selectedLabel: label,
+            sampleLoading: true,
+            sampleError: null,
+            sampleRows: null,
+            sampleTotal: 0,
+        });
+        try {
+            const { rows, total } = await fetchLabelData(label);
+            if (token !== this.selectToken) return;
+            this.setState({ sampleLoading: false, sampleRows: rows, sampleTotal: total });
+        } catch (e: unknown) {
+            if (token !== this.selectToken) return;
+            this.setState({
+                sampleLoading: false,
+                sampleError: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
+    private closePanel = () => {
+        this.selectToken++;
+        this.setState({
+            selectedLabel: null,
+            sampleLoading: false,
+            sampleError: null,
+            sampleRows: null,
+            sampleTotal: 0,
+        });
+    };
+
+    private renderDataPanel() {
+        const { selectedLabel, sampleLoading, sampleError, sampleRows, sampleTotal } = this.state;
+        if (!selectedLabel) return null;
+
+        const columns = sampleRows
+            ? [...new Set(sampleRows.flatMap((r) => Object.keys(r)))]
+            : [];
+        const shown = sampleRows ? sampleRows.length : 0;
+
+        return (
+            <div
+                style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    bottom: 8,
+                    width: "min(48%, 440px)",
+                    background: "#fff",
+                    border: "1px solid #e0e0e0",
+                    borderRadius: 6,
+                    boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 10px",
+                        borderBottom: "1px solid #eee",
+                    }}
+                >
+                    <span
+                        style={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: 6,
+                            background: this.colorFor(selectedLabel),
+                            display: "inline-block",
+                            flexShrink: 0,
+                        }}
+                    />
+                    <Text weight="semibold">{selectedLabel}</Text>
+                    {!sampleLoading && !sampleError && (
+                        <Text size={200} style={{ opacity: 0.7 }}>
+                            {sampleTotal > shown
+                                ? `showing ${shown} of ${sampleTotal} rows`
+                                : `${sampleTotal} row${sampleTotal === 1 ? "" : "s"}`}
+                        </Text>
+                    )}
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        aria-label="Close data panel"
+                        icon={<Dismiss24Regular />}
+                        onClick={this.closePanel}
+                        style={{ marginLeft: "auto" }}
+                    />
+                </div>
+                <div style={{ overflow: "auto", padding: "4px 0" }}>
+                    {sampleLoading && (
+                        <div style={{ padding: 24, textAlign: "center" }}>
+                            <Spinner size="small" label="Loading data…" />
+                        </div>
+                    )}
+                    {sampleError && (
+                        <Text
+                            style={{
+                                color: "red",
+                                fontFamily: "monospace",
+                                display: "block",
+                                padding: 12,
+                            }}
+                        >
+                            {sampleError}
+                        </Text>
+                    )}
+                    {!sampleLoading && !sampleError && sampleRows && sampleRows.length === 0 && (
+                        <Text style={{ display: "block", padding: 12, opacity: 0.7 }}>
+                            No rows.
+                        </Text>
+                    )}
+                    {!sampleLoading && !sampleError && sampleRows && sampleRows.length > 0 && (
+                        <table
+                            style={{
+                                borderCollapse: "collapse",
+                                fontSize: 12,
+                                width: "100%",
+                            }}
+                        >
+                            <thead>
+                                <tr>
+                                    {columns.map((col) => (
+                                        <th
+                                            key={col}
+                                            style={{
+                                                textAlign: "left",
+                                                padding: "4px 8px",
+                                                borderBottom: "1px solid #ddd",
+                                                position: "sticky",
+                                                top: 0,
+                                                background: "#fafafa",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {col}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sampleRows.map((row, i) => (
+                                    <tr key={i}>
+                                        {columns.map((col) => {
+                                            const v = row[col];
+                                            return (
+                                                <td
+                                                    key={col}
+                                                    style={{
+                                                        padding: "4px 8px",
+                                                        borderBottom: "1px solid #f0f0f0",
+                                                        verticalAlign: "top",
+                                                        maxWidth: 220,
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                    title={
+                                                        typeof v === "object" && v !== null
+                                                            ? JSON.stringify(v)
+                                                            : String(v ?? "")
+                                                    }
+                                                >
+                                                    {typeof v === "object" && v !== null
+                                                        ? JSON.stringify(v)
+                                                        : String(v ?? "")}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    private onWheel = (e: WheelEvent) => {
+        e.preventDefault();
         const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        // Anchor the zoom on the pointer so the graph doesn't drift while scaling.
+        const anchor = this.toViewBoxPoint(e.clientX, e.clientY);
         this.setState((s) => {
             const scale = Math.min(4, Math.max(0.2, s.transform.scale * factor));
-            return { transform: { ...s.transform, scale } };
+            const ratio = scale / s.transform.scale;
+            // Keep the point under the cursor fixed:
+            //   anchor = tx + scale * model  =>  newTx = anchor - ratio * (anchor - tx)
+            const tx = anchor.x - ratio * (anchor.x - s.transform.tx);
+            const ty = anchor.y - ratio * (anchor.y - s.transform.ty);
+            return { transform: { scale, tx, ty } };
         });
     };
 
@@ -428,7 +706,7 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                                         </Text>
                                     </div>
                                     <svg
-                                        ref={this.svgRef}
+                                        ref={this.setSvgRef}
                                         width="100%"
                                         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
                                         style={{
@@ -441,7 +719,6 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                                         onPointerDown={this.onBackgroundPointerDown}
                                         onPointerMove={this.onPointerMove}
                                         onPointerUp={this.onPointerUp}
-                                        onWheel={this.onWheel}
                                     >
                                         <defs>
                                             <marker

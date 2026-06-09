@@ -35,6 +35,9 @@ class AggregatedWith extends With {
         };
     }
     public async finish(): Promise<void> {
+        if (this._where !== null) {
+            this._group_by.where = this._where;
+        }
         const wantProvenance = this._group_by.provenanceEnabled;
         const provIter = wantProvenance ? this._group_by.generate_provenance() : null;
         for (const _ of this._group_by.generate_results()) {

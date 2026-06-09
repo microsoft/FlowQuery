@@ -1199,6 +1199,33 @@ class TestRunner:
         assert results[0] == {"i": 1, "sum": 20}
 
     @pytest.mark.asyncio
+    async def test_aggregated_with_compound_any_where_clause(self):
+        """Test aggregated WITH with compound any() WHERE clause."""
+        runner = Runner(
+            """
+            UNWIND [
+                { user: 'a', cert: 'CFA Charterholder' },
+                { user: 'a', cert: 'CAIA Charterholder' },
+                { user: 'b', cert: 'CFA Charterholder' },
+                { user: 'c', cert: 'CAIA Charterholder' }
+            ] AS row
+            WITH row.user AS user, collect(row.cert) AS certs
+            WHERE any(name IN certs WHERE name CONTAINS 'CFA Charterholder')
+              AND any(name IN certs WHERE name CONTAINS 'CAIA Charterholder')
+            RETURN user, certs
+            ORDER BY user
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {
+            "user": "a",
+            "certs": ["CFA Charterholder", "CAIA Charterholder"],
+        }
+
+
+    @pytest.mark.asyncio
     async def test_predicate_function_with_collection_from_function(self):
         """Test predicate function with collection from function."""
         runner = Runner(

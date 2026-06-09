@@ -46,6 +46,8 @@ class AggregatedWith(Return):
         return _AggregatedWithSource()
 
     async def finish(self) -> None:
+        if self._where is not None:
+            self._group_by.where = self._where
         want_provenance = self._group_by.provenance_enabled
         prov_iter = self._group_by.generate_provenance() if want_provenance else None
         for _ in self._group_by.generate_results():

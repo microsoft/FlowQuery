@@ -671,6 +671,9 @@ UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
 | `range(start, end)`            | Inclusive integer range                | `range(1,3)` → `[1,2,3]`               |
 | `round(n)`                     | Round to nearest integer               | `round(3.7)` → `4`                     |
 | `rand()`                       | Random float 0–1                       | `round(rand()*10)`                     |
+| `log(n)`                       | Natural logarithm (base e)             | `log(10)` → `2.302...`                 |
+| `log10(n)`                     | Base-10 logarithm                      | `log10(1000)` → `3`                    |
+| `pow(base, exp)`               | Base raised to the power of exponent   | `pow(2, 3)` → `8`                      |
 | `split(str, delim)`            | Split string into list                 | `split("a,b",",")` → `["a","b"]`       |
 | `join(list, delim)`            | Join list into string                  | `join(["a","b"],",")` → `"a,b"`        |
 | `replace(str, from, to)`       | Replace all occurrences                | `replace("hello","l","x")` → `"hexxo"` |
@@ -1021,6 +1024,7 @@ RETURN f.name, f.description, f.category
 │  SCALAR FUNCTIONS                                           │
 ├─────────────────────────────────────────────────────────────┤
 │  size  range  round  rand  split  join  replace             │
+│  log  log10  pow                                            │
 │  toLower  trim  substring  toString  toInteger  toFloat     │
 │  tojson  stringify  string_distance  keys  properties       │
 │  type  coalesce  head  tail  last  id  elementId  labels    │

@@ -525,6 +525,70 @@ test("Test rand and round functions", async () => {
     expect(results[0].rand).toBeLessThanOrEqual(10);
 });
 
+test("Test log function (natural logarithm)", async () => {
+    const runner = new Runner("WITH 10 AS n RETURN log(n) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeCloseTo(Math.log(10));
+});
+
+test("Test log of 1 is 0", async () => {
+    const runner = new Runner("RETURN log(1) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBe(0);
+});
+
+test("Test log10 function", async () => {
+    const runner = new Runner("WITH 1000 AS n RETURN log10(n) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeCloseTo(3);
+});
+
+test("Test pow function", async () => {
+    const runner = new Runner("WITH 2 AS b, 3 AS e RETURN pow(b, e) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBe(8);
+});
+
+test("Test pow with fractional exponent (square root)", async () => {
+    const runner = new Runner("RETURN pow(9, 0.5) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeCloseTo(3);
+});
+
+test("Test log with null returns null", async () => {
+    const runner = new Runner("RETURN log(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test log10 with null returns null", async () => {
+    const runner = new Runner("RETURN log10(null) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test pow with null returns null", async () => {
+    const runner = new Runner("RETURN pow(null, 2) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
 test("Test split function", async () => {
     const runner = new Runner('RETURN split("a,b,c", ",") as split');
     await runner.run();

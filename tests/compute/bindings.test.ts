@@ -63,6 +63,51 @@ describe("LET — literal bindings", () => {
     });
 });
 
+describe("LET — projection references", () => {
+    test("RETURN resolves a bare LET binding by name", async () => {
+        const runner = new Runner(`
+            LET greeting = 'hello';
+            RETURN greeting
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([{ greeting: "hello" }]);
+    });
+
+    test("RETURN can alias a LET binding", async () => {
+        const runner = new Runner(`
+            LET greeting = 'hello';
+            RETURN greeting AS g
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([{ g: "hello" }]);
+    });
+
+    test("LET binding is usable inside a projection expression", async () => {
+        const runner = new Runner(`
+            LET n = 3;
+            RETURN n + 1 AS m
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([{ m: 4 }]);
+    });
+
+    test("WITH resolves a bare LET binding by name", async () => {
+        const runner = new Runner(`
+            LET n = 3;
+            WITH n AS x
+            RETURN x
+        `);
+        await runner.run();
+        expect(runner.results).toEqual([{ x: 3 }]);
+    });
+
+    test("an unknown bare identifier stays undefined (no error)", async () => {
+        const runner = new Runner(`RETURN nope`);
+        await runner.run();
+        expect(runner.results).toEqual([{}]);
+    });
+});
+
 describe("LET — query bindings", () => {
     test("binds the rows produced by an inline sub-query", async () => {
         const runner = new Runner(`

@@ -18,6 +18,9 @@ class PredicateFunction(ASTNode):
         self._value_holder = ValueHolder()
         self._has_return_expression = True
 
+    def introduces_scope(self) -> bool:
+        return True
+
     @property
     def name(self) -> str:
         return self._name

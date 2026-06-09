@@ -36,6 +36,10 @@ class SubqueryExpression extends ASTNode {
         return this._mode;
     }
 
+    public introducesScope(): boolean {
+        return true;
+    }
+
     public async evaluate(): Promise<void> {
         this._results = [];
         this._rowCount = 0;

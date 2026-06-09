@@ -434,7 +434,7 @@ class TestParser:
             "---- KeyValuePair\n"
             "----- String (a)\n"
             "----- Expression\n"
-            "------ Reference (n)\n"
+            "------ BindingReference (n)\n"
             "- Return\n"
             "-- Expression\n"
             "--- Lookup\n"
@@ -550,7 +550,7 @@ class TestParser:
             "---- KeyValuePair\n"
             "----- String (key)\n"
             "----- Expression\n"
-            "------ Reference (value)"
+            "------ BindingReference (value)"
         )
         assert ast.print() == expected
 
@@ -812,7 +812,7 @@ class TestParser:
             "- Match\n"
             "- Return\n"
             "-- Expression (a)\n"
-            "--- Reference (a)"
+            "--- BindingReference (a)"
         )
         assert ast.print() == expected
         match_op = ast.first_child()

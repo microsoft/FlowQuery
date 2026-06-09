@@ -359,6 +359,12 @@ class Parser extends BaseParser {
         if (expressions.length === 0) {
             throw new Error("Expected expression");
         }
+        // Bare identifiers left unresolved by the parser scope refer to
+        // `LET`-bound values, resolved at run-time against the global
+        // Bindings store (lenient: unknown names stay `undefined`).
+        for (const expression of expressions) {
+            this.convertUnresolvedReferencesToBindings(expression, true);
+        }
         if (distinct || expressions.some((expression: Expression) => expression.has_reducers())) {
             return new AggregatedWith(expressions);
         }
@@ -415,6 +421,12 @@ class Parser extends BaseParser {
         const expressions = this.parseExpressions(AliasOption.OPTIONAL);
         if (expressions.length === 0) {
             throw new Error("Expected expression");
+        }
+        // Bare identifiers left unresolved by the parser scope refer to
+        // `LET`-bound values, resolved at run-time against the global
+        // Bindings store (lenient: unknown names stay `undefined`).
+        for (const expression of expressions) {
+            this.convertUnresolvedReferencesToBindings(expression, true);
         }
         if (distinct || expressions.some((expression: Expression) => expression.has_reducers())) {
             return new AggregatedReturn(expressions);
@@ -1333,17 +1345,33 @@ class Parser extends BaseParser {
      * Used by `UPDATE … AS u DELETE WHERE …` so that predicates can
      * reference other bindings by name, and to keep `LOAD JSON FROM …`
      * behaviour consistent at arbitrary depth.
+     *
+     * When `optional` is true, the produced {@link BindingReference}
+     * yields `undefined` (rather than throwing) for names absent from
+     * the bindings store.  Projection conversions pass `optional` so
+     * that an unresolved bare identifier in `RETURN`/`WITH` keeps its
+     * historical "silently undefined" behaviour for unknown names while
+     * still resolving real `LET` bindings.
      */
-    private convertUnresolvedReferencesToBindings(node: ASTNode): void {
+    private convertUnresolvedReferencesToBindings(node: ASTNode, optional: boolean = false): void {
         for (const child of node.getChildren().slice()) {
+            // Scope-introducing constructs manage their own variable
+            // bindings (the iteration-variable declaration of a
+            // predicate function / list comprehension, or a nested
+            // sub-query's own scope).  Their inner references are either
+            // binders or resolved within that inner scope, so rewriting
+            // them here would corrupt the binding wiring.  Skip them.
+            if (child.introducesScope()) {
+                continue;
+            }
             if (
                 child instanceof Reference &&
                 child.referred === undefined &&
                 !child.identifier.startsWith("$")
             ) {
-                node.replaceChild(child, new BindingReference(child.identifier));
+                node.replaceChild(child, new BindingReference(child.identifier, optional));
             } else {
-                this.convertUnresolvedReferencesToBindings(child);
+                this.convertUnresolvedReferencesToBindings(child, optional);
             }
         }
     }

@@ -32,6 +32,9 @@ class ListComprehension(ASTNode):
         super().__init__()
         self._value_holder = ValueHolder()
 
+    def introduces_scope(self) -> bool:
+        return True
+
     @property
     def reference(self) -> ASTNode:
         """The iteration variable reference."""

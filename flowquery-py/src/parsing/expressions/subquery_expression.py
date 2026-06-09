@@ -47,6 +47,9 @@ class SubqueryExpression(ASTNode):
     def mode(self) -> SubqueryMode:
         return self._mode
 
+    def introduces_scope(self) -> bool:
+        return True
+
     async def evaluate(self) -> None:
         from ...compute.runner import Runner
         from ..operations.return_op import Return

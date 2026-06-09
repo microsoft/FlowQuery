@@ -28,6 +28,10 @@ import Where from "../operations/where";
 class ListComprehension extends ASTNode {
     private _valueHolder: ValueHolder = new ValueHolder();
 
+    public introducesScope(): boolean {
+        return true;
+    }
+
     /**
      * The iteration variable reference.
      */

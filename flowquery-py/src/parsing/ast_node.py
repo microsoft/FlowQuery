@@ -98,6 +98,19 @@ class ASTNode:
         """
         return None
 
+    def introduces_scope(self) -> bool:
+        """Whether this node introduces its own variable scope (e.g. the
+        iteration variable of a predicate function / list comprehension,
+        or a nested sub-query).  References inside such a node are either
+        binders or resolved within that inner scope, so outer-scope
+        rewrites (such as LET-binding resolution in projections) must not
+        descend into them.  Override in scope-introducing subclasses.
+
+        Returns:
+            True if the node owns an inner variable scope
+        """
+        return False
+
     def is_operator(self) -> bool:
         """Checks if this node represents an operator.
 

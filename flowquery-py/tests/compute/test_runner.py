@@ -515,6 +515,79 @@ class TestRunner:
         assert results[0]["rand"] <= 10
 
     @pytest.mark.asyncio
+    async def test_log_function(self):
+        """Test log function (natural logarithm)."""
+        import math
+        runner = Runner("WITH 10 AS n RETURN log(n) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(math.log(10))
+
+    @pytest.mark.asyncio
+    async def test_log_of_one_is_zero(self):
+        """Test log(1) is 0."""
+        runner = Runner("RETURN log(1) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == 0
+
+    @pytest.mark.asyncio
+    async def test_log10_function(self):
+        """Test log10 function."""
+        runner = Runner("WITH 1000 AS n RETURN log10(n) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(3)
+
+    @pytest.mark.asyncio
+    async def test_pow_function(self):
+        """Test pow function."""
+        runner = Runner("WITH 2 AS b, 3 AS e RETURN pow(b, e) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == 8
+
+    @pytest.mark.asyncio
+    async def test_pow_with_fractional_exponent(self):
+        """Test pow with fractional exponent (square root)."""
+        runner = Runner("RETURN pow(9, 0.5) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0]["result"] == pytest.approx(3)
+
+    @pytest.mark.asyncio
+    async def test_log_with_null_returns_null(self):
+        """Test log with null returns null."""
+        runner = Runner("RETURN log(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_log10_with_null_returns_null(self):
+        """Test log10 with null returns null."""
+        runner = Runner("RETURN log10(null) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_pow_with_null_returns_null(self):
+        """Test pow with null returns null."""
+        runner = Runner("RETURN pow(null, 2) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
     async def test_split_function(self):
         """Test split function."""
         runner = Runner('RETURN split("a,b,c", ",") as split')

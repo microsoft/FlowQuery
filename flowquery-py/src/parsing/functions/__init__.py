@@ -33,9 +33,12 @@ from .last import Last
 from .length import Length
 from .localdatetime import LocalDatetime
 from .localtime import LocalTime
+from .log import Log
+from .log10 import Log10
 from .max_ import Max
 from .min_ import Min
 from .nodes import Nodes
+from .pow import Pow
 from .predicate_all import PredicateAll
 from .predicate_any import PredicateAny
 from .predicate_function import PredicateFunction
@@ -106,6 +109,9 @@ __all__ = [
     "Max",
     "Min",
     "Nodes",
+    "Log",
+    "Log10",
+    "Pow",
     "Properties",
     "Relationships",
     "Rand",

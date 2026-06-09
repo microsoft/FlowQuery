@@ -11,7 +11,7 @@ class AggregatedWith(Return):
 
     def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
-        self._group_by = GroupBy(self.children)
+        self._group_by = GroupBy(self.children, lambda: self._where)
         # Iterator over the per-group provenance produced by
         # ``_group_by``.  Advanced in lockstep with
         # :meth:`generate_results` inside :meth:`finish` so that

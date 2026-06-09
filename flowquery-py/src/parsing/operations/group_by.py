@@ -1,7 +1,7 @@
 """GroupBy implementation for aggregate operations."""
 
 import json
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from ...compute.provenance import (
     NodeBinding,
@@ -84,13 +84,17 @@ class GroupByNode:
 class GroupBy(Projection):
     """Implements grouping and aggregation for FlowQuery operations."""
 
-    def __init__(self, expressions: List[ASTNode]) -> None:
+    def __init__(
+        self,
+        expressions: List[ASTNode],
+        where_provider: Optional[Callable[[], Optional[ASTNode]]] = None,
+    ) -> None:
         super().__init__(expressions)
         self._root = GroupByNode()
         self._current = self._root
         self._mappers: Optional[List[Any]] = None
         self._reducers: Optional[List[AggregateFunction]] = None
-        self._where: Optional[ASTNode] = None
+        self._where_provider = where_provider
         self._provenance_sources: Optional[List[ProvenanceSource]] = None
 
     async def run(self) -> None:
@@ -247,15 +251,8 @@ class GroupBy(Projection):
             )
 
     @property
-    def where(self) -> Optional[ASTNode]:
-        return self._where
-
-    @where.setter
-    def where(self, where: Optional[ASTNode]) -> None:
-        self._where = where
-
-    @property
     def where_condition(self) -> Any:
-        if self._where is None:
+        where = self._where_provider() if self._where_provider is not None else None
+        if where is None:
             return True
-        return self._where.value()
+        return where.value()

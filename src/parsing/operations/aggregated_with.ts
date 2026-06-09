@@ -4,7 +4,7 @@ import GroupBy from "./group_by";
 import With from "./return";
 
 class AggregatedWith extends With {
-    private _group_by: GroupBy = new GroupBy(this.children as Expression[]);
+    private _group_by: GroupBy = new GroupBy(this.children as Expression[], () => this._where);
     /**
      * Iterator over the per-group provenance produced by `_group_by`.
      * Advanced in lockstep with `generate_results()` inside `finish()` so

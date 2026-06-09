@@ -1158,6 +1158,31 @@ test("Test chained aggregated return with where clause", async () => {
     expect(results[0]).toEqual({ i: 1, sum: 20 });
 });
 
+test("Test aggregated WITH with compound any() WHERE clause", async () => {
+    const runner = new Runner(
+        `
+        UNWIND [
+            { user: 'a', cert: 'CFA Charterholder' },
+            { user: 'a', cert: 'CAIA Charterholder' },
+            { user: 'b', cert: 'CFA Charterholder' },
+            { user: 'c', cert: 'CAIA Charterholder' }
+        ] AS row
+        WITH row.user AS user, collect(row.cert) AS certs
+        WHERE any(name IN certs WHERE name CONTAINS 'CFA Charterholder')
+          AND any(name IN certs WHERE name CONTAINS 'CAIA Charterholder')
+        RETURN user, certs
+        ORDER BY user
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({
+        user: "a",
+        certs: ["CFA Charterholder", "CAIA Charterholder"],
+    });
+});
+
 test("Test predicate function with collection from function", async () => {
     const runner = new Runner(
         `

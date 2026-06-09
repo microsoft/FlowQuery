@@ -26,6 +26,13 @@ interface LineageItem {
     property?: string;
     /** The observed value at this level. */
     value?: unknown;
+    /**
+     * How many structurally-identical sibling chains were collapsed into
+     * this one.  `1` (or absent) when unique; `>1` when an aggregate fed
+     * the same backing chain from multiple input rows.  Rendered as a
+     * `×N` badge.
+     */
+    count?: number;
     children: LineageItem[];
 }
 
@@ -84,6 +91,44 @@ function buildSegment(seg: RowProvenance): LineageItem[] {
 }
 
 /**
+ * A canonical structural key for a lineage item, ignoring `count`.  Two
+ * items with the same key represent the same backing chain (same kind,
+ * title, property, value, and recursively the same children) and can be
+ * safely collapsed.
+ */
+function itemKey(item: LineageItem): string {
+    return JSON.stringify([
+        item.kind,
+        item.title,
+        item.property ?? null,
+        formatValue(item.value),
+        item.children.map(itemKey),
+    ]);
+}
+
+/**
+ * Collapse structurally-identical sibling chains into a single item with
+ * a `count`, recursing depth-first so deeper duplicates are merged before
+ * their parents are compared.  Preserves first-seen order.
+ */
+function dedupeItems(items: LineageItem[]): LineageItem[] {
+    const order: string[] = [];
+    const byKey = new Map<string, LineageItem>();
+    for (const raw of items) {
+        const item: LineageItem = { ...raw, children: dedupeItems(raw.children) };
+        const key = itemKey(item);
+        const existing = byKey.get(key);
+        if (existing) {
+            existing.count = (existing.count ?? 1) + (item.count ?? 1);
+        } else {
+            byKey.set(key, { ...item, count: item.count ?? 1 });
+            order.push(key);
+        }
+    }
+    return order.map((k) => byKey.get(k)!);
+}
+
+/**
  * Build the root lineage item for a clicked cell: the output column,
  * backed by its node / relationship bindings (or, for `LOAD`-only rows,
  * the row-level data sources).
@@ -118,6 +163,7 @@ function buildChain(
         root.children = buildSegment(rowProvenance);
     }
 
+    root.children = dedupeItems(root.children);
     return root;
 }
 
@@ -159,6 +205,22 @@ function LineageRow({ item, depth }: { item: LineageItem; depth: number }) {
                     {item.title}
                     {item.property ? "." + item.property : ""}
                 </Text>
+                {(item.count ?? 1) > 1 && (
+                    <span
+                        style={{
+                            background: "#eceff1",
+                            color: "#37474f",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "1px 6px",
+                            borderRadius: 10,
+                            flexShrink: 0,
+                        }}
+                        title={`${item.count} input rows shared this lineage`}
+                    >
+                        ×{item.count}
+                    </span>
+                )}
                 {valueText !== "" && (
                     <Text
                         size={200}

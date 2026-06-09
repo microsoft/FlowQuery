@@ -26,6 +26,10 @@ class PredicateFunction extends ASTNode {
         this._hasReturnExpression = value;
     }
 
+    public introducesScope(): boolean {
+        return true;
+    }
+
     protected get reference(): Reference {
         return this.firstChild() as Reference;
     }

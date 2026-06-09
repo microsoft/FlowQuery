@@ -410,7 +410,7 @@ test("Test with and return with variable lookup", () => {
             "---- KeyValuePair\n" +
             "----- String (a)\n" +
             "----- Expression\n" +
-            "------ Reference (n)\n" +
+            "------ BindingReference (n)\n" +
             "- Return\n" +
             "-- Expression\n" +
             "--- Lookup\n" +
@@ -542,7 +542,7 @@ test("Test associative array with backtick string", () => {
             "---- KeyValuePair\n" +
             "----- String (key)\n" +
             "----- Expression\n" +
-            "------ Reference (value)"
+            "------ BindingReference (value)"
     );
 });
 
@@ -956,7 +956,7 @@ test("Test relationship with properties", () => {
         "- Match\n" +
         "- Return\n" +
         "-- Expression (a)\n" +
-        "--- Reference (a)"
+        "--- BindingReference (a)"
     );
     const match: Match = ast.firstChild() as Match;
     const relationship: Relationship = match.patterns[0].chain[1] as Relationship;

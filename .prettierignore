@@ -1,0 +1,11 @@
+# Build outputs
+dist/
+docs/
+flowquery-app/dist/
+flowquery-vscode/flowQueryEngine/
+
+# Minified bundles
+**/*.min.js
+
+# Dependencies
+node_modules/

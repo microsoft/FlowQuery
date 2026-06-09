@@ -702,24 +702,27 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                                         ))}
                                         <Text size={200} style={{ marginLeft: "auto", opacity: 0.7 }}>
                                             {data.nodes.length} labels · {data.edges.length}{" "}
-                                            relationship types · drag to move, scroll to zoom
+                                            relationship types · click a node for data, drag to move,
+                                            scroll to zoom
                                         </Text>
                                     </div>
-                                    <svg
-                                        ref={this.setSvgRef}
-                                        width="100%"
-                                        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-                                        style={{
-                                            border: "1px solid #e0e0e0",
-                                            borderRadius: 6,
-                                            background: "#fafafa",
-                                            touchAction: "none",
-                                            cursor: this.panning ? "grabbing" : "grab",
-                                        }}
-                                        onPointerDown={this.onBackgroundPointerDown}
-                                        onPointerMove={this.onPointerMove}
-                                        onPointerUp={this.onPointerUp}
-                                    >
+                                    <div style={{ position: "relative" }}>
+                                        <svg
+                                            ref={this.setSvgRef}
+                                            width="100%"
+                                            viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+                                            style={{
+                                                border: "1px solid #e0e0e0",
+                                                borderRadius: 6,
+                                                background: "#fafafa",
+                                                touchAction: "none",
+                                                cursor: this.panning ? "grabbing" : "grab",
+                                                display: "block",
+                                            }}
+                                            onPointerDown={this.onBackgroundPointerDown}
+                                            onPointerMove={this.onPointerMove}
+                                            onPointerUp={this.onPointerUp}
+                                        >
                                         <defs>
                                             <marker
                                                 id="arrow"
@@ -826,8 +829,8 @@ export class GraphView extends React.Component<GraphViewProps, GraphViewState> {
                                                 </g>
                                             ))}
                                         </g>
-                                    </svg>
-                                </>
+                                    </svg>                                        {this.renderDataPanel()}
+                                    </div>                                </>
                             )}
                         </DialogContent>
                         <DialogActions>

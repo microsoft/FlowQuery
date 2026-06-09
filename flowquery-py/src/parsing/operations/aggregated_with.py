@@ -11,7 +11,7 @@ class AggregatedWith(Return):
 
     def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
-        self._group_by = GroupBy(self.children)
+        self._group_by = GroupBy(self.children, lambda: self._where)
         # Iterator over the per-group provenance produced by
         # ``_group_by``.  Advanced in lockstep with
         # :meth:`generate_results` inside :meth:`finish` so that
@@ -46,8 +46,6 @@ class AggregatedWith(Return):
         return _AggregatedWithSource()
 
     async def finish(self) -> None:
-        if self._where is not None:
-            self._group_by.where = self._where
         want_provenance = self._group_by.provenance_enabled
         prov_iter = self._group_by.generate_provenance() if want_provenance else None
         for _ in self._group_by.generate_results():

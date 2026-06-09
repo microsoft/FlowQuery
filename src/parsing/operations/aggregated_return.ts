@@ -5,7 +5,7 @@ import Operation from "./operation";
 import Return from "./return";
 
 class AggregatedReturn extends Return {
-    private _group_by: GroupBy = new GroupBy(this.children as Expression[]);
+    private _group_by: GroupBy = new GroupBy(this.children as Expression[], () => this._where);
     public async run(): Promise<void> {
         await this._group_by.run();
     }
@@ -37,9 +37,6 @@ class AggregatedReturn extends Return {
         results: Record<string, any>[];
         provenance: RowProvenance[];
     } {
-        if (this._where !== null) {
-            this._group_by.where = this._where;
-        }
         const results: Record<string, any>[] = [];
         const provenance: RowProvenance[] = [];
         // Emit a provenance entry per result row whenever a sink is

@@ -68,8 +68,12 @@ class GroupBy extends Projection {
     private _current: Node = this._root;
     private _mappers: Expression[] | null = null;
     private _reducers: AggregateFunction[] | null = null;
-    protected _where: Where | null = null;
+    private _whereProvider: () => Where | null;
     private _provenanceSources: ProvenanceSource[] | null = null;
+    constructor(expressions: Expression[], whereProvider: () => Where | null = () => null) {
+        super(expressions);
+        this._whereProvider = whereProvider;
+    }
     public async run(): Promise<void> {
         this.resetTree();
         this.map();
@@ -232,14 +236,12 @@ class GroupBy extends Projection {
             };
         }
     }
-    public set where(where: Where) {
-        this._where = where;
-    }
     public get where(): boolean {
-        if (this._where === null) {
+        const where = this._whereProvider();
+        if (where === null) {
             return true;
         }
-        return this._where.value();
+        return where.value();
     }
 }
 

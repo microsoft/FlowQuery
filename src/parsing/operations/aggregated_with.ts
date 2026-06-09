@@ -4,7 +4,7 @@ import GroupBy from "./group_by";
 import With from "./return";
 
 class AggregatedWith extends With {
-    private _group_by: GroupBy = new GroupBy(this.children as Expression[]);
+    private _group_by: GroupBy = new GroupBy(this.children as Expression[], () => this._where);
     /**
      * Iterator over the per-group provenance produced by `_group_by`.
      * Advanced in lockstep with `generate_results()` inside `finish()` so
@@ -35,9 +35,6 @@ class AggregatedWith extends With {
         };
     }
     public async finish(): Promise<void> {
-        if (this._where !== null) {
-            this._group_by.where = this._where;
-        }
         const wantProvenance = this._group_by.provenanceEnabled;
         const provIter = wantProvenance ? this._group_by.generate_provenance() : null;
         for (const _ of this._group_by.generate_results()) {

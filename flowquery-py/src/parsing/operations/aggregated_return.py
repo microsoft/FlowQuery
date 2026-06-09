@@ -12,7 +12,7 @@ class AggregatedReturn(Return):
 
     def __init__(self, expressions: List[ASTNode]) -> None:
         super().__init__(expressions)
-        self._group_by = GroupBy(self.children)
+        self._group_by = GroupBy(self.children, lambda: self._where)
 
     async def run(self) -> None:
         await self._group_by.run()
@@ -45,8 +45,6 @@ class AggregatedReturn(Return):
     def _build_aggregate_output(
         self,
     ) -> Tuple[List[Dict[str, Any]], List[RowProvenance]]:
-        if self._where is not None:
-            self._group_by.where = self._where
         results: List[Dict[str, Any]] = []
         provenance: List[RowProvenance] = []
         # Emit a provenance entry per result row whenever a sink is

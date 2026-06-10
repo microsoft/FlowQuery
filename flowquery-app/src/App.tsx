@@ -199,7 +199,7 @@ export class App extends React.Component<Record<string, never>, AppState> {
                         {error}
                     </Text>
                 )}
-                <div style={{ flexGrow: 1, overflowY: "auto", marginTop: 8 }}>
+                <div style={{ flexGrow: 1, overflow: "hidden", marginTop: 8 }}>
                     <ResultsTable results={results} lineage={lineage} provenance={provenance} />
                 </div>
                 <GraphView

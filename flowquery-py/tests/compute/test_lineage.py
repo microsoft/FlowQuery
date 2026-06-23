@@ -227,6 +227,170 @@ class TestColumnLineageMetadata:
             await Runner("DELETE VIRTUAL (:ColLinRelCity)").run()
 
 
+class TestColumnLineageUnion:
+    """Column lineage across ``UNION`` / ``UNION ALL``: each branch is an
+    independent sub-pipeline, so the crawler must descend into both and
+    merge their per-column references (and labels / properties).
+    """
+
+    @staticmethod
+    def _ref_tuples(lineage):
+        return sorted(
+            (r.alias, r.kind, tuple(r.labels), r.property)
+            for r in lineage.references
+        )
+
+    @pytest.mark.asyncio
+    async def test_merges_references_from_both_union_branches(self):
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionCity) AS {
+                UNWIND [{id: 'nyc', name: 'New York', country: 'US'}] AS c
+                RETURN c.id AS id, c.name AS name, c.country AS country
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionTown) AS {
+                UNWIND [{id: 'rye', name: 'Rye', region: 'NY'}] AS t
+                RETURN t.id AS id, t.name AS name, t.region AS region
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (a:ColUnionCity) RETURN a.name AS name
+                UNION
+                MATCH (b:ColUnionTown) RETURN b.name AS name
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            assert list(info.returns.keys()) == ["name"]
+            name = info.returns["name"]
+            assert name.kind == "property"
+            assert self._ref_tuples(name) == [
+                ("a", "node", ("ColUnionCity",), "name"),
+                ("b", "node", ("ColUnionTown",), "name"),
+            ]
+            # Labels / properties from both branches are extracted.
+            assert "ColUnionCity" in info.node_labels
+            assert "ColUnionTown" in info.node_labels
+            assert info.node_properties["ColUnionCity"] == ["name"]
+            assert info.node_properties["ColUnionTown"] == ["name"]
+        finally:
+            await Runner("DELETE VIRTUAL (:ColUnionCity)").run()
+            await Runner("DELETE VIRTUAL (:ColUnionTown)").run()
+
+    @pytest.mark.asyncio
+    async def test_merges_branches_for_union_all(self):
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionAllCity) AS {
+                UNWIND [{id: 'nyc', name: 'New York'}] AS c
+                RETURN c.id AS id, c.name AS name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionAllTown) AS {
+                UNWIND [{id: 'rye', name: 'Rye'}] AS t
+                RETURN t.id AS id, t.name AS name
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (a:ColUnionAllCity) RETURN a.name AS name
+                UNION ALL
+                MATCH (b:ColUnionAllTown) RETURN b.name AS name
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            name = info.returns["name"]
+            assert name.kind == "property"
+            assert self._ref_tuples(name) == [
+                ("a", "node", ("ColUnionAllCity",), "name"),
+                ("b", "node", ("ColUnionAllTown",), "name"),
+            ]
+        finally:
+            await Runner("DELETE VIRTUAL (:ColUnionAllCity)").run()
+            await Runner("DELETE VIRTUAL (:ColUnionAllTown)").run()
+
+    @pytest.mark.asyncio
+    async def test_merges_three_way_nested_union(self):
+        await Runner(
+            "CREATE VIRTUAL (:ColUnionA) AS { UNWIND [{id: 1, name: 'a'}] AS r RETURN r.id AS id, r.name AS name }"
+        ).run()
+        await Runner(
+            "CREATE VIRTUAL (:ColUnionB) AS { UNWIND [{id: 2, name: 'b'}] AS r RETURN r.id AS id, r.name AS name }"
+        ).run()
+        await Runner(
+            "CREATE VIRTUAL (:ColUnionC) AS { UNWIND [{id: 3, name: 'c'}] AS r RETURN r.id AS id, r.name AS name }"
+        ).run()
+        try:
+            runner = Runner("""
+                MATCH (a:ColUnionA) RETURN a.name AS name
+                UNION
+                MATCH (b:ColUnionB) RETURN b.name AS name
+                UNION
+                MATCH (c:ColUnionC) RETURN c.name AS name
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            name = info.returns["name"]
+            assert self._ref_tuples(name) == [
+                ("a", "node", ("ColUnionA",), "name"),
+                ("b", "node", ("ColUnionB",), "name"),
+                ("c", "node", ("ColUnionC",), "name"),
+            ]
+        finally:
+            await Runner("DELETE VIRTUAL (:ColUnionA)").run()
+            await Runner("DELETE VIRTUAL (:ColUnionB)").run()
+            await Runner("DELETE VIRTUAL (:ColUnionC)").run()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_expression_when_branches_disagree(self):
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionMixed) AS {
+                UNWIND [{id: 'nyc', name: 'New York'}] AS c
+                RETURN c.id AS id, c.name AS name
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                WITH 'literal' AS name RETURN name
+                UNION
+                MATCH (c:ColUnionMixed) RETURN c.name AS name
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            name = info.returns["name"]
+            # literal (left) + property (right) → expression, with the
+            # property reference still surfaced.
+            assert name.kind == "expression"
+            assert self._ref_tuples(name) == [
+                ("c", "node", ("ColUnionMixed",), "name"),
+            ]
+        finally:
+            await Runner("DELETE VIRTUAL (:ColUnionMixed)").run()
+
+    @pytest.mark.asyncio
+    async def test_kind_aggregate_when_either_branch_aggregates(self):
+        await Runner("""
+            CREATE VIRTUAL (:ColUnionAgg) AS {
+                UNWIND [{id: 'a', country: 'US'}, {id: 'b', country: 'US'}] AS r
+                RETURN r.id AS id, r.country AS country
+            }
+        """).run()
+        try:
+            runner = Runner("""
+                MATCH (c:ColUnionAgg) RETURN count(c) AS total
+                UNION
+                MATCH (c:ColUnionAgg) RETURN count(c) AS total
+            """)
+            info = runner.metadata.info
+            assert info is not None
+            total = info.returns["total"]
+            assert total.kind == "aggregate"
+            assert total.aggregate == "count"
+        finally:
+            await Runner("DELETE VIRTUAL (:ColUnionAgg)").run()
+
+
 class TestTraceRow:
     """:meth:`Runner.trace_row` bundles structural lineage with row provenance."""
 

@@ -7652,6 +7652,151 @@ test("Test info.returns is a deep copy", () => {
 });
 
 // =====================================================================
+// Column-level lineage across UNION / UNION ALL — each branch is an
+// independent sub-pipeline, so the crawler must descend into both and
+// merge their per-column references (and labels / properties).
+// =====================================================================
+
+test("Test info.returns merges alias.property references from both UNION branches", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionCity) AS {
+            UNWIND [{id: 'nyc', name: 'New York', country: 'US'}] AS c
+            RETURN c.id AS id, c.name AS name, c.country AS country
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionTown) AS {
+            UNWIND [{id: 'rye', name: 'Rye', region: 'NY'}] AS t
+            RETURN t.id AS id, t.name AS name, t.region AS region
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (a:ColUnionCity) RETURN a.name AS name
+        UNION
+        MATCH (b:ColUnionTown) RETURN b.name AS name
+    `);
+    const info = runner.metadata.info!;
+    // The output column draws from both branches.
+    expect(Object.keys(info.returns)).toEqual(["name"]);
+    expect(info.returns.name.kind).toBe("property");
+    expect(info.returns.name.references).toEqual(
+        expect.arrayContaining([
+            { alias: "a", kind: "node", labels: ["ColUnionCity"], property: "name" },
+            { alias: "b", kind: "node", labels: ["ColUnionTown"], property: "name" },
+        ])
+    );
+    expect(info.returns.name.references.length).toBe(2);
+    // Labels / properties from both branches are extracted, not just one.
+    expect(info.node_labels).toEqual(expect.arrayContaining(["ColUnionCity", "ColUnionTown"]));
+    expect(info.node_properties.ColUnionCity).toEqual(["name"]);
+    expect(info.node_properties.ColUnionTown).toEqual(["name"]);
+    await new Runner("DELETE VIRTUAL (:ColUnionCity)").run();
+    await new Runner("DELETE VIRTUAL (:ColUnionTown)").run();
+});
+
+test("Test info.returns merges branches for UNION ALL too", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionAllCity) AS {
+            UNWIND [{id: 'nyc', name: 'New York'}] AS c
+            RETURN c.id AS id, c.name AS name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionAllTown) AS {
+            UNWIND [{id: 'rye', name: 'Rye'}] AS t
+            RETURN t.id AS id, t.name AS name
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (a:ColUnionAllCity) RETURN a.name AS name
+        UNION ALL
+        MATCH (b:ColUnionAllTown) RETURN b.name AS name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns.name.kind).toBe("property");
+    expect(info.returns.name.references).toEqual(
+        expect.arrayContaining([
+            { alias: "a", kind: "node", labels: ["ColUnionAllCity"], property: "name" },
+            { alias: "b", kind: "node", labels: ["ColUnionAllTown"], property: "name" },
+        ])
+    );
+    expect(info.returns.name.references.length).toBe(2);
+    await new Runner("DELETE VIRTUAL (:ColUnionAllCity)").run();
+    await new Runner("DELETE VIRTUAL (:ColUnionAllTown)").run();
+});
+
+test("Test info.returns merges three-way nested UNION branches", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionA) AS { UNWIND [{id: 1, name: 'a'}] AS r RETURN r.id AS id, r.name AS name }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionB) AS { UNWIND [{id: 2, name: 'b'}] AS r RETURN r.id AS id, r.name AS name }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionC) AS { UNWIND [{id: 3, name: 'c'}] AS r RETURN r.id AS id, r.name AS name }
+    `).run();
+    const runner = new Runner(`
+        MATCH (a:ColUnionA) RETURN a.name AS name
+        UNION
+        MATCH (b:ColUnionB) RETURN b.name AS name
+        UNION
+        MATCH (c:ColUnionC) RETURN c.name AS name
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns.name.references).toEqual(
+        expect.arrayContaining([
+            { alias: "a", kind: "node", labels: ["ColUnionA"], property: "name" },
+            { alias: "b", kind: "node", labels: ["ColUnionB"], property: "name" },
+            { alias: "c", kind: "node", labels: ["ColUnionC"], property: "name" },
+        ])
+    );
+    expect(info.returns.name.references.length).toBe(3);
+    await new Runner("DELETE VIRTUAL (:ColUnionA)").run();
+    await new Runner("DELETE VIRTUAL (:ColUnionB)").run();
+    await new Runner("DELETE VIRTUAL (:ColUnionC)").run();
+});
+
+test("Test info.returns falls back to kind='expression' when UNION branches disagree", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionMixed) AS {
+            UNWIND [{id: 'nyc', name: 'New York'}] AS c
+            RETURN c.id AS id, c.name AS name
+        }
+    `).run();
+    const runner = new Runner(`
+        WITH 'literal' AS name RETURN name
+        UNION
+        MATCH (c:ColUnionMixed) RETURN c.name AS name
+    `);
+    const info = runner.metadata.info!;
+    // literal (left) + property (right) → expression, with the property
+    // reference still surfaced.
+    expect(info.returns.name.kind).toBe("expression");
+    expect(info.returns.name.references).toEqual([
+        { alias: "c", kind: "node", labels: ["ColUnionMixed"], property: "name" },
+    ]);
+    await new Runner("DELETE VIRTUAL (:ColUnionMixed)").run();
+});
+
+test("Test info.returns kind='aggregate' when either UNION branch aggregates", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:ColUnionAgg) AS {
+            UNWIND [{id: 'a', country: 'US'}, {id: 'b', country: 'US'}] AS r
+            RETURN r.id AS id, r.country AS country
+        }
+    `).run();
+    const runner = new Runner(`
+        MATCH (c:ColUnionAgg) RETURN count(c) AS total
+        UNION
+        MATCH (c:ColUnionAgg) RETURN count(c) AS total
+    `);
+    const info = runner.metadata.info!;
+    expect(info.returns.total.kind).toBe("aggregate");
+    expect(info.returns.total.aggregate).toBe("count");
+    await new Runner("DELETE VIRTUAL (:ColUnionAgg)").run();
+});
+
+// =====================================================================
 // traceRow() / lineage() - convenience methods that bundle structural
 // column lineage (info.returns) with row-level provenance.
 // =====================================================================

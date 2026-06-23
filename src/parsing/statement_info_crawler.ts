@@ -26,6 +26,7 @@ import Operation from "./operations/operation";
 import OrderBy from "./operations/order_by";
 import Projection from "./operations/projection";
 import Return from "./operations/return";
+import Union from "./operations/union";
 import With from "./operations/with";
 
 /**
@@ -338,10 +339,97 @@ class StatementInfoCrawler {
         } catch {
             return;
         }
-        while (op !== null) {
-            this.visitOperation(op);
-            op = op.next;
+        if (!(op instanceof Operation)) return;
+        // Each top-level statement overwrites the per-column lineage so a
+        // chained `A; B` ends up reporting B's RETURN (the last visible
+        // result shape).  A statement without a RETURN leaves the previous
+        // one in place (`crawlChain` returns null).
+        const returns = this.crawlChain(op);
+        if (returns !== null) {
+            this._returns = returns;
         }
+    }
+
+    /**
+     * Walks an operation chain, recording side-effects (labels, properties,
+     * sources, property accesses) for each operation and returning the
+     * per-column lineage produced by the chain's terminal `RETURN`.
+     *
+     * A `UNION` composes two independent sub-pipelines whose branches are
+     * stored off the `.next` chain; descend into both and merge their
+     * column lineage so every branch's `alias.property` references surface.
+     * Returns `null` when the chain has no terminal `RETURN`/`UNION`.
+     */
+    private crawlChain(op: Operation): Record<string, ColumnLineage> | null {
+        let returns: Record<string, ColumnLineage> | null = null;
+        let current: Operation | null = op;
+        while (current !== null) {
+            this.visitOperation(current);
+            if (current instanceof Union) {
+                // A parsed UNION always has both branches set.
+                const left = this.crawlChain(current.left);
+                const right = this.crawlChain(current.right);
+                returns = this.mergeReturnColumns(left ?? {}, right ?? {});
+            } else if (current instanceof Return) {
+                returns = this.collectReturnColumns(current);
+            }
+            current = current.next;
+        }
+        return returns;
+    }
+
+    /**
+     * Merges the per-column lineage of two UNION branches.  Output columns
+     * draw their values from every branch, so a column's references are the
+     * union of the branch references (deduplicated by alias/kind/property/
+     * labels).  The `kind` is `aggregate` when either branch aggregates,
+     * the shared kind when both branches agree, and `expression` otherwise.
+     */
+    private mergeReturnColumns(
+        left: Record<string, ColumnLineage>,
+        right: Record<string, ColumnLineage>
+    ): Record<string, ColumnLineage> {
+        const merged: Record<string, ColumnLineage> = {};
+        const columns = [...Object.keys(left), ...Object.keys(right).filter((k) => !(k in left))];
+        for (const column of columns) {
+            const l = left[column];
+            const r = right[column];
+            if (l === undefined) {
+                merged[column] = r;
+            } else if (r === undefined) {
+                merged[column] = l;
+            } else {
+                merged[column] = this.mergeColumnLineage(l, r);
+            }
+        }
+        return merged;
+    }
+
+    private mergeColumnLineage(a: ColumnLineage, b: ColumnLineage): ColumnLineage {
+        const references: ColumnReference[] = [];
+        const seenKeys = new Set<string>();
+        for (const ref of [...a.references, ...b.references]) {
+            const key = `${ref.alias}\u0000${ref.kind}\u0000${ref.property}\u0000${ref.labels.join(",")}`;
+            if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                references.push({
+                    alias: ref.alias,
+                    kind: ref.kind,
+                    labels: [...ref.labels],
+                    property: ref.property,
+                });
+            }
+        }
+
+        let kind: ColumnLineage["kind"];
+        if (a.kind === "aggregate" || b.kind === "aggregate") kind = "aggregate";
+        else if (a.kind === b.kind) kind = a.kind;
+        else kind = "expression";
+
+        const result: ColumnLineage = { references, kind };
+        const aggregate = a.aggregate ?? b.aggregate;
+        if (aggregate !== undefined) result.aggregate = aggregate;
+        return result;
     }
 
     private visitOperation(op: Operation): void {
@@ -410,14 +498,6 @@ class StatementInfoCrawler {
             !(op instanceof DeleteRelationship)
         ) {
             this.collectPropertyAccesses(op);
-        }
-
-        // Capture per-output-column lineage from the final RETURN.  Each
-        // Return op we visit overwrites the previous result so chained
-        // statements end up with the lineage of the last RETURN, which is
-        // what the caller actually sees in `runner.results`.
-        if (op instanceof Return) {
-            this._returns = this.collectReturnColumns(op);
         }
     }
 

@@ -34,6 +34,7 @@ from .operations.operation import Operation
 from .operations.order_by import OrderBy
 from .operations.projection import Projection
 from .operations.return_op import Return
+from .operations.union import Union as UnionOperation
 from .operations.with_op import With
 
 
@@ -308,10 +309,98 @@ class StatementInfoCrawler:
             return
         if not isinstance(op, Operation):
             return
+        # Each top-level statement overwrites the per-column lineage so a
+        # chained ``A; B`` ends up reporting B's RETURN (the last visible
+        # result shape).  A statement without a RETURN leaves the previous
+        # one in place (``_crawl_chain`` returns ``None``).
+        returns = self._crawl_chain(op)
+        if returns is not None:
+            self._returns = returns
+
+    def _crawl_chain(
+        self, op: Operation
+    ) -> Optional[Dict[str, ColumnLineage]]:
+        """Walk an operation chain, recording side-effects (labels,
+        properties, sources, property accesses) for each operation and
+        returning the per-column lineage produced by the chain's terminal
+        ``RETURN``.
+
+        A ``UNION`` composes two independent sub-pipelines whose branches
+        live off the ``.next`` chain; descend into both and merge their
+        column lineage so every branch's ``alias.property`` references
+        surface.  Returns ``None`` when the chain has no terminal
+        ``RETURN`` / ``UNION``.
+        """
+        returns: Optional[Dict[str, ColumnLineage]] = None
         current: Optional[Operation] = op
         while current is not None:
             self._visit_operation(current)
+            if isinstance(current, UnionOperation):
+                # A parsed UNION always has both branches set.
+                left = self._crawl_chain(current.left)
+                right = self._crawl_chain(current.right)
+                returns = self._merge_return_columns(left or {}, right or {})
+            elif isinstance(current, Return):
+                returns = self._collect_return_columns(current)
             current = current.next
+        return returns
+
+    def _merge_return_columns(
+        self,
+        left: Dict[str, ColumnLineage],
+        right: Dict[str, ColumnLineage],
+    ) -> Dict[str, ColumnLineage]:
+        """Merge the per-column lineage of two UNION branches.
+
+        Output columns draw their values from every branch, so a column's
+        references are the union of the branch references (deduplicated by
+        alias/kind/property/labels).  The ``kind`` is ``aggregate`` when
+        either branch aggregates, the shared kind when both branches
+        agree, and ``expression`` otherwise.
+        """
+        merged: Dict[str, ColumnLineage] = {}
+        columns = list(left.keys()) + [k for k in right.keys() if k not in left]
+        for column in columns:
+            left_col = left.get(column)
+            right_col = right.get(column)
+            if left_col is None:
+                merged[column] = right_col  # type: ignore[assignment]
+            elif right_col is None:
+                merged[column] = left_col
+            else:
+                merged[column] = self._merge_column_lineage(left_col, right_col)
+        return merged
+
+    def _merge_column_lineage(
+        self, a: ColumnLineage, b: ColumnLineage
+    ) -> ColumnLineage:
+        references: List[ColumnReference] = []
+        seen_keys: Set[str] = set()
+        for ref in list(a.references) + list(b.references):
+            key = f"{ref.alias}\x00{ref.kind}\x00{ref.property}\x00{','.join(ref.labels)}"
+            if key not in seen_keys:
+                seen_keys.add(key)
+                references.append(
+                    ColumnReference(
+                        alias=ref.alias,
+                        kind=ref.kind,
+                        labels=list(ref.labels),
+                        property=ref.property,
+                    )
+                )
+
+        if a.kind == "aggregate" or b.kind == "aggregate":
+            kind = "aggregate"
+        elif a.kind == b.kind:
+            kind = a.kind
+        else:
+            kind = "expression"
+
+        return ColumnLineage(
+            references=references,
+            kind=kind,
+            aggregate=a.aggregate if a.aggregate is not None else b.aggregate,
+        )
 
     def _visit_operation(self, op: Operation) -> None:
         if isinstance(op, CreateNode):
@@ -377,13 +466,6 @@ class StatementInfoCrawler:
             op, (CreateNode, CreateRelationship, DeleteNode, DeleteRelationship)
         ):
             self._collect_property_accesses(op)
-
-        # Capture per-output-column lineage from the final RETURN.  Each
-        # Return op we visit overwrites the previous result so chained
-        # statements end up with the lineage of the last RETURN, which is
-        # what the caller actually sees in ``runner.results``.
-        if isinstance(op, Return):
-            self._returns = self._collect_return_columns(op)
 
     def _resolve_registered_definitions(self) -> None:
         # Sources and declared properties from inline CREATE VIRTUAL clauses

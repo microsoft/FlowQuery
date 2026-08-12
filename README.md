@@ -1708,6 +1708,13 @@ Notes:
   property reference.
 - Multi-label intersection matches (`MATCH (n:A:B)`) populate every
   label in `references[i].labels`.
+- For queries composed with `UNION` / `UNION ALL`, each output column's
+  lineage is the **union** of the references contributed by every branch
+  (deduplicated by `alias`, `kind`, `property`, and `labels`). The
+  column `kind` is `aggregate` if any branch aggregates, the shared kind
+  when all branches agree, and `expression` otherwise. Node labels,
+  relationship types, and accessed properties are likewise collected
+  from every branch.
 
 #### Combining Lineage and Provenance: `traceRow()` and `lineage()`
 

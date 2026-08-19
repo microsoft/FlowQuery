@@ -95,6 +95,31 @@ jobs:
             sleep 5
           done
 
+      - name: Package TypeScript library
+        run: |
+          mkdir -p release-assets
+          npm pack --pack-destination release-assets
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Package Python library
+        id: python_package
+        run: |
+          python -m pip install build
+          python -m build --outdir release-assets flowquery-py
+          PYTHON_VERSION=$(python -c "import sys; tomllib = __import__('tomllib' if sys.version_info >= (3, 11) else 'tomli'); print(tomllib.load(open('flowquery-py/pyproject.toml', 'rb'))['project']['version'])")
+          echo "version=${PYTHON_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify local package installation
+        run: |
+          npm install --ignore-scripts --prefix "$RUNNER_TEMP/flowquery-npm-install" ./release-assets/*.tgz
+          python -m pip install --no-deps --target "$RUNNER_TEMP/flowquery-python-wheel-install" ./release-assets/*.whl
+          python -m pip install --no-deps --target "$RUNNER_TEMP/flowquery-python-sdist-install" ./release-assets/*.tar.gz
+          ls -la release-assets
+
       - name: Install VS Code extension dependencies
         working-directory: ./flowquery-vscode
         run: |
@@ -115,9 +140,16 @@ jobs:
           body: |
             Automated release from main branch
             Version: ${{ steps.version.outputs.version }}
+            Python package version: ${{ steps.python_package.outputs.version }}
             Commit: ${{ github.sha }}
+
+            Install the downloaded library packages from local files:
+            - Node.js/TypeScript: `npm install ./flowquery-${{ steps.version.outputs.version }}.tgz`
+            - Python wheel: `pip install ./flowquery-${{ steps.python_package.outputs.version }}-py3-none-any.whl`
+            - Python source archive: `pip install ./flowquery-${{ steps.python_package.outputs.version }}.tar.gz`
           files: |
             dist/flowquery.min.js
             flowquery-vscode/*.vsix
+            release-assets/*
           draft: false
           prerelease: false

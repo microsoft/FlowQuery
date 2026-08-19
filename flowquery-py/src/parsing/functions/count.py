@@ -20,6 +20,8 @@ class CountReducerElement(ReducerElement):
 
     @value.setter
     def value(self, val: Any) -> None:
+        if val is None:
+            return
         self._value += 1
 
 
@@ -35,6 +37,8 @@ class DistinctCountReducerElement(ReducerElement):
 
     @value.setter
     def value(self, val: Any) -> None:
+        if val is None:
+            return
         key: str = json.dumps(val, sort_keys=True, default=str)
         self._seen.add(key)
 

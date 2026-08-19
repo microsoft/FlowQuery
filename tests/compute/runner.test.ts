@@ -194,6 +194,70 @@ test("Test count distinct with strings", async () => {
     expect(results[0]).toEqual({ cnt: 3 });
 });
 
+test("Test count ignores null values", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, null, 2, null, 3] as x
+        return count(x) as cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ cnt: 3 });
+});
+
+test("Test count distinct ignores null values", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, null, 1, null, 2] as x
+        return count(distinct x) as cnt
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ cnt: 2 });
+});
+
+test("Test count over optional match does not count null nodes", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:CountUser) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Carol'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:CountUser)-[:REPORTS_TO]-(:CountUser) AS {
+            unwind [
+                {left_id: 2, right_id: 1},
+                {left_id: 3, right_id: 1}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+    // Alice has two direct reports (Bob, Carol); Bob and Carol have none.
+    const match = new Runner(`
+        MATCH (person:CountUser)
+        OPTIONAL MATCH (report:CountUser)-[:REPORTS_TO]->(person)
+        WITH person, count(DISTINCT report) AS directReportCount
+        RETURN person.name AS name, directReportCount
+        ORDER BY name
+    `);
+    await match.run();
+    const results = match.results;
+    expect(results.length).toBe(3);
+    expect(results).toEqual([
+        { name: "Alice", directReportCount: 2 },
+        { name: "Bob", directReportCount: 0 },
+        { name: "Carol", directReportCount: 0 },
+    ]);
+});
+
 test("Test avg with null", async () => {
     const runner = new Runner("return avg(null) as avg");
     await runner.run();

@@ -8,6 +8,9 @@ class CountReducerElement extends ReducerElement {
         return this._value;
     }
     public set value(value: any) {
+        if (value === null || value === undefined) {
+            return;
+        }
         this._value += 1;
     }
 }
@@ -18,6 +21,9 @@ class DistinctCountReducerElement extends ReducerElement {
         return this._seen.size;
     }
     public set value(value: any) {
+        if (value === null || value === undefined) {
+            return;
+        }
         const key: string = JSON.stringify(value);
         this._seen.add(key);
     }

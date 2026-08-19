@@ -20,6 +20,8 @@ class CollectReducerElement(ReducerElement):
 
     @value.setter
     def value(self, val: Any) -> None:
+        if val is None:
+            return
         self._value.append(val)
 
 
@@ -35,6 +37,8 @@ class DistinctCollectReducerElement(ReducerElement):
 
     @value.setter
     def value(self, val: Any) -> None:
+        if val is None:
+            return
         key: str = json.dumps(val, sort_keys=True, default=str)
         if key not in self._value:
             self._value[key] = val

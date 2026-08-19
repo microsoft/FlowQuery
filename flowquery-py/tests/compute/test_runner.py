@@ -226,6 +226,79 @@ class TestRunner:
         assert results[0] == {"cnt": 3}
 
     @pytest.mark.asyncio
+    async def test_count_ignores_null_values(self):
+        """Test count skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 2, null, 3] as x
+            return count(x) as cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"cnt": 3}
+
+    @pytest.mark.asyncio
+    async def test_count_distinct_ignores_null_values(self):
+        """Test count distinct skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 1, null, 2] as x
+            return count(distinct x) as cnt
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"cnt": 2}
+
+    @pytest.mark.asyncio
+    async def test_count_over_optional_match_skips_null_nodes(self):
+        """Test count over an optional match does not count null nodes."""
+        await Runner(
+            """
+            CREATE VIRTUAL (:CountUser) AS {
+                unwind [
+                    {id: 1, name: 'Alice'},
+                    {id: 2, name: 'Bob'},
+                    {id: 3, name: 'Carol'}
+                ] as record
+                RETURN record.id as id, record.name as name
+            }
+            """
+        ).run()
+        await Runner(
+            """
+            CREATE VIRTUAL (:CountUser)-[:REPORTS_TO]-(:CountUser) AS {
+                unwind [
+                    {left_id: 2, right_id: 1},
+                    {left_id: 3, right_id: 1}
+                ] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+            """
+        ).run()
+        # Alice has two direct reports (Bob, Carol); Bob and Carol have none.
+        match = Runner(
+            """
+            MATCH (person:CountUser)
+            OPTIONAL MATCH (report:CountUser)-[:REPORTS_TO]->(person)
+            WITH person, count(DISTINCT report) AS directReportCount
+            RETURN person.name AS name, directReportCount
+            ORDER BY name
+            """
+        )
+        await match.run()
+        results = match.results
+        assert len(results) == 3
+        assert results == [
+            {"name": "Alice", "directReportCount": 2},
+            {"name": "Bob", "directReportCount": 0},
+            {"name": "Carol", "directReportCount": 0},
+        ]
+
+    @pytest.mark.asyncio
     async def test_avg_with_null(self):
         """Test avg with null."""
         runner = Runner("return avg(null) as avg")
@@ -712,6 +785,34 @@ class TestRunner:
         assert len(results) == 2
         assert results[0] == {"i": 1, "collected": [{"j": 1}, {"j": 2}, {"j": 3}]}
         assert results[1] == {"i": 2, "collected": [{"j": 1}, {"j": 2}, {"j": 3}]}
+
+    @pytest.mark.asyncio
+    async def test_collect_ignores_null_values(self):
+        """Test collect skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 2, null, 3] as x
+            return collect(x) as collected
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"collected": [1, 2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_collect_distinct_ignores_null_values(self):
+        """Test collect distinct skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 1, null, 2] as x
+            return collect(distinct x) as collected
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"collected": [1, 2]}
 
     @pytest.mark.asyncio
     async def test_return_distinct(self):
@@ -2909,9 +3010,9 @@ class TestRunner:
         assert results[0]["name"] == "Person 1"
         assert len(results[0]["friends"]) == 2
         assert results[1]["name"] == "Person 2"
-        assert len(results[1]["friends"]) == 1  # null is collected
+        assert len(results[1]["friends"]) == 0  # null is not collected
         assert results[2]["name"] == "Person 3"
-        assert len(results[2]["friends"]) == 1  # null is collected
+        assert len(results[2]["friends"]) == 0  # null is not collected
 
     @pytest.mark.asyncio
     async def test_standalone_optional_match_returns_data_when_label_exists(self):

@@ -787,6 +787,34 @@ class TestRunner:
         assert results[1] == {"i": 2, "collected": [{"j": 1}, {"j": 2}, {"j": 3}]}
 
     @pytest.mark.asyncio
+    async def test_collect_ignores_null_values(self):
+        """Test collect skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 2, null, 3] as x
+            return collect(x) as collected
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"collected": [1, 2, 3]}
+
+    @pytest.mark.asyncio
+    async def test_collect_distinct_ignores_null_values(self):
+        """Test collect distinct skips null values."""
+        runner = Runner(
+            """
+            unwind [1, null, 1, null, 2] as x
+            return collect(distinct x) as collected
+            """
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"collected": [1, 2]}
+
+    @pytest.mark.asyncio
     async def test_return_distinct(self):
         """Test return distinct."""
         runner = Runner(
@@ -2982,9 +3010,9 @@ class TestRunner:
         assert results[0]["name"] == "Person 1"
         assert len(results[0]["friends"]) == 2
         assert results[1]["name"] == "Person 2"
-        assert len(results[1]["friends"]) == 1  # null is collected
+        assert len(results[1]["friends"]) == 0  # null is not collected
         assert results[2]["name"] == "Person 3"
-        assert len(results[2]["friends"]) == 1  # null is collected
+        assert len(results[2]["friends"]) == 0  # null is not collected
 
     @pytest.mark.asyncio
     async def test_standalone_optional_match_returns_data_when_label_exists(self):

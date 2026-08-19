@@ -770,6 +770,32 @@ test("Test collect distinct with associative array", async () => {
     expect(results[1]).toEqual({ i: 2, collected: [{ j: 1 }, { j: 2 }, { j: 3 }] });
 });
 
+test("Test collect ignores null values", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, null, 2, null, 3] as x
+        return collect(x) as collected
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ collected: [1, 2, 3] });
+});
+
+test("Test collect distinct ignores null values", async () => {
+    const runner = new Runner(
+        `
+        unwind [1, null, 1, null, 2] as x
+        return collect(distinct x) as collected
+        `
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ collected: [1, 2] });
+});
+
 test("Test return distinct", async () => {
     const runner = new Runner(
         `
@@ -2766,9 +2792,9 @@ test("Test optional match with aggregation", async () => {
     expect(results[0].name).toBe("Person 1");
     expect(results[0].friends.length).toBe(2);
     expect(results[1].name).toBe("Person 2");
-    expect(results[1].friends.length).toBe(1); // null is collected
+    expect(results[1].friends.length).toBe(0); // null is not collected
     expect(results[2].name).toBe("Person 3");
-    expect(results[2].friends.length).toBe(1); // null is collected
+    expect(results[2].friends.length).toBe(0); // null is not collected
 });
 
 test("Test standalone optional match returns data when label exists", async () => {

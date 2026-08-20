@@ -570,6 +570,19 @@ class TestRunner:
         assert results[2] == {"ret": 3}
 
     @pytest.mark.asyncio
+    async def test_case_without_else_returns_null_when_no_match(self):
+        """Test case without else returns null when no branch matches."""
+        runner = Runner(
+            "unwind range(1, 3) as num return case when num > 1 then num end as ret"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"ret": None}
+        assert results[1] == {"ret": 2}
+        assert results[2] == {"ret": 3}
+
+    @pytest.mark.asyncio
     async def test_size_function(self):
         """Test size function."""
         runner = Runner("RETURN size([1, 2, 3]) as size")
@@ -7419,6 +7432,89 @@ class TestSubqueryExpressions:
         assert results[0] == {"name": "Alice", "hasFriends": True}
         assert results[1] == {"name": "Bob", "hasFriends": False}
         assert results[2] == {"name": "Charlie", "hasFriends": False}
+
+    @pytest.mark.asyncio
+    async def test_count_subquery_with_bare_pattern(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            RETURN p.name AS name, COUNT { (p)-[:KNOWS]->(:Person) } AS friendCount
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "friendCount": 2}
+        assert results[1] == {"name": "Bob", "friendCount": 1}
+        assert results[2] == {"name": "Charlie", "friendCount": 0}
+
+    @pytest.mark.asyncio
+    async def test_exists_subquery_with_bare_pattern(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            WHERE EXISTS { (p)-[:KNOWS]->(:Person) }
+            RETURN p.name AS name
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"name": "Alice"}
+        assert results[1] == {"name": "Bob"}
+
+    @pytest.mark.asyncio
+    async def test_count_bare_pattern_with_inner_where(self):
+        await Runner("""
+            CREATE VIRTUAL (:Person) AS {
+                unwind [{id: 1, name: 'Alice'}, {id: 2, name: 'Bob'}, {id: 3, name: 'Charlie'}] as record
+                RETURN record.id as id, record.name as name
+            }
+        """).run()
+        await Runner("""
+            CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+                unwind [{left_id: 1, right_id: 2}, {left_id: 1, right_id: 3}, {left_id: 2, right_id: 3}] as record
+                RETURN record.left_id as left_id, record.right_id as right_id
+            }
+        """).run()
+        runner = Runner("""
+            MATCH (p:Person)
+            RETURN p.name AS name,
+                   COUNT { (p)-[:KNOWS]->(friend:Person) WHERE friend.id > 2 } AS cnt
+        """)
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"name": "Alice", "cnt": 1}
+        assert results[1] == {"name": "Bob", "cnt": 1}
+        assert results[2] == {"name": "Charlie", "cnt": 0}
+
+    def test_collect_rejects_bare_pattern(self):
+        with pytest.raises(ValueError, match="COLLECT subquery must contain a RETURN clause"):
+            Runner("""
+                MATCH (p:Person)
+                RETURN COLLECT { (p)-[:KNOWS]->(:Person) } AS friends
+            """)
 
 
 class TestPredicateFunctions:

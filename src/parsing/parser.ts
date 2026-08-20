@@ -2226,12 +2226,10 @@ class Parser extends BaseParser {
             parts++;
         }
         const _else = this.parseElse();
-        if (_else === null) {
-            throw new Error("Expected ELSE");
-        } else {
+        if (_else !== null) {
             _case.addChild(_else);
+            this.expectAndSkipWhitespaceAndComments();
         }
-        this.expectAndSkipWhitespaceAndComments();
         if (!this.token.isEnd()) {
             throw new Error("Expected END");
         }
@@ -2749,12 +2747,51 @@ class Parser extends BaseParser {
         const outerState = this._state;
         this._state = new ParserState();
         this._state.inheritVariablesFrom(outerState);
-        const subqueryAST = this.parseSubQuery();
+        // Bare-pattern shorthand: EXISTS/COUNT accept a graph pattern
+        // directly (no MATCH keyword), e.g. COUNT { (a)-[:R]->(b) }.
+        // COLLECT is excluded: it needs a RETURN to know what to collect.
+        let subqueryAST: ASTNode | null;
+        if (this.token.isOpeningBrace() && this.nextSignificantToken().isLeftParenthesis()) {
+            if (mode === SubqueryMode.COLLECT) {
+                this._state = outerState;
+                throw new Error("COLLECT subquery must contain a RETURN clause");
+            }
+            subqueryAST = this.parsePatternSubQuery();
+        } else {
+            subqueryAST = this.parseSubQuery();
+        }
         this._state = outerState;
         if (subqueryAST === null) {
             throw new Error(`Expected opening brace after ${keyword}`);
         }
         return new SubqueryExpression(mode, subqueryAST);
+    }
+
+    /**
+     * Parses a bare graph pattern (with optional trailing WHERE) inside
+     * an EXISTS/COUNT subquery into a MATCH-only sub-query body,
+     * equivalent to `{ MATCH <pattern> [WHERE ...] }`.
+     */
+    private parsePatternSubQuery(): ASTNode {
+        this.setNextToken(); // consume '{'
+        this.skipWhitespaceAndComments();
+        const patterns: Pattern[] = Array.from(this.parsePatterns());
+        if (patterns.length === 0) {
+            throw new Error("Expected graph pattern");
+        }
+        const root = new ASTNode();
+        const match = new Match(patterns, false);
+        root.addChild(match);
+        const where = this.parseWhere();
+        if (where !== null) {
+            match.addSibling(where);
+        }
+        this.skipWhitespaceAndComments();
+        if (!this.token.isClosingBrace()) {
+            throw new Error("Expected closing brace for sub-query");
+        }
+        this.setNextToken();
+        return root;
     }
 }
 

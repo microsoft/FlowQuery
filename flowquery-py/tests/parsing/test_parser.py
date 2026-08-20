@@ -545,8 +545,8 @@ class TestParser:
             parser.parse("RETURN avg(1, 2, 3)")
         with pytest.raises(Exception, match="Function size expected 1 parameters, but got 2"):
             parser.parse("RETURN size(1, 2)")
-        with pytest.raises(Exception, match="Function round expected 1 parameters, but got 2"):
-            parser.parse("RETURN round(1, 2)")
+        with pytest.raises(Exception, match="Function round expected 1 or 2 parameters, but got 3"):
+            parser.parse("RETURN round(1, 2, 3)")
 
     def test_non_well_formed_statements(self):
         """Test non-well formed statements."""

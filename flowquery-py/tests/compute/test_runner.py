@@ -1202,6 +1202,46 @@ class TestRunner:
         assert results[0] == {"result": None}
 
     @pytest.mark.asyncio
+    async def test_round_with_precision(self):
+        """Test round with an optional precision argument."""
+        runner = Runner(
+            "RETURN round(3.14159, 2) AS a, round(3.14159, 3) AS b, "
+            "round(3.7, 0) AS c, round(2.5, 0) AS d"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"a": 3.14, "b": 3.142, "c": 4, "d": 3}
+
+    @pytest.mark.asyncio
+    async def test_round_precision_half_away_from_zero(self):
+        """Test round with precision rounds half away from zero."""
+        runner = Runner(
+            "WITH -1.25 AS x, -2.5 AS y "
+            "RETURN round(1.25, 1) AS a, round(x, 1) AS b, round(y, 0) AS c"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"a": 1.3, "b": -1.3, "c": -3}
+
+    @pytest.mark.asyncio
+    async def test_round_with_precision_and_null_returns_null(self):
+        """Test round with precision and a null argument returns null."""
+        runner = Runner("RETURN round(null, 2) AS a, round(3.14159, null) AS b")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"a": None, "b": None}
+
+    @pytest.mark.asyncio
+    async def test_round_with_non_integer_precision_throws(self):
+        """Test round with a non-integer precision raises an error."""
+        runner = Runner("RETURN round(3.14159, 1.5) AS result")
+        with pytest.raises(ValueError, match="Invalid precision argument for round function"):
+            await runner.run()
+
+    @pytest.mark.asyncio
     async def test_join_with_null_returns_null(self):
         """Test join with null returns null."""
         runner = Runner("RETURN join(null, ',') as result")

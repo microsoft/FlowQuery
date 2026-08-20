@@ -670,6 +670,7 @@ UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
 | `size(list)`                   | Length of list or string               | `size([1,2,3])` → `3`                  |
 | `range(start, end)`            | Inclusive integer range                | `range(1,3)` → `[1,2,3]`               |
 | `round(n)`                     | Round to nearest integer               | `round(3.7)` → `4`                     |
+| `round(n, precision)`          | Round to `precision` decimal places    | `round(3.14159, 2)` → `3.14`           |
 | `rand()`                       | Random float 0–1                       | `round(rand()*10)`                     |
 | `log(n)`                       | Natural logarithm (base e)             | `log(10)` → `2.302...`                 |
 | `log10(n)`                     | Base-10 logarithm                      | `log10(1000)` → `3`                    |

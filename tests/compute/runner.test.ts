@@ -6302,6 +6302,118 @@ test("Test EXISTS as return expression", async () => {
     expect(results[2]).toEqual({ name: "Charlie", hasFriends: false });
 });
 
+test("Test COUNT subquery with bare pattern (no MATCH)", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        RETURN p.name AS name, COUNT { (p)-[:KNOWS]->(:Person) } AS friendCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", friendCount: 2 });
+    expect(results[1]).toEqual({ name: "Bob", friendCount: 1 });
+    expect(results[2]).toEqual({ name: "Charlie", friendCount: 0 });
+});
+
+test("Test EXISTS subquery with bare pattern (no MATCH)", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        WHERE EXISTS { (p)-[:KNOWS]->(:Person) }
+        RETURN p.name AS name
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ name: "Alice" });
+    expect(results[1]).toEqual({ name: "Bob" });
+});
+
+test("Test COUNT bare pattern with inner WHERE", async () => {
+    await new Runner(`
+        CREATE VIRTUAL (:Person) AS {
+            unwind [
+                {id: 1, name: 'Alice'},
+                {id: 2, name: 'Bob'},
+                {id: 3, name: 'Charlie'}
+            ] as record
+            RETURN record.id as id, record.name as name, record.id as age
+        }
+    `).run();
+    await new Runner(`
+        CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) AS {
+            unwind [
+                {left_id: 1, right_id: 2},
+                {left_id: 1, right_id: 3},
+                {left_id: 2, right_id: 3}
+            ] as record
+            RETURN record.left_id as left_id, record.right_id as right_id
+        }
+    `).run();
+
+    const runner = new Runner(`
+        MATCH (p:Person)
+        RETURN p.name AS name,
+               COUNT { (p)-[:KNOWS]->(friend:Person) WHERE friend.id > 2 } AS cnt
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ name: "Alice", cnt: 1 });
+    expect(results[1]).toEqual({ name: "Bob", cnt: 1 });
+    expect(results[2]).toEqual({ name: "Charlie", cnt: 0 });
+});
+
+test("Test COLLECT rejects bare pattern (needs RETURN)", () => {
+    expect(
+        () =>
+            new Runner(`
+        MATCH (p:Person)
+        RETURN COLLECT { (p)-[:KNOWS]->(:Person) } AS friends
+    `)
+    ).toThrow("COLLECT subquery must contain a RETURN clause");
+});
+
 test("Test unlabeled node match returns all nodes", async () => {
     await new Runner(`
         CREATE VIRTUAL (:Fruit) AS {

@@ -854,6 +854,23 @@ WHERE 'Alice' IN COLLECT { MATCH (p)-[:KNOWS]->(f:Person) RETURN f.name }
 RETURN p.name
 ```
 
+**Bare-pattern shorthand:** `EXISTS` and `COUNT` also accept a graph pattern directly, without the `MATCH` keyword (with an optional trailing `WHERE`). `COLLECT` does not support this form because it needs a `RETURN` to know which value to collect.
+
+```cypher
+// EXISTS with a bare pattern
+MATCH (p:Person)
+WHERE EXISTS { (p)-[:KNOWS]->(:Person) }
+RETURN p.name
+
+// COUNT with a bare pattern, in RETURN
+MATCH (p:Person)
+RETURN p.name, COUNT { (p)-[:KNOWS]->(:Person) } AS friendCount
+
+// COUNT with a bare pattern and inner WHERE
+MATCH (p:Person)
+RETURN p.name, COUNT { (p)-[:KNOWS]->(f:Person) WHERE f.age > 30 } AS closeFriends
+```
+
 **Node reference reuse across MATCH clauses:**
 
 ```cypher
@@ -992,6 +1009,7 @@ RETURN f.name, f.description, f.category
 │  ENDS WITH  ·  NOT ENDS WITH                                │
 │  EXISTS { subquery }  ·  NOT EXISTS { subquery }            │
 │  COUNT { subquery }  ·  COLLECT { subquery }                │
+│  EXISTS { pattern }  ·  COUNT { pattern }   -- bare pattern │
 ├─────────────────────────────────────────────────────────────┤
 │  EXPRESSIONS                                                │
 ├─────────────────────────────────────────────────────────────┤

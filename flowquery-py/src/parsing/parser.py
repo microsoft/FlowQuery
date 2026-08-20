@@ -2321,8 +2321,39 @@ class Parser(BaseParser):
         outer_state = self._state
         self._state = ParserState()
         self._state.inherit_variables_from(outer_state)
-        subquery_ast = self._parse_sub_query()
+        # Bare-pattern shorthand: EXISTS/COUNT accept a graph pattern
+        # directly (no MATCH keyword), e.g. COUNT { (a)-[:R]->(b) }.
+        # COLLECT is excluded: it needs a RETURN to know what to collect.
+        if self.token.is_opening_brace() and self.next_significant_token().is_left_parenthesis():
+            if mode == SubqueryMode.COLLECT:
+                self._state = outer_state
+                raise ValueError("COLLECT subquery must contain a RETURN clause")
+            subquery_ast: Optional[ASTNode] = self._parse_pattern_sub_query()
+        else:
+            subquery_ast = self._parse_sub_query()
         self._state = outer_state
         if subquery_ast is None:
             raise ValueError(f"Expected opening brace after {keyword}")
         return SubqueryExpression(mode, subquery_ast)
+
+    def _parse_pattern_sub_query(self) -> ASTNode:
+        """Parse a bare graph pattern (with optional trailing WHERE) inside
+        an EXISTS/COUNT subquery into a MATCH-only sub-query body,
+        equivalent to ``{ MATCH <pattern> [WHERE ...] }``.
+        """
+        self.set_next_token()  # consume '{'
+        self._skip_whitespace_and_comments()
+        patterns = list(self._parse_patterns())
+        if len(patterns) == 0:
+            raise ValueError("Expected graph pattern")
+        root = ASTNode()
+        match = Match(patterns, False)
+        root.add_child(match)
+        where = self._parse_where()
+        if where is not None:
+            match.add_sibling(where)
+        self._skip_whitespace_and_comments()
+        if not self.token.is_closing_brace():
+            raise ValueError("Expected closing brace for sub-query")
+        self.set_next_token()
+        return root

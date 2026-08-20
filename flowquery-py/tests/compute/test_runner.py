@@ -570,6 +570,19 @@ class TestRunner:
         assert results[2] == {"ret": 3}
 
     @pytest.mark.asyncio
+    async def test_case_without_else_returns_null_when_no_match(self):
+        """Test case without else returns null when no branch matches."""
+        runner = Runner(
+            "unwind range(1, 3) as num return case when num > 1 then num end as ret"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"ret": None}
+        assert results[1] == {"ret": 2}
+        assert results[2] == {"ret": 3}
+
+    @pytest.mark.asyncio
     async def test_size_function(self):
         """Test size function."""
         runner = Runner("RETURN size([1, 2, 3]) as size")

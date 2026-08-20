@@ -573,6 +573,18 @@ test("Test range function with unwind and case", async () => {
     expect(results[2]).toEqual({ ret: 3 });
 });
 
+test("Test case without else returns null when no match", async () => {
+    const runner = new Runner(
+        "unwind range(1, 3) as num return case when num > 1 then num end as ret"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ ret: null });
+    expect(results[1]).toEqual({ ret: 2 });
+    expect(results[2]).toEqual({ ret: 3 });
+});
+
 test("Test size function", async () => {
     const runner = new Runner("RETURN size([1, 2, 3]) as size");
     await runner.run();

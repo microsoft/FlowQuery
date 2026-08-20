@@ -2226,12 +2226,10 @@ class Parser extends BaseParser {
             parts++;
         }
         const _else = this.parseElse();
-        if (_else === null) {
-            throw new Error("Expected ELSE");
-        } else {
+        if (_else !== null) {
             _case.addChild(_else);
+            this.expectAndSkipWhitespaceAndComments();
         }
-        this.expectAndSkipWhitespaceAndComments();
         if (!this.token.isEnd()) {
             throw new Error("Expected END");
         }

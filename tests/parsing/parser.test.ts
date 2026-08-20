@@ -498,6 +498,23 @@ test("Test case statement with keywords as identifiers", () => {
     expect(ast.print()).toContain("Else");
 });
 
+test("Test case statement without else", () => {
+    const parser = new Parser();
+    const ast = parser.parse("RETURN CASE WHEN 1 THEN 2 END");
+    expect(ast.print()).toBe(
+        "ASTNode\n" +
+            "- Return\n" +
+            "-- Expression\n" +
+            "--- Case\n" +
+            "---- When\n" +
+            "----- Expression\n" +
+            "------ Number (1)\n" +
+            "---- Then\n" +
+            "----- Expression\n" +
+            "------ Number (2)"
+    );
+});
+
 test("Test functions with wrong number of arguments", () => {
     expect(() => new Parser().parse("RETURN range(1)")).toThrow(
         "Function range expected 2 parameters, but got 1"

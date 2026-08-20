@@ -516,6 +516,24 @@ class TestParser:
         )
         assert ast.print() == expected
 
+    def test_case_statement_without_else(self):
+        """Test case statement without an else clause."""
+        parser = Parser()
+        ast = parser.parse("RETURN CASE WHEN 1 THEN 2 END")
+        expected = (
+            "ASTNode\n"
+            "- Return\n"
+            "-- Expression\n"
+            "--- Case\n"
+            "---- When\n"
+            "----- Expression\n"
+            "------ Number (1)\n"
+            "---- Then\n"
+            "----- Expression\n"
+            "------ Number (2)"
+        )
+        assert ast.print() == expected
+
     def test_functions_with_wrong_number_of_arguments(self):
         """Test functions with wrong number of arguments."""
         parser = Parser()

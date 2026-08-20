@@ -1911,11 +1911,9 @@ class Parser(BaseParser):
             self._expect_and_skip_whitespace_and_comments()
             parts += 1
         else_ = self._parse_else()
-        if else_ is None:
-            raise ValueError("Expected ELSE")
-        else:
+        if else_ is not None:
             case.add_child(else_)
-        self._expect_and_skip_whitespace_and_comments()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_end():
             raise ValueError("Expected END")
         self.set_next_token()

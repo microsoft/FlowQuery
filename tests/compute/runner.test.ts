@@ -1147,6 +1147,39 @@ test("Test round with null returns null", async () => {
     expect(results[0]).toEqual({ result: null });
 });
 
+test("Test round with precision", async () => {
+    const runner = new Runner(
+        "RETURN round(3.14159, 2) AS a, round(3.14159, 3) AS b, round(3.7, 0) AS c, round(2.5, 0) AS d"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ a: 3.14, b: 3.142, c: 4, d: 3 });
+});
+
+test("Test round with precision rounds half away from zero", async () => {
+    const runner = new Runner(
+        "WITH -1.25 AS x, -2.5 AS y RETURN round(1.25, 1) AS a, round(x, 1) AS b, round(y, 0) AS c"
+    );
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ a: 1.3, b: -1.3, c: -3 });
+});
+
+test("Test round with precision and null value returns null", async () => {
+    const runner = new Runner("RETURN round(null, 2) AS a, round(3.14159, null) AS b");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ a: null, b: null });
+});
+
+test("Test round with non-integer precision throws", async () => {
+    const runner = new Runner("RETURN round(3.14159, 1.5) AS result");
+    await expect(runner.run()).rejects.toThrow("Invalid precision argument for round function");
+});
+
 test("Test join with null returns null", async () => {
     const runner = new Runner("RETURN join(null, ',') as result");
     await runner.run();

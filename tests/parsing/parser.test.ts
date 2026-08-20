@@ -534,8 +534,8 @@ test("Test functions with wrong number of arguments", () => {
     expect(() => new Parser().parse("RETURN size(1, 2)")).toThrow(
         "Function size expected 1 parameters, but got 2"
     );
-    expect(() => new Parser().parse("RETURN round(1, 2)")).toThrow(
-        "Function round expected 1 parameters, but got 2"
+    expect(() => new Parser().parse("RETURN round(1, 2, 3)")).toThrow(
+        "Function round expected 1 or 2 parameters, but got 3"
     );
 });
 

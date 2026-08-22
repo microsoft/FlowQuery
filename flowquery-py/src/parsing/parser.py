@@ -26,6 +26,9 @@ from .data_structures.key_value_pair import KeyValuePair
 from .data_structures.list_comprehension import ListComprehension
 from .data_structures.lookup import Lookup
 from .data_structures.range_lookup import RangeLookup
+from .expressions.collect_subquery import CollectSubquery
+from .expressions.count_subquery import CountSubquery
+from .expressions.exists_subquery import ExistsSubquery
 from .expressions.expression import Expression
 from .expressions.f_string import FString
 from .expressions.identifier import Identifier
@@ -45,7 +48,7 @@ from .expressions.operator import (
 from .expressions.parameter_reference import ParameterReference
 from .expressions.reference import Reference
 from .expressions.string import String
-from .expressions.subquery_expression import SubqueryExpression, SubqueryMode
+from .expressions.subquery_expression import SubqueryExpression
 from .functions.aggregate_function import AggregateFunction
 from .functions.async_function import AsyncFunction
 from .functions.function import Function
@@ -2304,13 +2307,13 @@ class Parser(BaseParser):
     def _parse_subquery_expression(self) -> Optional[SubqueryExpression]:
         """Parse EXISTS { ... }, COUNT { ... }, or COLLECT { ... }."""
         keyword = (self.token.value or "").upper()
-        mode_map = {
-            "EXISTS": SubqueryMode.EXISTS,
-            "COUNT": SubqueryMode.COUNT,
-            "COLLECT": SubqueryMode.COLLECT,
+        subquery_types = {
+            "EXISTS": ExistsSubquery,
+            "COUNT": CountSubquery,
+            "COLLECT": CollectSubquery,
         }
-        mode = mode_map.get(keyword)
-        if mode is None:
+        subquery_type = subquery_types.get(keyword)
+        if subquery_type is None:
             return None
         self.set_next_token()  # consume EXISTS/COUNT/COLLECT keyword
         self._skip_whitespace_and_comments()
@@ -2325,7 +2328,7 @@ class Parser(BaseParser):
         # directly (no MATCH keyword), e.g. COUNT { (a)-[:R]->(b) }.
         # COLLECT is excluded: it needs a RETURN to know what to collect.
         if self.token.is_opening_brace() and self.next_significant_token().is_left_parenthesis():
-            if mode == SubqueryMode.COLLECT:
+            if subquery_type is CollectSubquery:
                 self._state = outer_state
                 raise ValueError("COLLECT subquery must contain a RETURN clause")
             subquery_ast: Optional[ASTNode] = self._parse_pattern_sub_query()
@@ -2334,7 +2337,7 @@ class Parser(BaseParser):
         self._state = outer_state
         if subquery_ast is None:
             raise ValueError(f"Expected opening brace after {keyword}")
-        return SubqueryExpression(mode, subquery_ast)
+        return subquery_type(subquery_ast)
 
     def _parse_pattern_sub_query(self) -> ASTNode:
         """Parse a bare graph pattern (with optional trailing WHERE) inside

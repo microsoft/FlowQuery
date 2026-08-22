@@ -21,6 +21,9 @@ import ListComprehension from "./data_structures/list_comprehension";
 import Lookup from "./data_structures/lookup";
 import RangeLookup from "./data_structures/range_lookup";
 import BindingReference from "./expressions/binding_reference";
+import CollectSubquery from "./expressions/collect_subquery";
+import CountSubquery from "./expressions/count_subquery";
+import ExistsSubquery from "./expressions/exists_subquery";
 import Expression from "./expressions/expression";
 import FString from "./expressions/f_string";
 import Identifier from "./expressions/identifier";
@@ -40,7 +43,7 @@ import {
 import ParameterReference from "./expressions/parameter_reference";
 import Reference from "./expressions/reference";
 import String from "./expressions/string";
-import SubqueryExpression, { SubqueryMode } from "./expressions/subquery_expression";
+import SubqueryExpression from "./expressions/subquery_expression";
 import AggregateFunction from "./functions/aggregate_function";
 import AsyncFunction from "./functions/async_function";
 import Function from "./functions/function";
@@ -2724,19 +2727,8 @@ class Parser extends BaseParser {
 
     private parseSubqueryExpression(): SubqueryExpression | null {
         const keyword = (this.token.value || "").toUpperCase();
-        let mode: SubqueryMode;
-        switch (keyword) {
-            case "EXISTS":
-                mode = SubqueryMode.EXISTS;
-                break;
-            case "COUNT":
-                mode = SubqueryMode.COUNT;
-                break;
-            case "COLLECT":
-                mode = SubqueryMode.COLLECT;
-                break;
-            default:
-                return null;
+        if (keyword !== "EXISTS" && keyword !== "COUNT" && keyword !== "COLLECT") {
+            return null;
         }
         this.setNextToken(); // consume EXISTS/COUNT/COLLECT keyword
         this.skipWhitespaceAndComments();
@@ -2752,7 +2744,7 @@ class Parser extends BaseParser {
         // COLLECT is excluded: it needs a RETURN to know what to collect.
         let subqueryAST: ASTNode | null;
         if (this.token.isOpeningBrace() && this.nextSignificantToken().isLeftParenthesis()) {
-            if (mode === SubqueryMode.COLLECT) {
+            if (keyword === "COLLECT") {
                 this._state = outerState;
                 throw new Error("COLLECT subquery must contain a RETURN clause");
             }
@@ -2764,7 +2756,13 @@ class Parser extends BaseParser {
         if (subqueryAST === null) {
             throw new Error(`Expected opening brace after ${keyword}`);
         }
-        return new SubqueryExpression(mode, subqueryAST);
+        if (keyword === "EXISTS") {
+            return new ExistsSubquery(subqueryAST);
+        }
+        if (keyword === "COUNT") {
+            return new CountSubquery(subqueryAST);
+        }
+        return new CollectSubquery(subqueryAST);
     }
 
     /**

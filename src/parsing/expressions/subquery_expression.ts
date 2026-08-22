@@ -1,13 +1,5 @@
-import Runner from "../../compute/runner";
 import ASTNode from "../ast_node";
 import Operation from "../operations/operation";
-import Return from "../operations/return";
-
-export enum SubqueryMode {
-    EXISTS = "exists",
-    COUNT = "count",
-    COLLECT = "collect",
-}
 
 /**
  * Counts rows flowing through an operation chain without producing results.
@@ -20,20 +12,19 @@ class RowCounter extends Operation {
     }
 }
 
-class SubqueryExpression extends ASTNode {
-    private _mode: SubqueryMode;
+/**
+ * Base class for the brace-delimited subquery expressions `EXISTS { }`,
+ * `COUNT { }` and `COLLECT { }`.  The base executes the nested query and
+ * hands the resulting rows and row-count to `reduce()`, which each concrete
+ * subclass implements to produce its value.
+ */
+abstract class SubqueryExpression extends ASTNode {
     private _subqueryAST: ASTNode;
-    private _results: any[] = [];
-    private _rowCount: number = 0;
+    private _value: any;
 
-    constructor(mode: SubqueryMode, subqueryAST: ASTNode) {
+    constructor(subqueryAST: ASTNode) {
         super();
-        this._mode = mode;
         this._subqueryAST = subqueryAST;
-    }
-
-    public get mode(): SubqueryMode {
-        return this._mode;
     }
 
     public introducesScope(): boolean {
@@ -41,17 +32,22 @@ class SubqueryExpression extends ASTNode {
     }
 
     public async evaluate(): Promise<void> {
-        this._results = [];
-        this._rowCount = 0;
+        // Imported lazily to break the module cycle with Runner (which
+        // imports the parser, which imports this file's subclasses).
+        const { default: Runner } = await import("../../compute/runner");
+        const { default: Return } = await import("../operations/return");
 
         const first = this._subqueryAST.firstChild() as Operation;
         const last = this._subqueryAST.lastChild() as Operation;
 
+        let rows: any[] = [];
+        let count = 0;
+
         if (last instanceof Return) {
             const runner = new Runner(null, this._subqueryAST);
             await runner.run();
-            this._results = runner.results ?? [];
-            this._rowCount = this._results.length;
+            rows = runner.results ?? [];
+            count = rows.length;
         } else {
             // Subquery without RETURN (e.g., EXISTS { MATCH ... })
             const counter = new RowCounter();
@@ -63,27 +59,18 @@ class SubqueryExpression extends ASTNode {
             await first.finish();
 
             last.next = savedNext;
-            this._rowCount = counter.count;
+            count = counter.count;
         }
+
+        this._value = this.reduce(rows, count);
     }
 
     public value(): any {
-        switch (this._mode) {
-            case SubqueryMode.EXISTS:
-                return this._rowCount > 0;
-            case SubqueryMode.COUNT:
-                return this._rowCount;
-            case SubqueryMode.COLLECT: {
-                if (this._results.length === 0) return [];
-                const keys = Object.keys(this._results[0]);
-                if (keys.length !== 1) {
-                    throw new Error("COLLECT subquery must return exactly one column");
-                }
-                const key = keys[0];
-                return this._results.map((r: any) => r[key]);
-            }
-        }
+        return this._value;
     }
+
+    /** Reduce the executed subquery's rows and row-count to this expression's value. */
+    protected abstract reduce(rows: any[], count: number): any;
 }
 
 export default SubqueryExpression;

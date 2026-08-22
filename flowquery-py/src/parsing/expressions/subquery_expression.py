@@ -1,16 +1,9 @@
-"""Subquery expression for EXISTS, COUNT, and COLLECT subqueries."""
+"""Base class for EXISTS, COUNT, and COLLECT subquery expressions."""
 
-from enum import Enum
 from typing import Any, List
 
 from ..ast_node import ASTNode
 from ..operations.operation import Operation
-
-
-class SubqueryMode(Enum):
-    EXISTS = "exists"
-    COUNT = "count"
-    COLLECT = "collect"
 
 
 class RowCounter(Operation):
@@ -28,24 +21,17 @@ class RowCounter(Operation):
 
 
 class SubqueryExpression(ASTNode):
-    """Represents an EXISTS, COUNT, or COLLECT subquery expression.
+    """Base class for the brace-delimited subquery expressions.
 
-    Evaluates an inner query pipeline and returns:
-    - EXISTS: True if the subquery produced any rows
-    - COUNT: The number of rows produced
-    - COLLECT: A list of single-column values from the subquery results
+    The base executes the nested query and hands the resulting rows and
+    row-count to `reduce()`, which each concrete subclass (ExistsSubquery,
+    CountSubquery, CollectSubquery) implements to produce its value.
     """
 
-    def __init__(self, mode: SubqueryMode, subquery_ast: ASTNode) -> None:
+    def __init__(self, subquery_ast: ASTNode) -> None:
         super().__init__()
-        self._mode = mode
         self._subquery_ast = subquery_ast
-        self._results: List[Any] = []
-        self._row_count: int = 0
-
-    @property
-    def mode(self) -> SubqueryMode:
-        return self._mode
+        self._value: Any = None
 
     def introduces_scope(self) -> bool:
         return True
@@ -54,20 +40,20 @@ class SubqueryExpression(ASTNode):
         from ...compute.runner import Runner
         from ..operations.return_op import Return
 
-        self._results = []
-        self._row_count = 0
-
         first = self._subquery_ast.first_child()
         last = self._subquery_ast.last_child()
 
         if not isinstance(first, Operation) or not isinstance(last, Operation):
             raise ValueError("Subquery AST must contain Operations")
 
+        rows: List[Any] = []
+        count = 0
+
         if isinstance(last, Return):
             runner = Runner(ast=self._subquery_ast)
             await runner.run()
-            self._results = runner.results or []
-            self._row_count = len(self._results)
+            rows = runner.results or []
+            count = len(rows)
         else:
             # Subquery without RETURN (e.g., EXISTS { MATCH ... })
             counter = RowCounter()
@@ -79,19 +65,12 @@ class SubqueryExpression(ASTNode):
             await first.finish()
 
             last.next = saved_next
-            self._row_count = counter.count
+            count = counter.count
+
+        self._value = self.reduce(rows, count)
 
     def value(self) -> Any:
-        if self._mode == SubqueryMode.EXISTS:
-            return self._row_count > 0
-        elif self._mode == SubqueryMode.COUNT:
-            return self._row_count
-        elif self._mode == SubqueryMode.COLLECT:
-            if not self._results:
-                return []
-            keys = list(self._results[0].keys())
-            if len(keys) != 1:
-                raise ValueError("COLLECT subquery must return exactly one column")
-            key = keys[0]
-            return [r[key] for r in self._results]
-        return None
+        return self._value
+
+    def reduce(self, rows: List[Any], count: int) -> Any:
+        raise NotImplementedError

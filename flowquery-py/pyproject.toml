@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "FlowQuery Contributors"}
+    {name = "Team Microsoft FlowQuery", email = "flowquery@microsoft.com"}
 ]
 keywords = ["query", "data-processing", "pipeline", "declarative"]
 classifiers = [
@@ -29,9 +29,9 @@ dependencies = [
 flowquery = "flowquery.io.command_line:main"
 
 [project.urls]
-Homepage = "https://github.com/microsoft/FlowQuery/flowquery-py"
-Repository = "https://github.com/microsoft/FlowQuery/flowquery-py"
-Documentation = "https://github.com/microsoft/FlowQuery/flowquery-py#readme"
+Homepage = "https://github.com/microsoft/FlowQuery"
+Repository = "https://github.com/microsoft/FlowQuery"
+Documentation = "https://github.com/microsoft/FlowQuery#readme"
 Issues = "https://github.com/microsoft/FlowQuery/issues"
 
 [project.optional-dependencies]

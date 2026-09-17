@@ -3828,6 +3828,78 @@ class TestRunner:
         assert results[0] == {"result": 9}
 
     @pytest.mark.asyncio
+    async def test_unary_minus_on_variable(self):
+        """Test unary minus applied to a variable."""
+        runner = Runner("unwind [5] as x return -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -5}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_aggregate(self):
+        """Test unary minus applied to an aggregate."""
+        runner = Runner("unwind [1, 2, 3] as x return -count(x) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -3}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_property_access(self):
+        """Test unary minus applied to a property access."""
+        runner = Runner("unwind [{a: 4}] as row return -row.a as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -4}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_parenthesised_expression(self):
+        """Test unary minus applied to a parenthesised expression."""
+        runner = Runner("return -(2 + 3) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -5}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_binds_to_single_operand(self):
+        """Test unary minus binds only to the next operand."""
+        runner = Runner("unwind [5] as x return -x + 5 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 0}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_after_operator(self):
+        """Test unary minus directly after a binary operator."""
+        runner = Runner("unwind [5] as x return 3 * -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -15}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_null_returns_null(self):
+        """Test unary minus on null returns null."""
+        runner = Runner("unwind [null] as x return -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_subtraction_of_variable_is_not_unary(self):
+        """Test a minus between operands stays subtraction."""
+        runner = Runner("unwind [5] as x return 10-x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 5}
+
+    @pytest.mark.asyncio
     async def test_add_zero(self):
         """Test add zero."""
         runner = Runner("return 42 + 0 as result")

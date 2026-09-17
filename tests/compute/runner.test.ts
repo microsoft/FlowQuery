@@ -3564,6 +3564,70 @@ test("Test subtraction after a parenthesised expression", async () => {
     expect(results[0]).toEqual({ result: 9 });
 });
 
+test("Test unary minus on a variable", async () => {
+    const runner = new Runner("unwind [5] as x return -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -5 });
+});
+
+test("Test unary minus on an aggregate", async () => {
+    const runner = new Runner("unwind [1, 2, 3] as x return -count(x) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -3 });
+});
+
+test("Test unary minus on a property access", async () => {
+    const runner = new Runner("unwind [{a: 4}] as row return -row.a as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -4 });
+});
+
+test("Test unary minus on a parenthesised expression", async () => {
+    const runner = new Runner("return -(2 + 3) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -5 });
+});
+
+test("Test unary minus binds to a single operand", async () => {
+    const runner = new Runner("unwind [5] as x return -x + 5 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 0 });
+});
+
+test("Test unary minus after an operator", async () => {
+    const runner = new Runner("unwind [5] as x return 3 * -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -15 });
+});
+
+test("Test unary minus on null returns null", async () => {
+    const runner = new Runner("unwind [null] as x return -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test subtraction of a variable is not unary", async () => {
+    const runner = new Runner("unwind [5] as x return 10-x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 5 });
+});
+
 test("Test add zero", async () => {
     const runner = new Runner("return 42 + 0 as result");
     await runner.run();

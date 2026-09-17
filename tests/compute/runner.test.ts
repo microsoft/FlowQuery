@@ -5072,7 +5072,7 @@ test("Test order by expression on aggregated RETURN", async () => {
     expect(results[2].participant).toBe("sarah");
 });
 
-test("PLACEHOLDER_ANCHOR", async () => {
+test("Test order by aggregate expression then expression on aggregated WITH", async () => {
     const runner = new Runner(`
         unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row
         with row.name as participant, count(distinct row.event) as meetingCount
@@ -5085,6 +5085,44 @@ test("PLACEHOLDER_ANCHOR", async () => {
     expect(results[0]).toEqual({ participant: "PRIYA", meetingCount: 2 });
     expect(results[1]).toEqual({ participant: "bob", meetingCount: 1 });
     expect(results[2]).toEqual({ participant: "sarah", meetingCount: 1 });
+});
+
+test("Test limit with order by on aggregated RETURN", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'First', event: 1}, {name: 'Winner', event: 2}, {name: 'Winner', event: 3}] as row
+        return row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc
+        limit 1
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ participant: "Winner", meetingCount: 2 });
+});
+
+test("Test limit without order by on aggregated RETURN", async () => {
+    const runner = new Runner(`
+        unwind [1, 1, 2, 2, 3, 3] as x
+        return x, count(x) as cnt
+        limit 2
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+});
+
+test("Test limit larger than group count on aggregated RETURN", async () => {
+    const runner = new Runner(`
+        unwind [1, 1, 2, 2] as x
+        return x, count(x) as cnt
+        order by x asc
+        limit 10
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ x: 1, cnt: 2 });
+    expect(results[1]).toEqual({ x: 2, cnt: 2 });
 });
 
 test("Test delete virtual node operation", async () => {

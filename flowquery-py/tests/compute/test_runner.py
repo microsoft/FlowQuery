@@ -3774,6 +3774,60 @@ class TestRunner:
         assert results[0] == {"result": -6}
 
     @pytest.mark.asyncio
+    async def test_negative_literal_after_operator(self):
+        """Test a negative literal directly after an operator."""
+        runner = Runner("return 3 * -1 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -3}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_as_first_function_argument(self):
+        """Test a negative literal as the first function argument."""
+        runner = Runner("return round(-1.25, 1) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -1.3}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_after_comparison_operator(self):
+        """Test a negative literal directly after a comparison operator."""
+        runner = Runner("unwind [-5, 3] as x return x where x < -1")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"x": -5}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_in_list_literal(self):
+        """Test a negative literal inside a list literal."""
+        runner = Runner("return [-1, 2] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [-1, 2]}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_in_parentheses(self):
+        """Test a negative literal inside parentheses."""
+        runner = Runner("return (-1) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -1}
+
+    @pytest.mark.asyncio
+    async def test_subtraction_after_parenthesised_expression(self):
+        """Test subtraction directly after a parenthesised expression."""
+        runner = Runner("return (5 + 5) - 1 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 9}
+
+    @pytest.mark.asyncio
     async def test_add_zero(self):
         """Test add zero."""
         runner = Runner("return 42 + 0 as result")

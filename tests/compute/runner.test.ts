@@ -3516,6 +3516,54 @@ test("Test add to negative result", async () => {
     expect(results[0]).toEqual({ result: -6 });
 });
 
+test("Test negative literal after an operator", async () => {
+    const runner = new Runner("return 3 * -1 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -3 });
+});
+
+test("Test negative literal as first function argument", async () => {
+    const runner = new Runner("return round(-1.25, 1) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -1.3 });
+});
+
+test("Test negative literal after a comparison operator", async () => {
+    const runner = new Runner("unwind [-5, 3] as x return x where x < -1");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ x: -5 });
+});
+
+test("Test negative literal in a list literal", async () => {
+    const runner = new Runner("return [-1, 2] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [-1, 2] });
+});
+
+test("Test negative literal in parentheses", async () => {
+    const runner = new Runner("return (-1) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -1 });
+});
+
+test("Test subtraction after a parenthesised expression", async () => {
+    const runner = new Runner("return (5 + 5) - 1 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 9 });
+});
+
 test("Test add zero", async () => {
     const runner = new Runner("return 42 + 0 as result");
     await runner.run();

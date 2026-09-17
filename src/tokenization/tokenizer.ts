@@ -74,7 +74,7 @@ class Tokenizer {
             this.comment() ||
             this.whitespace() ||
             this.lookup(this.keywords) ||
-            this.lookup(this.operators, last, this.skipMinus) ||
+            this.lookup(this.operators, last, (l, t) => this.skipMinus(l, t)) ||
             this.boolean() ||
             this.identifier() ||
             this.string() ||
@@ -241,13 +241,23 @@ class Tokenizer {
     }
 
     private skipMinus(last: Token | null, current: Token): boolean {
-        if (last === null) {
+        if (last === null || !current.isNegation()) {
             return false;
         }
-        if ((last.isKeyword() || last.isComma() || last.isColon()) && current.isNegation()) {
-            return true;
+        // A digit must follow immediately, otherwise relationship patterns
+        // such as `<-[r]-` and `-->` would lex their `-` as a number lead.
+        if (!/^-[0-9]/.test(this.walker.getRemainingString())) {
+            return false;
         }
-        return false;
+        // Prefix position: no operand can precede the `-`, so it is a sign.
+        return (
+            last.isKeyword() ||
+            last.isComma() ||
+            last.isColon() ||
+            last.isLeftParenthesis() ||
+            last.isOpeningBracket() ||
+            last.isOperator()
+        );
     }
 }
 

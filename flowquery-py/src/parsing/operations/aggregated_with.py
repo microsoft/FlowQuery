@@ -49,12 +49,17 @@ class AggregatedWith(Return):
         want_provenance = self._group_by.provenance_enabled
         prov_iter = self._group_by.generate_provenance() if want_provenance else None
         if self._order_by is not None:
+            # Re-emission re-walks the group tree, so drop stale keys first.
+            self._order_by.reset_sort_keys()
             # Groups must be buffered so ORDER BY can permute them before
             # any downstream operation (notably LIMIT) consumes the stream.
             records: List[Dict[str, Any]] = []
             restores: List[Callable[[], None]] = []
             provenance: List[Optional[RowProvenance]] = []
             for record, restore in self._group_by.generate_groups():
+                # Evaluated while this group's overrides are live, so ORDER BY
+                # supports arbitrary expressions and not just bare aliases.
+                self._order_by.capture_sort_keys()
                 records.append(record)
                 restores.append(restore)
                 if prov_iter is not None:

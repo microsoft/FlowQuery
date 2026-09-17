@@ -50,6 +50,11 @@ class OrderBy extends Operation {
         this._sortKeys.push(this._fields.map((f) => f.expression.value()));
     }
 
+    /** Discards keys from a previous emission pass so a re-run starts clean. */
+    public resetSortKeys(): void {
+        this._sortKeys = [];
+    }
+
     /**
      * Sorts an array of records using the pre-computed sort keys captured
      * during accumulation.  When no keys have been captured (e.g.

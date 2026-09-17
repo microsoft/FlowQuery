@@ -44,6 +44,8 @@ class AggregatedReturn extends Return {
         // `RETURN count(*)` over no MATCH).  This keeps
         // `runner.provenance.length === runner.results.length`.
         const wantProvenance = this._provenanceSink !== null;
+        // Re-emission re-walks the group tree, so drop stale keys first.
+        this._orderBy?.resetSortKeys();
         if (wantProvenance) {
             const recordIter = this._group_by.generate_results();
             const provIter = this._group_by.generate_provenance();
@@ -51,11 +53,17 @@ class AggregatedReturn extends Return {
                 const r = recordIter.next();
                 const p = provIter.next();
                 if (r.done || p.done) break;
+                // Evaluated while this group's overrides are live, so ORDER BY
+                // supports arbitrary expressions and not just bare aliases.
+                this._orderBy?.captureSortKeys();
                 results.push(r.value);
                 provenance.push(p.value);
             }
         } else {
-            for (const r of this._group_by.generate_results()) results.push(r);
+            for (const r of this._group_by.generate_results()) {
+                this._orderBy?.captureSortKeys();
+                results.push(r);
+            }
         }
         if (this._orderBy !== null) {
             const indices = this._orderBy.sortIndices(results);

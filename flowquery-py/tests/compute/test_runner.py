@@ -5302,6 +5302,56 @@ class TestRunner:
         assert results[0] == {"participant": "Sarah"}
 
     @pytest.mark.asyncio
+    async def test_order_by_expression_on_aggregated_with(self):
+        """Test ORDER BY with a non-alias expression on an aggregating WITH."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'bob', event: 7}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by toLower(participant) asc "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"participant": "bob"}
+        assert results[1] == {"participant": "PRIYA"}
+        assert results[2] == {"participant": "sarah"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_expression_on_aggregated_return(self):
+        """Test ORDER BY with a non-alias expression on an aggregating RETURN."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'bob', event: 7}] as row "
+            "return row.name as participant, count(distinct row.event) as meetingCount "
+            "order by toLower(participant) asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0]["participant"] == "bob"
+        assert results[1]["participant"] == "PRIYA"
+        assert results[2]["participant"] == "sarah"
+
+    @pytest.mark.asyncio
+    async def test_order_by_aggregate_then_expression_on_aggregated_with(self):
+        """Test multi-key ORDER BY mixing an alias and an expression."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc, toLower(participant) asc "
+            "return participant, meetingCount"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"participant": "PRIYA", "meetingCount": 2}
+        assert results[1] == {"participant": "bob", "meetingCount": 1}
+        assert results[2] == {"participant": "sarah", "meetingCount": 1}
+
+    @pytest.mark.asyncio
     async def test_order_by_with_where(self):
         """Test ORDER BY combined with WHERE."""
         runner = Runner(

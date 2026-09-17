@@ -4931,6 +4931,50 @@ test("Test order by ascending on aggregated WITH keeps the bottom group", async 
     expect(results[0]).toEqual({ participant: "Sarah" });
 });
 
+test("Test order by expression on aggregated WITH", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'bob', event: 7}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by toLower(participant) asc
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ participant: "bob" });
+    expect(results[1]).toEqual({ participant: "PRIYA" });
+    expect(results[2]).toEqual({ participant: "sarah" });
+});
+
+test("Test order by expression on aggregated RETURN", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'bob', event: 7}] as row
+        return row.name as participant, count(distinct row.event) as meetingCount
+        order by toLower(participant) asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0].participant).toBe("bob");
+    expect(results[1].participant).toBe("PRIYA");
+    expect(results[2].participant).toBe("sarah");
+});
+
+test("Test order by aggregate expression then expression on aggregated WITH", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc, toLower(participant) asc
+        return participant, meetingCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ participant: "PRIYA", meetingCount: 2 });
+    expect(results[1]).toEqual({ participant: "bob", meetingCount: 1 });
+    expect(results[2]).toEqual({ participant: "sarah", meetingCount: 1 });
+});
+
 test("Test delete virtual node operation", async () => {
     const db = Database.getInstance();
     // Create a virtual node first

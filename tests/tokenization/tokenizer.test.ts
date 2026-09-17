@@ -63,6 +63,21 @@ test("Test return -2", () => {
     expect(tokens.length).toBeGreaterThan(0);
 });
 
+test("Test relationship arrows keep minus as an operator", () => {
+    const significant = (query: string) =>
+        new Tokenizer(query)
+            .tokenize()
+            .filter((token) => !token.isWhitespaceOrComment())
+            .map((token) => token.value)
+            .join(" ");
+    expect(significant("MATCH (a)-->(b) RETURN a")).toBe("MATCH ( a ) - - > ( b ) RETURN a");
+    expect(significant("MATCH (a)<-[r]-(b) RETURN a")).toBe(
+        "MATCH ( a ) < - [ r ] - ( b ) RETURN a"
+    );
+    // Contrast: a digit directly after the minus makes it a negative literal.
+    expect(significant("RETURN 3 * -1")).toBe("RETURN 3 * -1");
+});
+
 test("Test range with function", () => {
     const tokenizer = new Tokenizer(`
         with range(1,10) as data

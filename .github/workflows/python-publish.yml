@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - "flowquery-py/src/**"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       target:
@@ -138,13 +136,13 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           attestations: false
+          skip-existing: true
 
   publish-pypi:
     name: Publish to PyPI
     if: >-
       !cancelled() && needs.build.result == 'success' &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-       github.event_name == 'release' ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi'))
     needs: build
     runs-on: ubuntu-latest
@@ -164,3 +162,5 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           attestations: false
+          # A re-run rebuilds an already-uploaded version; warn instead of failing.
+          skip-existing: true

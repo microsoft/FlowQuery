@@ -5125,6 +5125,30 @@ test("Test limit larger than group count on aggregated RETURN", async () => {
     expect(results[1]).toEqual({ x: 2, cnt: 2 });
 });
 
+test("Test un-aliased property access keeps its column name", async () => {
+    const runner = new Runner("unwind [{a: 1, b: 2}] as r return r.a, r.b");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ "r.a": 1, "r.b": 2 });
+});
+
+test("Test un-aliased nested property access keeps its column name", async () => {
+    const runner = new Runner("unwind [{a: {b: 7}}] as r return r.a.b");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ "r.a.b": 7 });
+});
+
+test("Test un-nameable expressions still fall back to exprN", async () => {
+    const runner = new Runner("unwind [{a: 1}] as r return r.a + 1, r['a'], 42");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(Object.keys(results[0])).toEqual(["expr0", "expr1", "expr2"]);
+});
+
 test("Test delete virtual node operation", async () => {
     const db = Database.getInstance();
     // Create a virtual node first
@@ -5320,9 +5344,9 @@ test("Test ORDER BY property of alias-shadowed MATCH variable", async () => {
     await runner.run();
     const results = runner.results;
     expect(results.length).toBe(3);
-    expect(results[0]).toEqual({ manager: "Bob", peer: "Anna", expr2: "Eng" });
-    expect(results[1]).toEqual({ manager: "Bob", peer: "Carol", expr2: "Eng" });
-    expect(results[2]).toEqual({ manager: "Bob", peer: "Zoe", expr2: "Eng" });
+    expect(results[0]).toEqual({ manager: "Bob", peer: "Anna", "peer.title": "Eng" });
+    expect(results[1]).toEqual({ manager: "Bob", peer: "Carol", "peer.title": "Eng" });
+    expect(results[2]).toEqual({ manager: "Bob", peer: "Zoe", "peer.title": "Eng" });
 });
 
 test("Test chained optional match with null intermediate node", async () => {

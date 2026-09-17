@@ -153,3 +153,6 @@ jobs:
             release-assets/*
           draft: false
           prerelease: false
+          # Uploading all five assets at once trips GitHub's "Error creating
+          # asset temp dir" server error; serialise them instead.
+          preserve_order: true

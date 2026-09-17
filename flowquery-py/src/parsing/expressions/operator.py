@@ -161,6 +161,20 @@ class Not(Operator):
         return 1 if not self.lhs.value() else 0
 
 
+class Negate(Operator):
+    """Unary minus.  Binds to a single operand, so ``-a + b`` is ``(-a) + b``."""
+
+    def __init__(self) -> None:
+        super().__init__(0, True)
+
+    def is_operator(self) -> bool:
+        return False
+
+    def value(self) -> Any:
+        value = self.lhs.value()
+        return None if value is None else -value
+
+
 class Is(Operator):
     def __init__(self) -> None:
         super().__init__(0, True)

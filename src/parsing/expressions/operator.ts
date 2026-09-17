@@ -195,6 +195,20 @@ class Not extends Operator {
     }
 }
 
+/** Unary minus. Binds to a single operand, so `-a + b` is `(-a) + b`. */
+class Negate extends Operator {
+    constructor() {
+        super(0, true);
+    }
+    public isOperator(): boolean {
+        return false;
+    }
+    public value(): any {
+        const value = this.lhs.value();
+        return value === null || value === undefined ? null : -value;
+    }
+}
+
 class Is extends Operator {
     constructor() {
         super(0, true);
@@ -359,6 +373,7 @@ export {
     And,
     Or,
     Not,
+    Negate,
     Is,
     IsNot,
     In,

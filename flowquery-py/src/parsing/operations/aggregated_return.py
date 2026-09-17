@@ -52,6 +52,9 @@ class AggregatedReturn(Return):
         # (e.g. ``RETURN count(*)`` over no MATCH).  This keeps
         # ``runner.provenance`` length aligned with ``runner.results``.
         want_provenance = self._provenance_sink is not None
+        # Re-emission re-walks the group tree, so drop stale keys first.
+        if self._order_by is not None:
+            self._order_by.reset_sort_keys()
         if want_provenance:
             record_iter = self._group_by.generate_results()
             prov_iter = self._group_by.generate_provenance()
@@ -64,10 +67,16 @@ class AggregatedReturn(Return):
                     p = next(prov_iter)
                 except StopIteration:
                     break
+                # Evaluated while this group's overrides are live, so ORDER BY
+                # supports arbitrary expressions and not just bare aliases.
+                if self._order_by is not None:
+                    self._order_by.capture_sort_keys()
                 results.append(r)
                 provenance.append(p)
         else:
             for r in self._group_by.generate_results():
+                if self._order_by is not None:
+                    self._order_by.capture_sort_keys()
                 results.append(r)
         if self._order_by is not None:
             indices = self._order_by.sort_indices(results)

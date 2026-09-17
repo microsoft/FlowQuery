@@ -48,6 +48,11 @@ class OrderBy(Operation):
         accumulated row (from ``Return.run()``)."""
         self._sort_keys.append([f.expression.value() for f in self._fields])
 
+    def reset_sort_keys(self) -> None:
+        """Discard keys from a previous emission pass so a re-run starts
+        clean."""
+        self._sort_keys = []
+
     def sort(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Sort records using pre-computed sort keys captured during
         accumulation.  When no keys have been captured (e.g. aggregated

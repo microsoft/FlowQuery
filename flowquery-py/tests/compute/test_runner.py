@@ -3774,6 +3774,132 @@ class TestRunner:
         assert results[0] == {"result": -6}
 
     @pytest.mark.asyncio
+    async def test_negative_literal_after_operator(self):
+        """Test a negative literal directly after an operator."""
+        runner = Runner("return 3 * -1 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -3}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_as_first_function_argument(self):
+        """Test a negative literal as the first function argument."""
+        runner = Runner("return round(-1.25, 1) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -1.3}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_after_comparison_operator(self):
+        """Test a negative literal directly after a comparison operator."""
+        runner = Runner("unwind [-5, 3] as x return x where x < -1")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"x": -5}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_in_list_literal(self):
+        """Test a negative literal inside a list literal."""
+        runner = Runner("return [-1, 2] as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": [-1, 2]}
+
+    @pytest.mark.asyncio
+    async def test_negative_literal_in_parentheses(self):
+        """Test a negative literal inside parentheses."""
+        runner = Runner("return (-1) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -1}
+
+    @pytest.mark.asyncio
+    async def test_subtraction_after_parenthesised_expression(self):
+        """Test subtraction directly after a parenthesised expression."""
+        runner = Runner("return (5 + 5) - 1 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 9}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_variable(self):
+        """Test unary minus applied to a variable."""
+        runner = Runner("unwind [5] as x return -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -5}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_aggregate(self):
+        """Test unary minus applied to an aggregate."""
+        runner = Runner("unwind [1, 2, 3] as x return -count(x) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -3}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_property_access(self):
+        """Test unary minus applied to a property access."""
+        runner = Runner("unwind [{a: 4}] as row return -row.a as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -4}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_parenthesised_expression(self):
+        """Test unary minus applied to a parenthesised expression."""
+        runner = Runner("return -(2 + 3) as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -5}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_binds_to_single_operand(self):
+        """Test unary minus binds only to the next operand."""
+        runner = Runner("unwind [5] as x return -x + 5 as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 0}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_after_operator(self):
+        """Test unary minus directly after a binary operator."""
+        runner = Runner("unwind [5] as x return 3 * -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": -15}
+
+    @pytest.mark.asyncio
+    async def test_unary_minus_on_null_returns_null(self):
+        """Test unary minus on null returns null."""
+        runner = Runner("unwind [null] as x return -x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": None}
+
+    @pytest.mark.asyncio
+    async def test_subtraction_of_variable_is_not_unary(self):
+        """Test a minus between operands stays subtraction."""
+        runner = Runner("unwind [5] as x return 10-x as result")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"result": 5}
+
+    @pytest.mark.asyncio
     async def test_add_zero(self):
         """Test add zero."""
         runner = Runner("return 42 + 0 as result")
@@ -5252,6 +5378,104 @@ class TestRunner:
         assert results[0] == {"x": 1}
         assert results[1] == {"x": 1}
         assert results[2] == {"x": 2}
+
+    @pytest.mark.asyncio
+    async def test_order_by_on_aggregated_with_sorts_groups(self):
+        """Test ORDER BY on an aggregating WITH sorts the groups."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc "
+            "return participant, meetingCount"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"participant": "Priya", "meetingCount": 2}
+        assert results[1] == {"participant": "Sarah", "meetingCount": 1}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_limit_on_aggregated_with(self):
+        """Test ORDER BY with LIMIT on an aggregating WITH keeps the top group."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc "
+            "limit 1 "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"participant": "Priya"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_ascending_with_limit_on_aggregated_with(self):
+        """Test ascending ORDER BY on an aggregating WITH keeps the bottom group."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount asc "
+            "limit 1 "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"participant": "Sarah"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_expression_on_aggregated_with(self):
+        """Test ORDER BY with a non-alias expression on an aggregating WITH."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'bob', event: 7}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by toLower(participant) asc "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"participant": "bob"}
+        assert results[1] == {"participant": "PRIYA"}
+        assert results[2] == {"participant": "sarah"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_expression_on_aggregated_return(self):
+        """Test ORDER BY with a non-alias expression on an aggregating RETURN."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'bob', event: 7}] as row "
+            "return row.name as participant, count(distinct row.event) as meetingCount "
+            "order by toLower(participant) asc"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0]["participant"] == "bob"
+        assert results[1]["participant"] == "PRIYA"
+        assert results[2]["participant"] == "sarah"
+
+    @pytest.mark.asyncio
+    async def test_order_by_aggregate_then_expression_on_aggregated_with(self):
+        """Test multi-key ORDER BY mixing an alias and an expression."""
+        runner = Runner(
+            "unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, "
+            "{name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc, toLower(participant) asc "
+            "return participant, meetingCount"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 3
+        assert results[0] == {"participant": "PRIYA", "meetingCount": 2}
+        assert results[1] == {"participant": "bob", "meetingCount": 1}
+        assert results[2] == {"participant": "sarah", "meetingCount": 1}
 
     @pytest.mark.asyncio
     async def test_order_by_with_where(self):

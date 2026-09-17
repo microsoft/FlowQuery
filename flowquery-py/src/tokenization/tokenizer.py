@@ -207,8 +207,19 @@ class Tokenizer:
         return None
 
     def _skip_minus(self, last: Optional[Token], current: Token) -> bool:
-        if last is None:
+        if last is None or not current.is_negation():
             return False
-        if (last.is_keyword() or last.is_comma() or last.is_colon()) and current.is_negation():
-            return True
-        return False
+        # A digit must follow immediately, otherwise relationship patterns
+        # such as ``<-[r]-`` and ``-->`` would lex their ``-`` as a number lead.
+        remaining = self._walker.get_remaining_string()
+        if len(remaining) < 2 or remaining[1] not in '0123456789':
+            return False
+        # Prefix position: no operand can precede the ``-``, so it is a sign.
+        return (
+            last.is_keyword()
+            or last.is_comma()
+            or last.is_colon()
+            or last.is_left_parenthesis()
+            or last.is_opening_bracket()
+            or last.is_operator()
+        )

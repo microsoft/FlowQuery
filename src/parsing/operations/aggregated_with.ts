@@ -37,12 +37,39 @@ class AggregatedWith extends With {
     public async finish(): Promise<void> {
         const wantProvenance = this._group_by.provenanceEnabled;
         const provIter = wantProvenance ? this._group_by.generate_provenance() : null;
-        for (const _ of this._group_by.generate_results()) {
-            if (provIter !== null) {
-                const next = provIter.next();
-                this._currentGroupProvenance = next.done ? null : next.value;
+        if (this._orderBy !== null) {
+            const orderBy = this._orderBy;
+            // Re-emission re-walks the group tree, so drop stale keys first.
+            orderBy.resetSortKeys();
+            // Groups must be buffered so ORDER BY can permute them before
+            // any downstream operation (notably LIMIT) consumes the stream.
+            const records: Record<string, any>[] = [];
+            const restores: (() => void)[] = [];
+            const provenance: (RowProvenance | null)[] = [];
+            for (const { record, restore } of this._group_by.generate_groups()) {
+                // Evaluated while this group's overrides are live, so ORDER BY
+                // supports arbitrary expressions and not just bare aliases.
+                orderBy.captureSortKeys();
+                records.push(record);
+                restores.push(restore);
+                if (provIter !== null) {
+                    const next = provIter.next();
+                    provenance.push(next.done ? null : next.value);
+                }
             }
-            await this.next?.run();
+            for (const index of orderBy.sortIndices(records)) {
+                restores[index]();
+                this._currentGroupProvenance = provIter === null ? null : provenance[index];
+                await this.next?.run();
+            }
+        } else {
+            for (const _ of this._group_by.generate_results()) {
+                if (provIter !== null) {
+                    const next = provIter.next();
+                    this._currentGroupProvenance = next.done ? null : next.value;
+                }
+                await this.next?.run();
+            }
         }
         this._currentGroupProvenance = null;
         await super.finish();

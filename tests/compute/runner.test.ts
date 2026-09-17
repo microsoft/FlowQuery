@@ -3516,6 +3516,118 @@ test("Test add to negative result", async () => {
     expect(results[0]).toEqual({ result: -6 });
 });
 
+test("Test negative literal after an operator", async () => {
+    const runner = new Runner("return 3 * -1 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -3 });
+});
+
+test("Test negative literal as first function argument", async () => {
+    const runner = new Runner("return round(-1.25, 1) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -1.3 });
+});
+
+test("Test negative literal after a comparison operator", async () => {
+    const runner = new Runner("unwind [-5, 3] as x return x where x < -1");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ x: -5 });
+});
+
+test("Test negative literal in a list literal", async () => {
+    const runner = new Runner("return [-1, 2] as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: [-1, 2] });
+});
+
+test("Test negative literal in parentheses", async () => {
+    const runner = new Runner("return (-1) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -1 });
+});
+
+test("Test subtraction after a parenthesised expression", async () => {
+    const runner = new Runner("return (5 + 5) - 1 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 9 });
+});
+
+test("Test unary minus on a variable", async () => {
+    const runner = new Runner("unwind [5] as x return -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -5 });
+});
+
+test("Test unary minus on an aggregate", async () => {
+    const runner = new Runner("unwind [1, 2, 3] as x return -count(x) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -3 });
+});
+
+test("Test unary minus on a property access", async () => {
+    const runner = new Runner("unwind [{a: 4}] as row return -row.a as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -4 });
+});
+
+test("Test unary minus on a parenthesised expression", async () => {
+    const runner = new Runner("return -(2 + 3) as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -5 });
+});
+
+test("Test unary minus binds to a single operand", async () => {
+    const runner = new Runner("unwind [5] as x return -x + 5 as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 0 });
+});
+
+test("Test unary minus after an operator", async () => {
+    const runner = new Runner("unwind [5] as x return 3 * -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: -15 });
+});
+
+test("Test unary minus on null returns null", async () => {
+    const runner = new Runner("unwind [null] as x return -x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: null });
+});
+
+test("Test subtraction of a variable is not unary", async () => {
+    const runner = new Runner("unwind [5] as x return 10-x as result");
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ result: 5 });
+});
+
 test("Test add zero", async () => {
     const runner = new Runner("return 42 + 0 as result");
     await runner.run();
@@ -4887,6 +4999,92 @@ test("Test order by with mixed simple and expression fields", async () => {
     expect(results[0]).toEqual({ name: "Alice", score: 3 }); // Alice, score 3 desc
     expect(results[1]).toEqual({ name: "Alice", score: 1 }); // Alice, score 1 desc
     expect(results[2]).toEqual({ name: "Bob", score: 2 }); // Bob
+});
+
+test("Test order by on aggregated WITH sorts groups", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc
+        return participant, meetingCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ participant: "Priya", meetingCount: 2 });
+    expect(results[1]).toEqual({ participant: "Sarah", meetingCount: 1 });
+});
+
+test("Test order by with limit on aggregated WITH keeps the top group", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc
+        limit 1
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ participant: "Priya" });
+});
+
+test("Test order by ascending on aggregated WITH keeps the bottom group", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount asc
+        limit 1
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ participant: "Sarah" });
+});
+
+test("Test order by expression on aggregated WITH", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'bob', event: 7}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by toLower(participant) asc
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ participant: "bob" });
+    expect(results[1]).toEqual({ participant: "PRIYA" });
+    expect(results[2]).toEqual({ participant: "sarah" });
+});
+
+test("Test order by expression on aggregated RETURN", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'bob', event: 7}] as row
+        return row.name as participant, count(distinct row.event) as meetingCount
+        order by toLower(participant) asc
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0].participant).toBe("bob");
+    expect(results[1].participant).toBe("PRIYA");
+    expect(results[2].participant).toBe("sarah");
+});
+
+test("Test order by aggregate expression then expression on aggregated WITH", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc, toLower(participant) asc
+        return participant, meetingCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({ participant: "PRIYA", meetingCount: 2 });
+    expect(results[1]).toEqual({ participant: "bob", meetingCount: 1 });
+    expect(results[2]).toEqual({ participant: "sarah", meetingCount: 1 });
 });
 
 test("Test delete virtual node operation", async () => {

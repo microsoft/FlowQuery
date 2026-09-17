@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ...compute.provenance import ProvenanceSource, RowProvenance, RowSegment
 from ..ast_node import ASTNode
@@ -48,13 +48,40 @@ class AggregatedWith(Return):
     async def finish(self) -> None:
         want_provenance = self._group_by.provenance_enabled
         prov_iter = self._group_by.generate_provenance() if want_provenance else None
-        for _ in self._group_by.generate_results():
-            if prov_iter is not None:
-                try:
-                    self._current_group_provenance = next(prov_iter)
-                except StopIteration:
-                    self._current_group_provenance = None
-            if self.next:
-                await self.next.run()
+        if self._order_by is not None:
+            # Re-emission re-walks the group tree, so drop stale keys first.
+            self._order_by.reset_sort_keys()
+            # Groups must be buffered so ORDER BY can permute them before
+            # any downstream operation (notably LIMIT) consumes the stream.
+            records: List[Dict[str, Any]] = []
+            restores: List[Callable[[], None]] = []
+            provenance: List[Optional[RowProvenance]] = []
+            for record, restore in self._group_by.generate_groups():
+                # Evaluated while this group's overrides are live, so ORDER BY
+                # supports arbitrary expressions and not just bare aliases.
+                self._order_by.capture_sort_keys()
+                records.append(record)
+                restores.append(restore)
+                if prov_iter is not None:
+                    try:
+                        provenance.append(next(prov_iter))
+                    except StopIteration:
+                        provenance.append(None)
+            for index in self._order_by.sort_indices(records):
+                restores[index]()
+                self._current_group_provenance = (
+                    None if prov_iter is None else provenance[index]
+                )
+                if self.next:
+                    await self.next.run()
+        else:
+            for _ in self._group_by.generate_results():
+                if prov_iter is not None:
+                    try:
+                        self._current_group_provenance = next(prov_iter)
+                    except StopIteration:
+                        self._current_group_provenance = None
+                if self.next:
+                    await self.next.run()
         self._current_group_provenance = None
         await super().finish()

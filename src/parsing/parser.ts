@@ -33,6 +33,7 @@ import {
     In,
     Is,
     IsNot,
+    Negate,
     Not,
     NotContains,
     NotEndsWith,
@@ -1954,6 +1955,19 @@ class Parser extends BaseParser {
                 throw new Error("Expected CASE statement");
             }
             expression.addNode(_case);
+            return true;
+        } else if (this.token.isSubtract()) {
+            // Only unary here: a binary minus is consumed as an operator by
+            // parseExpression, and the tokenizer folds `-<digit>` into a literal.
+            const negate = new Negate();
+            this.setNextToken();
+            const tempExpr = new Expression();
+            if (!this.parseOperand(tempExpr)) {
+                throw new Error("Expected expression after unary minus");
+            }
+            tempExpr.finish();
+            negate.addChild(tempExpr);
+            expression.addNode(negate);
             return true;
         } else if (this.token.isNot()) {
             const not = new Not();

@@ -70,6 +70,22 @@ class TestTokenizer:
         assert tokens is not None
         assert len(tokens) > 0
 
+    def test_relationship_arrows_keep_minus_as_operator(self):
+        """Test relationship arrows are not lexed as negative literals."""
+        def significant(query: str) -> str:
+            tokens = Tokenizer(query).tokenize()
+            return " ".join(
+                t.value for t in tokens if not t.is_whitespace_or_comment()
+            )
+
+        assert significant("MATCH (a)-->(b) RETURN a") == "MATCH ( a ) - - > ( b ) RETURN a"
+        assert (
+            significant("MATCH (a)<-[r]-(b) RETURN a")
+            == "MATCH ( a ) < - [ r ] - ( b ) RETURN a"
+        )
+        # Contrast: a digit directly after the minus makes it a negative literal.
+        assert significant("RETURN 3 * -1") == "RETURN 3 * -1"
+
     def test_range_with_function(self):
         """Test range with function."""
         tokenizer = Tokenizer("""

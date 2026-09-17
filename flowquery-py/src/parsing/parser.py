@@ -38,6 +38,7 @@ from .expressions.operator import (
     In,
     Is,
     IsNot,
+    Negate,
     Not,
     NotContains,
     NotEndsWith,
@@ -1684,6 +1685,19 @@ class Parser(BaseParser):
             if case is None:
                 raise ValueError("Expected CASE statement")
             expression.add_node(case)
+            return True
+        elif self.token.is_subtract():
+            # Only unary here: a binary minus is consumed as an operator by
+            # _parse_expression, and the tokenizer folds ``-<digit>`` into a
+            # literal.
+            negate = Negate()
+            self.set_next_token()
+            temp_expr = Expression()
+            if not self._parse_operand(temp_expr):
+                raise ValueError("Expected expression after unary minus")
+            temp_expr.finish()
+            negate.add_child(temp_expr)
+            expression.add_node(negate)
             return True
         elif self.token.is_not():
             not_node = Not()

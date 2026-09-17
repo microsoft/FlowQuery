@@ -1,6 +1,8 @@
 import PatternExpression from "../../graph/pattern_expression";
 import ASTNode from "../ast_node";
+import Lookup from "../data_structures/lookup";
 import AggregateFunction from "../functions/aggregate_function";
+import Identifier from "./identifier";
 import Reference from "./reference";
 import SubqueryExpression from "./subquery_expression";
 
@@ -104,10 +106,37 @@ class Expression extends ASTNode {
     }
 
     public get alias(): string | null {
-        if (this.firstChild() instanceof Reference && this._alias === null) {
-            return (<Reference>this.firstChild()).identifier;
+        if (this._alias !== null) {
+            return this._alias;
         }
-        return this._alias;
+        const first = this.firstChild();
+        if (first instanceof Reference) {
+            return (<Reference>first).identifier;
+        }
+        return Expression.propertyPath(first);
+    }
+
+    /**
+     * Names an un-aliased dot lookup after its source text (`u.displayName`)
+     * so projected columns keep a readable key.  Returns null for anything
+     * else, leaving the caller to fall back to `expr<n>`.
+     */
+    private static propertyPath(node: ASTNode | null): string | null {
+        if (!(node instanceof Lookup)) {
+            return null;
+        }
+        const index = node.index;
+        // Bracket lookups carry an Expression index; only dot access has a bare
+        // Identifier, and Reference extends Identifier so it must be excluded.
+        if (!(index instanceof Identifier) || index instanceof Reference) {
+            return null;
+        }
+        const variable = node.variable;
+        const prefix =
+            variable instanceof Reference
+                ? (<Reference>variable).identifier
+                : Expression.propertyPath(variable);
+        return prefix === null ? null : `${prefix}.${index.value()}`;
     }
 
     public toString(): string {

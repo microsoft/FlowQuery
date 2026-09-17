@@ -97,14 +97,40 @@ class Expression(ASTNode):
 
     @property
     def alias(self) -> Optional[str]:
+        if self._alias is not None:
+            return self._alias
         first = self.first_child()
-        if isinstance(first, Reference) and self._alias is None:
+        if isinstance(first, Reference):
             return first.identifier
-        return self._alias
+        return self._property_path(first)
 
     @alias.setter
     def alias(self, value: str) -> None:
         self._alias = value
+
+    @staticmethod
+    def _property_path(node: Optional[ASTNode]) -> Optional[str]:
+        """Name an un-aliased dot lookup after its source text
+        (``u.displayName``) so projected columns keep a readable key.
+        Returns ``None`` for anything else, leaving the caller to fall back
+        to ``expr<n>``.
+        """
+        from ..data_structures.lookup import Lookup
+        from .identifier import Identifier
+
+        if not isinstance(node, Lookup):
+            return None
+        index = node.index
+        # Bracket lookups carry an Expression index; only dot access has a bare
+        # Identifier, and Reference subclasses Identifier so it must be excluded.
+        if not isinstance(index, Identifier) or isinstance(index, Reference):
+            return None
+        variable = node.variable
+        if isinstance(variable, Reference):
+            prefix: Optional[str] = variable.identifier
+        else:
+            prefix = Expression._property_path(variable)
+        return None if prefix is None else f"{prefix}.{index.value()}"
 
     def __str__(self) -> str:
         if self._alias is not None:

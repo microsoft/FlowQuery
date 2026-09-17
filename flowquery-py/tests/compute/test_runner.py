@@ -5513,6 +5513,33 @@ class TestRunner:
         assert results[1] == {"x": 2, "cnt": 2}
 
     @pytest.mark.asyncio
+    async def test_unaliased_property_access_keeps_column_name(self):
+        """Test an un-aliased property access is named after its source text."""
+        runner = Runner("unwind [{a: 1, b: 2}] as r return r.a, r.b")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"r.a": 1, "r.b": 2}
+
+    @pytest.mark.asyncio
+    async def test_unaliased_nested_property_access_keeps_column_name(self):
+        """Test a nested un-aliased property access keeps the full path."""
+        runner = Runner("unwind [{a: {b: 7}}] as r return r.a.b")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"r.a.b": 7}
+
+    @pytest.mark.asyncio
+    async def test_unnameable_expressions_fall_back_to_expr_n(self):
+        """Test expressions without a readable name still use exprN."""
+        runner = Runner("unwind [{a: 1}] as r return r.a + 1, r['a'], 42")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert list(results[0].keys()) == ["expr0", "expr1", "expr2"]
+
+    @pytest.mark.asyncio
     async def test_order_by_with_where(self):
         """Test ORDER BY combined with WHERE."""
         runner = Runner(
@@ -5696,9 +5723,9 @@ class TestRunner:
         await runner.run()
         results = runner.results
         assert len(results) == 3
-        assert results[0] == {"manager": "Bob", "peer": "Anna",  "expr2": "Eng"}
-        assert results[1] == {"manager": "Bob", "peer": "Carol", "expr2": "Eng"}
-        assert results[2] == {"manager": "Bob", "peer": "Zoe",   "expr2": "Eng"}
+        assert results[0] == {"manager": "Bob", "peer": "Anna",  "peer.title": "Eng"}
+        assert results[1] == {"manager": "Bob", "peer": "Carol", "peer.title": "Eng"}
+        assert results[2] == {"manager": "Bob", "peer": "Zoe",   "peer.title": "Eng"}
 
     @pytest.mark.asyncio
     async def test_delete_virtual_node_operation(self):

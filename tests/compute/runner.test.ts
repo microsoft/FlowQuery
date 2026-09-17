@@ -5072,7 +5072,7 @@ test("Test order by expression on aggregated RETURN", async () => {
     expect(results[2].participant).toBe("sarah");
 });
 
-test("Test order by aggregate expression then expression on aggregated WITH", async () => {
+test("PLACEHOLDER_ANCHOR", async () => {
     const runner = new Runner(`
         unwind [{name: 'sarah', event: 1}, {name: 'PRIYA', event: 1}, {name: 'PRIYA', event: 2}, {name: 'bob', event: 7}] as row
         with row.name as participant, count(distinct row.event) as meetingCount

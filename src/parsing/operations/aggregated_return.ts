@@ -65,13 +65,22 @@ class AggregatedReturn extends Return {
                 results.push(r);
             }
         }
+        let sorted = results;
+        let sortedProv = provenance;
         if (this._orderBy !== null) {
             const indices = this._orderBy.sortIndices(results);
-            const sorted = indices.map((i) => results[i]);
-            const sortedProv = wantProvenance ? indices.map((i) => provenance[i]) : provenance;
-            return { results: sorted, provenance: sortedProv };
+            sorted = indices.map((i) => results[i]);
+            if (wantProvenance) {
+                sortedProv = indices.map((i) => provenance[i]);
+            }
         }
-        return { results, provenance };
+        if (this._limit !== null) {
+            // Groups are never counted during accumulation, unlike per-row
+            // RETURN, so LIMIT can only be applied here.
+            sorted = sorted.slice(0, this._limit.limitValue);
+            sortedProv = sortedProv.slice(0, this._limit.limitValue);
+        }
+        return { results: sorted, provenance: sortedProv };
     }
 }
 

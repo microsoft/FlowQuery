@@ -5478,6 +5478,41 @@ class TestRunner:
         assert results[2] == {"participant": "sarah", "meetingCount": 1}
 
     @pytest.mark.asyncio
+    async def test_limit_with_order_by_on_aggregated_return(self):
+        """Test LIMIT truncates a sorted aggregating RETURN."""
+        runner = Runner(
+            "unwind [{name: 'First', event: 1}, {name: 'Winner', event: 2}, "
+            "{name: 'Winner', event: 3}] as row "
+            "return row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc "
+            "limit 1"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"participant": "Winner", "meetingCount": 2}
+
+    @pytest.mark.asyncio
+    async def test_limit_without_order_by_on_aggregated_return(self):
+        """Test LIMIT truncates an unsorted aggregating RETURN."""
+        runner = Runner("unwind [1, 1, 2, 2, 3, 3] as x return x, count(x) as cnt limit 2")
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_limit_larger_than_group_count_on_aggregated_return(self):
+        """Test a LIMIT above the group count returns every group."""
+        runner = Runner(
+            "unwind [1, 1, 2, 2] as x return x, count(x) as cnt order by x asc limit 10"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"x": 1, "cnt": 2}
+        assert results[1] == {"x": 2, "cnt": 2}
+
+    @pytest.mark.asyncio
     async def test_order_by_with_where(self):
         """Test ORDER BY combined with WHERE."""
         runner = Runner(

@@ -4889,6 +4889,48 @@ test("Test order by with mixed simple and expression fields", async () => {
     expect(results[2]).toEqual({ name: "Bob", score: 2 }); // Bob
 });
 
+test("Test order by on aggregated WITH sorts groups", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc
+        return participant, meetingCount
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(2);
+    expect(results[0]).toEqual({ participant: "Priya", meetingCount: 2 });
+    expect(results[1]).toEqual({ participant: "Sarah", meetingCount: 1 });
+});
+
+test("Test order by with limit on aggregated WITH keeps the top group", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount desc
+        limit 1
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ participant: "Priya" });
+});
+
+test("Test order by ascending on aggregated WITH keeps the bottom group", async () => {
+    const runner = new Runner(`
+        unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, {name: 'Priya', event: 2}] as row
+        with row.name as participant, count(distinct row.event) as meetingCount
+        order by meetingCount asc
+        limit 1
+        return participant
+    `);
+    await runner.run();
+    const results = runner.results;
+    expect(results.length).toBe(1);
+    expect(results[0]).toEqual({ participant: "Sarah" });
+});
+
 test("Test delete virtual node operation", async () => {
     const db = Database.getInstance();
     // Create a virtual node first

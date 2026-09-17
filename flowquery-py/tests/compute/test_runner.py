@@ -5254,6 +5254,54 @@ class TestRunner:
         assert results[2] == {"x": 2}
 
     @pytest.mark.asyncio
+    async def test_order_by_on_aggregated_with_sorts_groups(self):
+        """Test ORDER BY on an aggregating WITH sorts the groups."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc "
+            "return participant, meetingCount"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 2
+        assert results[0] == {"participant": "Priya", "meetingCount": 2}
+        assert results[1] == {"participant": "Sarah", "meetingCount": 1}
+
+    @pytest.mark.asyncio
+    async def test_order_by_with_limit_on_aggregated_with(self):
+        """Test ORDER BY with LIMIT on an aggregating WITH keeps the top group."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount desc "
+            "limit 1 "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"participant": "Priya"}
+
+    @pytest.mark.asyncio
+    async def test_order_by_ascending_with_limit_on_aggregated_with(self):
+        """Test ascending ORDER BY on an aggregating WITH keeps the bottom group."""
+        runner = Runner(
+            "unwind [{name: 'Sarah', event: 1}, {name: 'Priya', event: 1}, "
+            "{name: 'Priya', event: 2}] as row "
+            "with row.name as participant, count(distinct row.event) as meetingCount "
+            "order by meetingCount asc "
+            "limit 1 "
+            "return participant"
+        )
+        await runner.run()
+        results = runner.results
+        assert len(results) == 1
+        assert results[0] == {"participant": "Sarah"}
+
+    @pytest.mark.asyncio
     async def test_order_by_with_where(self):
         """Test ORDER BY combined with WHERE."""
         runner = Runner(

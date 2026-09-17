@@ -175,17 +175,25 @@ class GroupBy extends Projection {
         }
         return this._reducers;
     }
-    public *generate_results(
+    /**
+     * Depth-first walk over the group tree that applies each group's
+     * mapper and reducer overrides before yielding its leaf, together
+     * with the mapper values collected along the path.  Shared by the
+     * result, group and provenance generators so they always traverse
+     * in identical order.
+     */
+    private *_generate_leaves(
         mapperIndex: number = 0,
-        node: Node = this.root
-    ): Generator<Record<string, any>> {
+        node: Node = this.root,
+        path: any[] = []
+    ): Generator<{ node: Node; path: any[] }> {
         if (mapperIndex === 0 && node.children.size === 0 && this.mappers.length > 0) {
             return;
         }
         if (node.children.size > 0) {
             for (const child of node.children.values()) {
                 this.mappers[mapperIndex].overridden = child.value;
-                yield* this.generate_results(mapperIndex + 1, child);
+                yield* this._generate_leaves(mapperIndex + 1, child, [...path, child.value]);
             }
         } else {
             if (node.elements === null) {
@@ -194,13 +202,44 @@ class GroupBy extends Projection {
             node.elements.forEach((element, reducerIndex) => {
                 this.reducers[reducerIndex].overridden = element.value;
             });
+            yield { node, path };
+        }
+    }
+    /**
+     * Yields each emitted group together with a callback that re-applies
+     * that group's mapper and reducer overrides.  Lets callers replay
+     * groups in an order other than tree-traversal order (e.g. after
+     * ORDER BY) while keeping downstream expression evaluation correct.
+     */
+    public *generate_groups(): Generator<{
+        record: Record<string, any>;
+        restore: () => void;
+    }> {
+        for (const { node, path } of this._generate_leaves()) {
             const record: Record<string, any> = {};
             for (const [expression, alias] of this.expressions()) {
                 record[alias] = expression.value();
             }
-            if (this.where) {
-                yield record;
+            if (!this.where) {
+                continue;
             }
+            const elementValues = (node.elements ?? []).map((element) => element.value);
+            yield {
+                record,
+                restore: () => {
+                    path.forEach((value, mapperIndex) => {
+                        this.mappers[mapperIndex].overridden = value;
+                    });
+                    elementValues.forEach((value, reducerIndex) => {
+                        this.reducers[reducerIndex].overridden = value;
+                    });
+                },
+            };
+        }
+    }
+    public *generate_results(): Generator<Record<string, any>> {
+        for (const { record } of this.generate_groups()) {
+            yield record;
         }
     }
     /**
@@ -209,26 +248,9 @@ class GroupBy extends Projection {
      * RowProvenance} for each emitted group.  When provenance is
      * disabled, yields empty entries so callers can still zip cleanly.
      */
-    public *generate_provenance(
-        mapperIndex: number = 0,
-        node: Node = this.root
-    ): Generator<RowProvenance> {
-        if (mapperIndex === 0 && node.children.size === 0 && this.mappers.length > 0) {
-            return;
-        }
-        if (node.children.size > 0) {
-            for (const child of node.children.values()) {
-                this.mappers[mapperIndex].overridden = child.value;
-                yield* this.generate_provenance(mapperIndex + 1, child);
-            }
-        } else {
-            if (node.elements === null) {
-                node.elements = this.reducers.map((reducer) => reducer.element());
-            }
-            node.elements.forEach((element, reducerIndex) => {
-                this.reducers[reducerIndex].overridden = element.value;
-            });
-            if (!this.where) return;
+    public *generate_provenance(): Generator<RowProvenance> {
+        for (const { node } of this._generate_leaves()) {
+            if (!this.where) continue;
             yield {
                 nodes: Array.from(node.provenanceNodes.values()),
                 relationships: Array.from(node.provenanceRelationships.values()),

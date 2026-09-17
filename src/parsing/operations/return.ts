@@ -23,7 +23,7 @@ import Where from "./where";
 class Return extends Projection {
     protected _where: Where | null = null;
     protected _results: Record<string, any>[] = [];
-    private _limit: Limit | null = null;
+    protected _limit: Limit | null = null;
     protected _orderBy: OrderBy | null = null;
     protected _provenanceSources: ProvenanceSource[] | null = null;
     protected _provenanceSink: RowProvenance[] | null = null;

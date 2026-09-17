@@ -78,9 +78,17 @@ class AggregatedReturn(Return):
                 if self._order_by is not None:
                     self._order_by.capture_sort_keys()
                 results.append(r)
+        sorted_results = results
+        sorted_prov = provenance
         if self._order_by is not None:
             indices = self._order_by.sort_indices(results)
             sorted_results = [results[i] for i in indices]
-            sorted_prov = [provenance[i] for i in indices] if want_provenance else provenance
-            return sorted_results, sorted_prov
-        return results, provenance
+            if want_provenance:
+                sorted_prov = [provenance[i] for i in indices]
+        if self._limit is not None:
+            # Groups are never counted during accumulation, unlike per-row
+            # RETURN, so LIMIT can only be applied here.
+            limit_value = self._limit.limit_value
+            sorted_results = sorted_results[:limit_value]
+            sorted_prov = sorted_prov[:limit_value]
+        return sorted_results, sorted_prov

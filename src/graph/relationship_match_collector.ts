@@ -14,12 +14,30 @@ class RelationshipMatchCollector {
     private _nodeIds: Array<string> = [];
     private _nodeIdSet: Set<string> = new Set();
 
-    public push(relationship: Relationship, traversalId: string): RelationshipMatchRecord {
+    public push(
+        relationship: Relationship,
+        traversalId: string,
+        record?: Record<string, any> | null
+    ): RelationshipMatchRecord {
         const data = relationship.getData();
-        const currentRecord = data?.current();
+        // Provider-backed relationships supply the bound row explicitly
+        // (or expose it via currentRecord) instead of a data cursor.
+        const explicit = record !== undefined || relationship.access !== null;
+        const currentRecord = explicit
+            ? (record ?? relationship.currentRecord(0))
+            : data?.current();
         const actualType =
             currentRecord && "_type" in currentRecord ? currentRecord["_type"] : relationship.type!;
-        const relProperties = data?.properties() as Record<string, any>;
+        let relProperties: Record<string, any>;
+        if (explicit) {
+            relProperties = {};
+            if (currentRecord != null) {
+                const { left_id, right_id, _type, ...props } = currentRecord;
+                relProperties = props;
+            }
+        } else {
+            relProperties = data?.properties() as Record<string, any>;
+        }
         const match: RelationshipMatchRecord = {
             ...(relProperties || {}),
             type: actualType,

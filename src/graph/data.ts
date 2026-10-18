@@ -102,6 +102,9 @@ class Data {
             return true;
         }
     }
+    public get records(): Record<string, any>[] {
+        return this._records;
+    }
     public reset(): void {
         for (const layer of this._layers.values()) {
             layer.current = -1;

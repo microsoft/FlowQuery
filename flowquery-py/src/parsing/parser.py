@@ -594,6 +594,23 @@ class Parser(BaseParser):
             relationship.target = target
 
         self._expect_and_skip_whitespace_and_comments()
+        # Optional `WITH CAPABILITIES { ... }` opts the definition into the
+        # backend-aware source contract (see set_node_source_capabilities).
+        capabilities: Optional[AssociativeArray] = None
+        if self.token.is_with():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if (
+                not self.token.is_identifier_or_keyword()
+                or (self.token.value or "").upper() != "CAPABILITIES"
+            ):
+                raise ValueError("Expected CAPABILITIES after WITH in CREATE VIRTUAL")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_opening_brace():
+                raise ValueError("Expected capabilities map after WITH CAPABILITIES")
+            capabilities = self._parse_associative_array()
+            self._expect_and_skip_whitespace_and_comments()
         if not self.token.is_as():
             raise ValueError("Expected AS")
         self.set_next_token()
@@ -660,9 +677,11 @@ class Parser(BaseParser):
             self._token_index = saved_index
 
         if relationship is not None:
-            return CreateRelationship(relationship, query, is_static, refresh_every_ms)
+            return CreateRelationship(
+                relationship, query, is_static, refresh_every_ms, capabilities
+            )
         else:
-            return CreateNode(node, query, is_static, refresh_every_ms)
+            return CreateNode(node, query, is_static, refresh_every_ms, capabilities)
 
     def _parse_delete(self) -> Optional[Operation]:
         """Parse DELETE/DROP VIRTUAL or DROP BINDING statement."""

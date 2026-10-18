@@ -9,6 +9,12 @@ class AggregatedReturn extends Return {
     public async run(): Promise<void> {
         await this._group_by.run();
     }
+    public get saturated(): boolean {
+        return false;
+    }
+    public get supportsRowSink(): boolean {
+        return false;
+    }
     /**
      * Provenance sources registered on an aggregate RETURN are folded
      * into the active group's dedup maps rather than snapshotted per

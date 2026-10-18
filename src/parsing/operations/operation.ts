@@ -61,6 +61,14 @@ abstract class Operation extends ASTNode {
         await this.next?.initialize();
     }
     public reset(): void {}
+    /**
+     * True when no further input can change this operation's output (for
+     * example a reached LIMIT).  Upstream source-backed MATCHes use it to
+     * stop reading early.  Must only report permanent saturation.
+     */
+    public get saturated(): boolean {
+        return false;
+    }
     public get results(): Record<string, any>[] {
         throw new Error("Not implemented");
     }

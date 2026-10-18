@@ -25,8 +25,14 @@ class Unwind extends Operation {
         for (let i = 0; i < expression.length; i++) {
             this._value = expression[i];
             await this.next?.run();
+            if (this.next?.saturated) {
+                break;
+            }
         }
         this.next?.reset();
+    }
+    public get saturated(): boolean {
+        return this.next?.saturated ?? false;
     }
     public value(): any {
         return this._value;

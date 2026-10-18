@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from ..parsing.ast_node import ASTNode
 from .node import Node
@@ -30,7 +30,7 @@ class NodeReference(Node):
     def value(self) -> Optional[Any]:
         return self._reference.value() if self._reference else None
 
-    async def next(self) -> AsyncIterator[None]:
+    async def next(self) -> AsyncGenerator[None, None]:
         """Process next using the referenced node's value."""
         ref_value = self._reference.value()
         if ref_value is None:
@@ -42,7 +42,7 @@ class NodeReference(Node):
         else:
             yield
 
-    async def find(self, id_: str, hop: int = 0) -> AsyncIterator[None]:
+    async def find(self, id_: str, hop: int = 0) -> AsyncGenerator[None, None]:
         """Find by ID, only matching if it equals the referenced node's ID."""
         referenced = self._reference.value()
         if referenced is None or id_ != referenced.get('id'):

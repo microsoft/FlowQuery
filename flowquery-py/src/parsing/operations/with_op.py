@@ -16,3 +16,7 @@ class With(Projection):
     async def run(self) -> None:
         if self.next:
             await self.next.run()
+
+    @property
+    def saturated(self) -> bool:
+        return self.next.saturated if self.next else False

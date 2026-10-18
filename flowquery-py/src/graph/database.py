@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ..parsing.ast_node import ASTNode
 from .node import Node
@@ -153,6 +153,98 @@ class Database:
                 f"(:{src}) and (:{tgt}) does not exist"
             )
         physical.invalidate_cache()
+
+    def register_node_source(self, label: str, provider: Any) -> None:
+        """Registers a source provider for a virtual node label."""
+        from .source_provider import SourceCapabilityError, validate_node_provider
+
+        name = f"(:{label})"
+        validate_node_provider(provider, name)
+        existing = Database._nodes.get(label)
+        if existing is not None and existing.is_static:
+            raise SourceCapabilityError(
+                f"Virtual node {name} is static; DROP VIRTUAL {name} first", name
+            )
+        physical = PhysicalNode(None, label)
+        physical.provider = provider
+        Database._nodes[label] = physical
+
+    def register_relationship_source(
+        self,
+        rel_type: str,
+        source_label: Optional[str],
+        target_label: Optional[str],
+        provider: Any,
+    ) -> None:
+        """Registers a source provider for a virtual relationship type."""
+        from .source_provider import SourceCapabilityError, validate_relationship_provider
+
+        name = f"(:{source_label or ''})-[:{rel_type}]->(:{target_label or ''})"
+        validate_relationship_provider(provider, name)
+        key = Database._endpoint_key(source_label, target_label)
+        type_map = Database._relationships.get(rel_type)
+        existing = type_map.get(key) if type_map is not None else None
+        if existing is not None and existing.is_static:
+            raise SourceCapabilityError(
+                f"Virtual relationship {name} is static; DROP VIRTUAL it first", name
+            )
+        physical = PhysicalRelationship()
+        physical.type = rel_type
+        if source_label:
+            physical.source = Node(None, source_label)
+        if target_label:
+            physical.target = Node(None, target_label)
+        physical.provider = provider
+        if type_map is None:
+            type_map = {}
+            Database._relationships[rel_type] = type_map
+        type_map[key] = physical
+
+    def set_node_source_capabilities(
+        self, label: str, capabilities: Optional[Dict[str, Any]]
+    ) -> None:
+        """Opts a statement-defined virtual node into source access (None opts out)."""
+        from .source_provider import SourceCapabilityError, validate_node_provider
+        from .statement_source import StatementSourceProvider
+
+        name = f"(:{label})"
+        physical = Database._nodes.get(label)
+        if physical is None or physical.statement is None:
+            raise SourceCapabilityError(
+                f"Virtual node {name} is not defined by a statement", name
+            )
+        if capabilities is None:
+            physical.provider = None
+            return
+        provider = StatementSourceProvider(physical.virtual, capabilities)
+        validate_node_provider(provider, name)
+        physical.provider = provider
+
+    def set_relationship_source_capabilities(
+        self,
+        rel_type: str,
+        source_label: Optional[str],
+        target_label: Optional[str],
+        capabilities: Optional[Dict[str, Any]],
+    ) -> None:
+        """Opts a statement-defined virtual relationship into source access."""
+        from .source_provider import SourceCapabilityError, validate_relationship_provider
+        from .statement_source import StatementSourceProvider
+
+        name = f"(:{source_label or ''})-[:{rel_type}]->(:{target_label or ''})"
+        type_map = Database._relationships.get(rel_type)
+        key = Database._endpoint_key(source_label, target_label)
+        physical = type_map.get(key) if type_map is not None else None
+        if physical is None or physical.statement is None:
+            raise SourceCapabilityError(
+                f"Virtual relationship {name} is not defined by a statement", name
+            )
+        if capabilities is None:
+            physical.provider = None
+            return
+        provider = StatementSourceProvider(physical.virtual, capabilities)
+        validate_relationship_provider(provider, name)
+        physical.provider = provider
 
     def get_relationship(self, relationship: 'Relationship') -> Optional['PhysicalRelationship']:
         """Gets a relationship from the database (null labels act as wildcards)."""

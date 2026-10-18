@@ -4,6 +4,12 @@ import DataResolver from "../graph/data_resolver";
 import Node from "../graph/node";
 import Pattern from "../graph/pattern";
 import Relationship from "../graph/relationship";
+import SourceContext, {
+    SourceOptions,
+    SourceStats,
+    emptySourceStats,
+} from "../graph/source_context";
+import { INNER_SOURCE_CONTEXT } from "../graph/virtual_statement";
 import ASTNode from "../parsing/ast_node";
 import BindingReference from "../parsing/expressions/binding_reference";
 import ParameterReference from "../parsing/expressions/parameter_reference";
@@ -149,6 +155,20 @@ export interface RunnerOptions {
      * overhead.
      */
     provenance?: boolean;
+    /**
+     * Tuning for backend-aware virtual sources registered with
+     * `registerNodeSource` / `registerRelationshipSource` or opted in with
+     * `setNodeSourceCapabilities` / `setRelationshipSourceCapabilities`
+     * (page size, batch size, cache capacity, start-point reordering and
+     * an external cancellation `signal`).  Ignored by legacy definitions.
+     */
+    sources?: SourceOptions;
+    /**
+     * Additional named parameters.  A `$name` reference resolves to
+     * `parameters[name]` when present, otherwise to `args[name]`.
+     * Statement-backed sources receive their request as `$request`.
+     */
+    parameters?: Record<string, any>;
 }
 
 /**
@@ -202,6 +222,8 @@ class Runner {
     private _metadata: RunnerMetadata;
     private _options: RunnerOptions;
     private _provenance: RowProvenance[] | null = null;
+    private _sourceContext: SourceContext | null = null;
+    private _cancelRequested: boolean = false;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.
@@ -280,17 +302,44 @@ class Runner {
      */
     public async run(): Promise<void> {
         return new Promise<void>(async (resolve, reject) => {
+            const resolver = DataResolver.getInstance();
+            const inherited = (this._options as any)[INNER_SOURCE_CONTEXT] as
+                | SourceContext
+                | null
+                | undefined;
+            const previousContext = resolver.sourceContext;
+            const sink = (this._options as any).rowSink as
+                | ((row: Record<string, any>) => Promise<void> | void)
+                | undefined;
+            const last = this._statements[this._statements.length - 1]?.last;
+            let failed = false;
             try {
                 if (this._isTopLevel) {
-                    DataResolver.getInstance().dataCache = new DataCache(
+                    this._sourceContext = new SourceContext(
+                        this._options.sources ?? {},
                         this._options.provenance === true
                     );
+                    resolver.dataCache = new DataCache(
+                        this._options.provenance === true,
+                        this._sourceContext
+                    );
+                } else {
+                    this._sourceContext = inherited ?? previousContext ?? null;
                 }
+                if (this._cancelRequested) {
+                    this._sourceContext?.cancel();
+                }
+                resolver.sourceContext = this._sourceContext;
                 if (this._options.provenance) {
                     this._provenance = [];
                     this.enableProvenance();
                 }
+                if (sink !== undefined && last instanceof Return) {
+                    last.setRowSink(sink);
+                }
                 for (const stmt of this._statements) {
+                    this._sourceContext?.throwIfCancelled();
+                    Runner.assignSourceContext(stmt.ast, this._sourceContext);
                     this.bindParameters(stmt.ast);
                     // Refresh any stale refreshable bindings referenced
                     // by this statement.  Sub-query evaluation is
@@ -307,11 +356,57 @@ class Runner {
                     await stmt.first.run();
                     await stmt.first.finish();
                 }
-                resolve();
             } catch (e) {
+                failed = true;
                 reject(e);
+            } finally {
+                if (sink !== undefined && last instanceof Return) {
+                    last.setRowSink(null);
+                }
+                resolver.sourceContext = previousContext;
+
+                if (this._isTopLevel && this._sourceContext !== null) {
+                    try {
+                        await this._sourceContext.close();
+                    } catch (e) {
+                        if (!failed) {
+                            failed = true;
+                            reject(e);
+                        }
+                    }
+                }
             }
+            if (!failed) resolve();
         });
+    }
+
+    /**
+     * Cancel a running (or not yet started) query.  In-flight provider
+     * reads are aborted and the query rejects with `QueryCancelledError`.
+     */
+    public cancel(): void {
+        this._cancelRequested = true;
+        if (this._isTopLevel) {
+            this._sourceContext?.cancel();
+        }
+    }
+
+    /**
+     * Provider interaction counters of the last top-level run: calls,
+     * pages, rows, cache hits/misses, batches, materializations,
+     * fallbacks, cancellations, peak buffered rows and start-point plans.
+     */
+    public get sourceStats(): SourceStats {
+        return this._sourceContext?.stats ?? emptySourceStats();
+    }
+
+    private static assignSourceContext(node: ASTNode, ctx: SourceContext | null): void {
+        if (node instanceof Match) {
+            node.sourceContext = ctx;
+        }
+        for (const child of node.getChildren()) {
+            Runner.assignSourceContext(child, ctx);
+        }
     }
 
     /**
@@ -436,8 +531,11 @@ class Runner {
     private bindParameters(node: ASTNode): void {
         if (node instanceof ParameterReference) {
             const args = this._args ?? {};
+            const parameters = this._options.parameters;
             const key = node.name.startsWith("$") ? node.name.substring(1) : node.name;
-            if (key === "args") {
+            if (parameters !== undefined && key in parameters) {
+                node.parameterValue = parameters[key];
+            } else if (key === "args") {
                 node.parameterValue = args;
             } else {
                 node.parameterValue = key in args ? args[key] : null;

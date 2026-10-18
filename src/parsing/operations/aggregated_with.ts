@@ -15,6 +15,12 @@ class AggregatedWith extends With {
     public async run(): Promise<void> {
         await this._group_by.run();
     }
+    public get saturated(): boolean {
+        return false;
+    }
+    public get supportsRowSink(): boolean {
+        return false;
+    }
     /**
      * Forward upstream provenance sources into the embedded `GroupBy`
      * so each group accumulates the union of contributing bindings.

@@ -118,6 +118,11 @@ class Data:
             self.layer(level).current = entry.position
             return True
 
+    @property
+    def records(self) -> List[Dict[str, Any]]:
+        """All records held by this data set."""
+        return self._records
+
     def reset(self) -> None:
         """Reset iteration to the beginning."""
         for layer in self._layers.values():

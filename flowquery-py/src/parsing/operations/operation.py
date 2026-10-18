@@ -44,6 +44,13 @@ class Operation(ASTNode, ABC):
     def is_last(self) -> bool:
         return self._next is None
 
+    @property
+    def saturated(self) -> bool:
+        """True when no further input can change this operation's output
+        (e.g. a reached LIMIT). Upstream source-backed MATCHes use it to
+        stop reading early. Must only report permanent saturation."""
+        return False
+
     async def run(self) -> None:
         """Executes this operation. Must be implemented by subclasses.
 

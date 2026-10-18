@@ -4,7 +4,7 @@ Extends Runner with extensibility features such as function listing
 and plugin registration, keeping the Runner focused on execution.
 """
 
-from typing import List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from ..parsing.functions.function import Function
 from ..parsing.functions.function_factory import FunctionFactory
@@ -66,3 +66,53 @@ class FlowQuery(Runner):
             Function metadata or None
         """
         return get_function_metadata(name.lower())
+
+    @staticmethod
+    def register_node_source(label: str, provider: Any) -> None:
+        """Register a backend-aware node source for ``label``.
+
+        Replaces any existing virtual definition for the label.  The provider
+        exposes ``capabilities`` and ``scan`` (and optionally ``lookup``).
+        """
+        from ..graph.database import Database
+
+        Database.get_instance().register_node_source(label, provider)
+
+    @staticmethod
+    def register_relationship_source(
+        rel_type: str,
+        source_label: Optional[str],
+        target_label: Optional[str],
+        provider: Any,
+    ) -> None:
+        """Register a backend-aware relationship source for
+        ``(:source_label)-[:rel_type]->(:target_label)``."""
+        from ..graph.database import Database
+
+        Database.get_instance().register_relationship_source(
+            rel_type, source_label, target_label, provider
+        )
+
+    @staticmethod
+    def set_node_source_capabilities(
+        label: str, capabilities: Optional[Dict[str, Any]]
+    ) -> None:
+        """Opt a ``CREATE VIRTUAL (:label) AS { ... }`` definition into the
+        source contract with explicit capabilities, or pass ``None`` to opt out."""
+        from ..graph.database import Database
+
+        Database.get_instance().set_node_source_capabilities(label, capabilities)
+
+    @staticmethod
+    def set_relationship_source_capabilities(
+        rel_type: str,
+        source_label: Optional[str],
+        target_label: Optional[str],
+        capabilities: Optional[Dict[str, Any]],
+    ) -> None:
+        """Relationship counterpart of :meth:`set_node_source_capabilities`."""
+        from ..graph.database import Database
+
+        Database.get_instance().set_relationship_source_capabilities(
+            rel_type, source_label, target_label, capabilities
+        )

@@ -3,6 +3,16 @@ import Node from "./node";
 import PhysicalNode from "./physical_node";
 import PhysicalRelationship from "./physical_relationship";
 import Relationship from "./relationship";
+import {
+    NodeSourceCapabilities,
+    NodeSourceProvider,
+    RelationshipSourceCapabilities,
+    RelationshipSourceProvider,
+    SourceCapabilityError,
+    validateNodeProvider,
+    validateRelationshipProvider,
+} from "./source_provider";
+import { StatementSourceProvider } from "./statement_source";
 
 class Database {
     private static instance: Database;
@@ -131,6 +141,103 @@ class Database {
             );
         }
         physical.invalidateCache();
+    }
+    /**
+     * Register a backend-aware node source for `label`, replacing any
+     * existing definition.  The provider is validated eagerly.
+     */
+    public registerNodeSource(label: string, provider: NodeSourceProvider): void {
+        validateNodeProvider(provider, `(:${label})`);
+        const existing = Database._nodes.get(label);
+        if (existing !== undefined && existing.isStatic) {
+            throw new SourceCapabilityError(
+                `Virtual node (:${label}) is static; DROP VIRTUAL (:${label}) first`,
+                `(:${label})`
+            );
+        }
+        const physical = new PhysicalNode(null, label);
+        physical.provider = provider;
+        Database._nodes.set(label, physical);
+    }
+    /**
+     * Register a backend-aware relationship source, replacing any existing
+     * definition for the same type and endpoint labels.
+     */
+    public registerRelationshipSource(
+        type: string,
+        sourceLabel: string | null,
+        targetLabel: string | null,
+        provider: RelationshipSourceProvider
+    ): void {
+        const name = `(:${sourceLabel ?? ""})-[:${type}]->(:${targetLabel ?? ""})`;
+        validateRelationshipProvider(provider, name);
+        const key = Database.endpointKey(sourceLabel, targetLabel);
+        let map = Database._relationships.get(type);
+        if (map?.get(key)?.isStatic) {
+            throw new SourceCapabilityError(
+                `Virtual relationship ${name} is static; DROP VIRTUAL it first`,
+                name
+            );
+        }
+        const physical = new PhysicalRelationship(null, type);
+        physical.source = sourceLabel !== null ? new Node(null, sourceLabel) : null;
+        physical.target = targetLabel !== null ? new Node(null, targetLabel) : null;
+        physical.provider = provider;
+        if (!map) {
+            map = new Map();
+            Database._relationships.set(type, map);
+        }
+        map.set(key, physical);
+    }
+    /**
+     * Opt an existing `CREATE VIRTUAL` node definition into the source
+     * contract (`$request` binding, push-down, streaming...).  Pass `null`
+     * to restore legacy eager loading.  Redefining the label clears it.
+     */
+    public setNodeSourceCapabilities(
+        label: string,
+        capabilities: NodeSourceCapabilities | null
+    ): void {
+        const name = `(:${label})`;
+        const physical = Database._nodes.get(label);
+        if (physical === undefined || physical.statement === null) {
+            throw new SourceCapabilityError(
+                `Virtual node ${name} is not defined by a statement`,
+                name
+            );
+        }
+        if (capabilities === null) {
+            physical.provider = null;
+            return;
+        }
+        const provider = new StatementSourceProvider(physical.virtual, capabilities as any);
+        validateNodeProvider(provider, name);
+        physical.provider = provider;
+    }
+    /** Relationship counterpart of {@link setNodeSourceCapabilities}. */
+    public setRelationshipSourceCapabilities(
+        type: string,
+        sourceLabel: string | null,
+        targetLabel: string | null,
+        capabilities: RelationshipSourceCapabilities | null
+    ): void {
+        const name = `(:${sourceLabel ?? ""})-[:${type}]->(:${targetLabel ?? ""})`;
+        const physical = Database._relationships
+            .get(type)
+            ?.get(Database.endpointKey(sourceLabel, targetLabel));
+        if (physical === undefined || physical.statement === null) {
+            throw new SourceCapabilityError(
+                `Virtual relationship ${name} is not defined by a statement`,
+                name
+            );
+        }
+        if (capabilities === null) {
+            physical.provider = null;
+            return;
+        }
+        const provider = new StatementSourceProvider(physical.virtual, capabilities as any);
+        validateRelationshipProvider(provider, name);
+        physical.provider = provider;
     }
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         const typeMap = Database._relationships.get(relationship.type!);

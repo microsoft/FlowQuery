@@ -614,6 +614,26 @@ class Parser extends BaseParser {
             relationship.target = target;
         }
         this.expectAndSkipWhitespaceAndComments();
+        // Optional `WITH CAPABILITIES { ... }` opts the definition into the
+        // backend-aware source contract (see setNodeSourceCapabilities).
+        let capabilities: AssociativeArray | null = null;
+        if (this.token.isWith()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (
+                !this.token.isIdentifierOrKeyword() ||
+                (this.token.value || "").toUpperCase() !== "CAPABILITIES"
+            ) {
+                throw new Error("Expected CAPABILITIES after WITH in CREATE VIRTUAL");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            capabilities = this.parseAssociativeArray();
+            if (capabilities === null) {
+                throw new Error("Expected capabilities map after WITH CAPABILITIES");
+            }
+            this.expectAndSkipWhitespaceAndComments();
+        }
         if (!this.token.isAs()) {
             throw new Error("Expected AS");
         }
@@ -685,9 +705,15 @@ class Parser extends BaseParser {
         }
         let create: CreateNode | CreateRelationship;
         if (relationship !== null) {
-            create = new CreateRelationship(relationship, query, isStatic, refreshEveryMs);
+            create = new CreateRelationship(
+                relationship,
+                query,
+                isStatic,
+                refreshEveryMs,
+                capabilities
+            );
         } else {
-            create = new CreateNode(node, query, isStatic, refreshEveryMs);
+            create = new CreateNode(node, query, isStatic, refreshEveryMs, capabilities);
         }
         return create;
     }

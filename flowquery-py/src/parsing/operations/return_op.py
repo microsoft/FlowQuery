@@ -1,7 +1,8 @@
 """Represents a RETURN operation that produces the final query results."""
 
 import copy
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+import inspect
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from ...compute.provenance import (
     ProvenanceSource,
@@ -37,6 +38,27 @@ class Return(Projection):
         self._provenance_sources: Optional[List[ProvenanceSource]] = None
         self._provenance_sink: Optional[List[RowProvenance]] = None
         self._provenance_rows: List[RowProvenance] = []
+        self._row_sink: Optional[Callable[[Dict[str, Any]], Any]] = None
+
+    @property
+    def saturated(self) -> bool:
+        return (
+            self._order_by is None
+            and self._limit is not None
+            and self._limit.is_limit_reached
+        )
+
+    @property
+    def supports_row_sink(self) -> bool:
+        """Internal: whether rows can be handed to a sink as they are produced."""
+        return self._order_by is None and self._provenance_sink is None
+
+    def set_row_sink(self, sink: Optional[Callable[[Dict[str, Any]], Any]]) -> None:
+        """Internal: deliver each projected row to ``sink`` instead of
+        buffering it (used to stream statement-backed sources).  Pass
+        ``None`` to restore buffering.
+        """
+        self._row_sink = sink
 
     @property
     def where(self) -> Any:
@@ -107,6 +129,13 @@ class Return(Projection):
         # Capture sort-key values while expression bindings are still live.
         if self._order_by is not None:
             self._order_by.capture_sort_keys()
+        if self._row_sink is not None:
+            if self._limit is not None:
+                self._limit.increment()
+            sunk = self._row_sink(dict(record))
+            if inspect.isawaitable(sunk):
+                await sunk
+            return
         self._results.append(record)
         if self._provenance_sink is not None:
             segment = self._snapshot_provenance()

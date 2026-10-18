@@ -274,6 +274,147 @@ The same chain is reflected statically in `info.sources` so callers
 can introspect the upstream dependency graph without running the
 query.
 
+## Backend-Aware Virtual Sources
+
+By default a virtual definition is loaded eagerly: its sub-query runs
+once per query and all rows are held in memory. For large or remote
+backends, a **source provider** lets FlowQuery read only what a pattern
+needs. This is opt-in: existing `CREATE VIRTUAL` definitions behave
+exactly as before.
+
+The simplest way to write a provider is to subclass `NodeSource` or
+`RelationshipSource` and implement `scan(request, context)`. Implement
+`lookup` (nodes by id) or `expand` (relationships by `left_id`/`right_id`)
+when the backend can fetch selectively; the base class then declares the
+matching capability for you. `version` defaults to the current contract
+version, and capability keys may be written in snake_case
+(`max_batch_size`, `string_ordering`). A method may return a list of
+rows, an awaitable list, or an (async) iterable of pages.
+
+The `request` is a `SourceRequest`: a dict with the same camelCase keys
+as the TypeScript implementation (`request["pageSize"]`) that also
+accepts snake_case keys (`request["page_size"]`) and attribute access
+(`request.ids`, `request.side`, `request.predicate`, `request.page_size`).
+
+```python
+from flowquery import FlowQuery, NodeSource, RelationshipSource, cursor_pages
+
+class People(NodeSource):
+    capabilities = {
+        "cacheable": True,       # identical reads within one query may be cached
+        "max_batch_size": 50,    # ids per lookup/expand request
+        "predicates": {"operators": ["eq", "in", "gt", "gte", "lt", "lte"]},
+    }
+
+    def scan(self, request, context):
+        async def fetch(cursor):
+            page = await api.people(filter=request.predicate, cursor=cursor)
+            return {"rows": page.rows, "cursor": page.next_cursor}
+        return cursor_pages(fetch)
+
+    async def lookup(self, request, context):  # declares "lookup": True
+        return await api.people_by_ids(request.ids)
+
+class Knows(RelationshipSource):
+    async def scan(self, request, context):
+        return await api.all_knows()
+
+    async def expand(self, request, context):  # declares both expand sides
+        key = "from" if request.side == "left" else "to"
+        return await api.knows(**{key: request.ids})
+
+FlowQuery.register_node_source("Person", People())
+FlowQuery.register_relationship_source("KNOWS", "Person", "Person", Knows())
+
+fq = FlowQuery("MATCH (a:Person {id: 7})-[:KNOWS]->(b:Person) RETURN b.name LIMIT 10")
+await fq.run()
+print(fq.source_stats)  # calls, pages, rows, cacheHits, batches, plans...
+```
+
+Subclassing is optional: any object with a `capabilities` dict and a
+`scan` method works, and `SourceProvider` is a `typing.Protocol`
+describing that shape.
+
+The engine then loads correlated rows in batches instead of reading
+every person and relationship:
+
+- **Correlated loading and batching.** It issues id lookups, expands per
+  page of anchor nodes, and makes batched lookups for target nodes.
+- **Selective start points.** A chain may start from its more selective
+  end. The decision is recorded in `source_stats["plans"]`, and it can
+  change result order when there is no `ORDER BY`.
+- **Predicate push-down.** Pattern properties and `AND`-ed `WHERE`
+  comparisons (`=`, `<`, `<=`, `>`, `>=`, `IN`) against literals or
+  parameters are sent as `request["predicate"]`.
+- **Streaming with early stop under `LIMIT`.** Reading stops once the
+  limit is reached and the provider's iterator is closed.
+- **Query-scoped caching.**
+- **Cancellation.** Call `runner.cancel()` or pass
+  `SourceOptions(signal=...)` (an `asyncio.Event` or `SourceSignal`).
+  The query raises `QueryCancelledError`.
+- **Read contexts.** Optional `open_read_context()` and
+  `close_read_context(snapshot)` methods are called once per query.
+
+Providers may return a **superset**, because FlowQuery re-checks every
+row. `matches_predicate(predicate, row)` is a reference implementation
+of the predicate semantics.
+
+Errors are reported through typed exceptions:
+
+- `SourceCapabilityError`: an invalid declaration, raised at
+  registration.
+- `SourceResponseError`: malformed pages or a repeated cursor.
+- `SourceError`: any other provider failure.
+
+A provider may raise `SourceUnsupportedError` from `lookup`/`expand` to
+fall back to a scan.
+
+Query-level tuning goes in `RunnerOptions(sources=SourceOptions(...))`:
+`page_size` (256), `max_batch_size` (100), `cache_capacity` (10000),
+`max_prefetch_rows` (1024) and `reorder` (`True`).
+
+**In-memory sources.** `in_memory_node_source(rows)` and
+`in_memory_relationship_source(rows)` are ready-made providers over
+lists. They support lookup, expansion from both sides, every predicate
+operator and paging, which makes them handy for tests, examples and
+small reference data. Keyword options are `cacheable` (default `True`)
+and `max_batch_size`.
+
+```python
+from flowquery import in_memory_node_source, in_memory_relationship_source
+
+FlowQuery.register_node_source(
+    "Person", in_memory_node_source([{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bob"}])
+)
+FlowQuery.register_relationship_source(
+    "KNOWS", "Person", "Person", in_memory_relationship_source([{"left_id": 1, "right_id": 2}])
+)
+```
+
+**Statement-backed sources.** A `CREATE VIRTUAL` definition can opt into
+the same contract declaratively with a `WITH CAPABILITIES { ... }` clause
+between the pattern and `AS`. Each request runs its sub-query with
+`$request` bound to the request (`operation`, `label`/`type`, `ids`,
+`side`, `predicate`, `pageSize`):
+
+```python
+await FlowQuery("""
+    CREATE VIRTUAL (:Ticket) WITH CAPABILITIES {lookup: true, streaming: true} AS {
+        LOAD JSON FROM f"https://api.example.com/tickets?ids={join(coalesce($request.ids, []), ',')}" AS t
+        RETURN t.id AS id, t.title AS title
+    }
+""").run()
+```
+
+The map takes the same (camelCase) keys as the capabilities dict;
+`version` defaults to the current contract version. Invalid capabilities
+reject the whole definition. Redefining the label without
+`WITH CAPABILITIES`, or deleting it, restores eager loading. The same
+opt-in is available programmatically with
+`FlowQuery.set_node_source_capabilities(label, capabilities)` and
+`FlowQuery.set_relationship_source_capabilities(...)`; pass `None` to
+opt out.
+
 ## Documentation
 
 - [Language Reference](https://github.com/microsoft/FlowQuery#language-reference) (clauses, expressions, functions, graph operations, and more)

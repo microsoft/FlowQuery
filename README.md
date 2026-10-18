@@ -935,6 +935,107 @@ MATCH (t:Todo) WHERE t.id = 3 RETURN t.title
 
 `$`-prefixed identifiers are **only** allowed inside virtual definitions. Non-equality operators in `WHERE` (`>`, `<`, `CONTAINS`, etc.) are **not** extracted as pass-down parameters. `OR` predicates are also not extracted.
 
+#### Backend-Aware Virtual Sources
+
+By default a virtual definition is loaded eagerly: its sub-query runs once per query and all rows are held in memory. For large or remote backends, a **source provider** lets FlowQuery read only what a pattern needs. This is opt-in: existing `CREATE VIRTUAL` definitions behave exactly as before.
+
+A provider declares versioned capabilities and implements a required `scan` plus optional `lookup` (nodes by id) and `expand` (relationships by `left_id`/`right_id`):
+
+```typescript
+import FlowQuery from "flowquery";
+import { cursorPages, matchesPredicate } from "flowquery/extensibility";
+
+FlowQuery.registerNodeSource("Person", {
+    capabilities: {
+        version: 1,
+        lookup: true, // implements lookup()
+        cacheable: true, // identical reads within one query may be cached
+        maxBatchSize: 50, // ids per lookup/expand request
+        predicates: { operators: ["eq", "in", "gt", "gte", "lt", "lte"] },
+    },
+    // Any SourceResult: an array, a promise of an array, or a (async) iterable of pages.
+    scan: (req, ctx) =>
+        cursorPages((cursor) => api.people({ filter: req.predicate, cursor, signal: ctx.signal })),
+    lookup: (req) => api.peopleByIds(req.ids),
+});
+
+FlowQuery.registerRelationshipSource("KNOWS", "Person", "Person", {
+    capabilities: { version: 1, expand: { left: true, right: true } },
+    scan: () => api.allKnows(),
+    expand: (req) => api.knows({ [req.side === "left" ? "from" : "to"]: req.ids }),
+});
+
+const fq = new FlowQuery("MATCH (a:Person {id: 7})-[:KNOWS]->(b:Person) RETURN b.name LIMIT 10");
+await fq.run();
+console.log(fq.sourceStats); // calls, pages, rows, cache hits, batches, plans...
+```
+
+With these capabilities, the query above issues a `lookup` for id 7, one batched `expand` for its outgoing relationships and batched `lookup`s for the targets, instead of loading every person and relationship. What the engine does with a provider:
+
+- **Correlated loading and batching.** Relationships are expanded per page of anchor nodes, and target nodes are fetched with batched lookups. Each request carries at most `min(sources.maxBatchSize, capabilities.maxBatchSize)` distinct ids.
+- **Selective start points.** A chain such as `(a)-[:R]->(b)-[:R]->(c {id: 3})` may start from the more selective end (a bound reference, an id lookup or a pushable predicate). The decision is recorded in `sourceStats.plans`. This can change result order, which is never guaranteed without `ORDER BY`.
+- **Predicate push-down.** Pattern property constraints and top-level `AND`-ed `WHERE` comparisons (`=`, `<`, `<=`, `>`, `>=`, `IN`) on a node's properties, compared against literals or parameters, are sent as `request.predicate` when the capabilities allow it. The legacy `$args` map is still sent as `request.args`.
+- **Streaming and early termination.** Pages are consumed as they arrive. Once a `LIMIT` without `ORDER BY` or aggregation is satisfied, reading stops: the provider's iterator is closed and `ctx.signal` is aborted when the query ends.
+- **Query-scoped caching.** Reads of `cacheable` sources are cached for the duration of one query only. The cache is bounded by `sources.cacheCapacity` rows.
+- **Cancellation.** Call `runner.cancel()`, or pass `sources: { signal }`. In-flight reads are aborted and `run()` rejects with `QueryCancelledError`.
+- **Read contexts.** An optional `openReadContext()`/`closeReadContext(snapshot)` pair is called once per query, which is useful for snapshots or transactions. The value is available as `ctx.snapshot`.
+
+Providers may return a **superset**: FlowQuery always re-checks every row. Property constraints, anchor ids and the `WHERE` clause are evaluated as usual, so a provider may ignore predicates, ids or page sizes and still be correct. Predicates are never pushed for `null`, booleans, non-finite numbers, non-primitive `IN` items or into `OPTIONAL MATCH`. String ranges are pushed only when `stringOrdering: "binary"` is declared. `matchesPredicate(predicate, row)` is a reference implementation of these semantics for in-memory providers.
+
+Errors are reported through typed exceptions:
+
+- `SourceCapabilityError`: an invalid declaration, raised at registration.
+- `SourceResponseError`: malformed pages or a repeated cursor.
+- `SourceError`: any other provider failure, wrapped with the source name.
+
+A provider may throw `SourceUnsupportedError` from `lookup`/`expand` to fall back to a scan.
+
+Query-level tuning goes in `RunnerOptions.sources`. The defaults are:
+
+- `pageSize: 256`
+- `maxBatchSize: 100`
+- `cacheCapacity: 10000`
+- `maxPrefetchRows: 1024`
+- `reorder: true`
+
+**In-memory sources.** `inMemoryNodeSource(rows)` and `inMemoryRelationshipSource(rows)` are ready-made providers over arrays. They support lookup, expansion from both sides, every predicate operator and paging, which makes them handy for tests, examples and small reference data. Options are `{ cacheable?: boolean, maxBatchSize?: number }`.
+
+```typescript
+import { inMemoryNodeSource, inMemoryRelationshipSource } from "flowquery/extensibility";
+
+FlowQuery.registerNodeSource(
+    "Person",
+    inMemoryNodeSource([
+        { id: 1, name: "Ada" },
+        { id: 2, name: "Bob" },
+    ])
+);
+FlowQuery.registerRelationshipSource(
+    "KNOWS",
+    "Person",
+    "Person",
+    inMemoryRelationshipSource([{ left_id: 1, right_id: 2 }])
+);
+```
+
+**Statement-backed sources.** A `CREATE VIRTUAL` definition can opt into the same contract declaratively with a `WITH CAPABILITIES { ... }` clause between the pattern and `AS`. Each request then runs the sub-query with `$request` bound to the request: `operation`, `label`/`type`, `ids`, `side`, `predicate` and `pageSize`.
+
+```cypher
+CREATE VIRTUAL (:Ticket) WITH CAPABILITIES {lookup: true, streaming: true} AS {
+    LOAD JSON FROM f"https://api.example.com/tickets?ids={join(coalesce($request.ids, []), ',')}" AS t
+    RETURN t.id AS id, t.title AS title
+}
+
+CREATE VIRTUAL (:Ticket)-[:BLOCKS]-(:Ticket)
+WITH CAPABILITIES {expand: {left: true}, maxBatchSize: 50, predicates: {operators: ['eq', 'in']}} AS {
+    ...
+}
+```
+
+The map takes the same keys as the capabilities object; `version` defaults to the current contract version. Invalid capabilities reject the whole definition. With `streaming: true`, eligible sub-queries (no `ORDER BY` or aggregation in the final `RETURN`) hand rows over page by page. Redefining the label without `WITH CAPABILITIES`, or deleting it, restores eager loading.
+
+The same opt-in is available programmatically with `FlowQuery.setNodeSourceCapabilities(label, capabilities)` and `FlowQuery.setRelationshipSourceCapabilities(type, sourceLabel, targetLabel, capabilities)`; pass `null` to opt out.
+
 ### Reserved Keywords as Identifiers
 
 Reserved words (`return`, `with`, `from`, `to`, etc.) can be used as:

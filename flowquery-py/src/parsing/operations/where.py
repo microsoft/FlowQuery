@@ -44,3 +44,7 @@ class Where(Operation):
 
     def value(self) -> Any:
         return self.expression.value()
+
+    @property
+    def saturated(self) -> bool:
+        return self.next.saturated if self.next else False

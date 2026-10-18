@@ -23,6 +23,9 @@ class Limit extends Operation {
         this.count++;
         await this.next?.run();
     }
+    public get saturated(): boolean {
+        return this.count >= this.limit;
+    }
     public reset(): void {
         this.count = 0;
     }

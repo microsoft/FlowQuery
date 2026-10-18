@@ -1,6 +1,8 @@
 import Database from "../../graph/database";
 import Node from "../../graph/node";
+import { SOURCE_CONTRACT_VERSION } from "../../graph/source_provider";
 import ASTNode from "../ast_node";
+import AssociativeArray from "../data_structures/associative_array";
 import Operation from "./operation";
 
 class CreateNode extends Operation {
@@ -8,17 +10,20 @@ class CreateNode extends Operation {
     private _statement: ASTNode | null = null;
     private _isStatic: boolean = false;
     private _refreshEveryMs: number | null = null;
+    private _capabilities: AssociativeArray | null = null;
     constructor(
         node: Node,
         statement: ASTNode,
         isStatic: boolean = false,
-        refreshEveryMs: number | null = null
+        refreshEveryMs: number | null = null,
+        capabilities: AssociativeArray | null = null
     ) {
         super();
         this._node = node;
         this._statement = statement;
         this._isStatic = isStatic;
         this._refreshEveryMs = refreshEveryMs;
+        this._capabilities = capabilities;
     }
     public get node(): Node | null {
         return this._node;
@@ -32,6 +37,11 @@ class CreateNode extends Operation {
     public get refreshEveryMs(): number | null {
         return this._refreshEveryMs;
     }
+    /** Source capabilities declared with `WITH CAPABILITIES { ... }`, if any. */
+    public get capabilities(): Record<string, any> | null {
+        if (this._capabilities === null) return null;
+        return { version: SOURCE_CONTRACT_VERSION, ...this._capabilities.value() };
+    }
     public run(): Promise<void> {
         return new Promise(async (resolve, reject) => {
             try {
@@ -39,7 +49,16 @@ class CreateNode extends Operation {
                     throw new Error("Node is null");
                 }
                 const db: Database = Database.getInstance();
+                const capabilities = this.capabilities;
                 db.addNode(this._node, this._statement!, this._isStatic, this._refreshEveryMs);
+                if (capabilities !== null) {
+                    try {
+                        db.setNodeSourceCapabilities(this._node.label!, capabilities as any);
+                    } catch (error) {
+                        db.removeNode(this._node);
+                        throw error;
+                    }
+                }
                 resolve();
             } catch (error) {
                 reject(error);

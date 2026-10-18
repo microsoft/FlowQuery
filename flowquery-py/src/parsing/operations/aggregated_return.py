@@ -17,6 +17,14 @@ class AggregatedReturn(Return):
     async def run(self) -> None:
         await self._group_by.run()
 
+    @property
+    def saturated(self) -> bool:
+        return False
+
+    @property
+    def supports_row_sink(self) -> bool:
+        return False
+
     def add_provenance_source(self, source: ProvenanceSource) -> None:
         """Provenance sources registered on an aggregate RETURN are
         folded into the active group's dedup maps rather than

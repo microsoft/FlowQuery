@@ -37,6 +37,9 @@ class Where extends Operation {
             await this.next?.run();
         }
     }
+    public get saturated(): boolean {
+        return this.next?.saturated ?? false;
+    }
     public value(): any {
         return this.expression.value();
     }

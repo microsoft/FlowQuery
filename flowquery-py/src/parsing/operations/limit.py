@@ -29,5 +29,9 @@ class Limit(Operation):
         if self.next:
             await self.next.run()
 
+    @property
+    def saturated(self) -> bool:
+        return self._count >= self._limit
+
     def reset(self) -> None:
         self._count = 0

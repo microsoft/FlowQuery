@@ -3,9 +3,17 @@ import Database from "./database";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import NodeReference from "./node_reference";
+import PhysicalNode from "./physical_node";
 import PhysicalRelationship from "./physical_relationship";
 import Relationship from "./relationship";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
+import {
+    NodeAccess,
+    NodeSourceAccess,
+    RelationshipAccess,
+    RelationshipSourceAccess,
+} from "./source_access";
+import type SourceContext from "./source_context";
 import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
 /**
@@ -16,6 +24,7 @@ import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 class DataResolver {
     private static instance: DataResolver;
     private _dataCache: DataCache = new DataCache();
+    private _sourceContext: SourceContext | null = null;
 
     public static getInstance(): DataResolver {
         if (!DataResolver.instance) {
@@ -29,6 +38,67 @@ class DataResolver {
      */
     public set dataCache(cache: DataCache) {
         this._dataCache = cache;
+    }
+    /** Source context of the most recently started top-level query. */
+    public get sourceContext(): SourceContext | null {
+        return this._sourceContext;
+    }
+    public set sourceContext(ctx: SourceContext | null) {
+        this._sourceContext = ctx;
+    }
+
+    private static deferrable(
+        physical: PhysicalNode | PhysicalRelationship,
+        ctx: SourceContext
+    ): boolean {
+        return physical.provider !== null && !(ctx.provenance && physical.statement !== null);
+    }
+
+    /**
+     * Returns provider-backed access for an element when every physical
+     * definition it can match is backed by a source provider; otherwise
+     * `null`, and the element is loaded eagerly through {@link getData}.
+     */
+    public getAccess(
+        element: Node | Relationship,
+        ctx: SourceContext
+    ): NodeAccess | RelationshipAccess | null {
+        const db = Database.getInstance();
+        if (element instanceof Node) {
+            let candidates: [string, PhysicalNode][];
+            if (element.labels.length === 0) {
+                candidates = Array.from(db.nodes.entries());
+            } else {
+                candidates = [];
+                for (const label of element.labels) {
+                    const physical = db.nodes.get(label);
+                    if (physical !== undefined) candidates.push([label, physical]);
+                }
+            }
+            if (
+                candidates.length === 0 ||
+                !candidates.every(([, p]) => DataResolver.deferrable(p, ctx))
+            ) {
+                return null;
+            }
+            return new NodeSourceAccess(
+                ctx,
+                candidates.map(([label, p]) => ({ label, provider: p.provider! }))
+            );
+        }
+        const entries = this.getRelationshipEntries(element, db);
+        if (entries.length === 0 || !entries.every(([, p]) => DataResolver.deferrable(p, ctx))) {
+            return null;
+        }
+        return new RelationshipSourceAccess(
+            ctx,
+            entries.map(([type, p]) => ({
+                type,
+                sourceLabel: p.source?.label ?? null,
+                targetLabel: p.target?.label ?? null,
+                provider: p.provider!,
+            }))
+        );
     }
 
     public async schema(): Promise<Record<string, any>[]> {

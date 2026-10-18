@@ -24,6 +24,27 @@ from .compute.runner import (
     RunnerMetadata,
     RunnerOptions,
 )
+from .graph.source_context import SourceOptions
+from .graph.source_provider import (
+    PREDICATE_OPERATORS,
+    SOURCE_CONTRACT_VERSION,
+    NodeSource,
+    QueryCancelledError,
+    RelationshipSource,
+    SourceCapabilityError,
+    SourceError,
+    SourceProvider,
+    SourceReadContext,
+    SourceRequest,
+    SourceResponseError,
+    SourceResult,
+    SourceSignal,
+    SourceUnsupportedError,
+    cursor_pages,
+    in_memory_node_source,
+    in_memory_relationship_source,
+    matches_predicate,
+)
 from .io.command_line import CommandLine
 from .parsing.functions.aggregate_function import AggregateFunction
 from .parsing.functions.async_function import AsyncFunction
@@ -80,5 +101,24 @@ __all__ = [
     "FunctionDef",
     "FunctionMetadata",
     "FunctionCategory",
+    "SOURCE_CONTRACT_VERSION",
+    "PREDICATE_OPERATORS",
+    "SourceOptions",
+    "SourceSignal",
+    "SourceReadContext",
+    "SourceError",
+    "SourceCapabilityError",
+    "SourceResponseError",
+    "SourceUnsupportedError",
+    "QueryCancelledError",
+    "SourceProvider",
+    "SourceRequest",
+    "SourceResult",
+    "NodeSource",
+    "RelationshipSource",
+    "cursor_pages",
+    "matches_predicate",
+    "in_memory_node_source",
+    "in_memory_relationship_source",
 ]
 

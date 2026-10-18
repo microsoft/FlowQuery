@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 # uses an index signature ``[key: string]: any``.
 RelationshipMatchRecord = Dict[str, Any]
 
+_UNSET: Any = object()
+
 
 class RelationshipMatchCollector:
     """Collects relationship matches during graph traversal."""
@@ -23,17 +25,45 @@ class RelationshipMatchCollector:
         self._node_ids: List[str] = []
         self._node_id_set: set[str] = set()
 
-    def push(self, relationship: 'Relationship', traversal_id: str = "") -> RelationshipMatchRecord:
-        """Push a new match onto the collector."""
+    def push(
+        self,
+        relationship: 'Relationship',
+        traversal_id: str = "",
+        record: Any = _UNSET,
+    ) -> RelationshipMatchRecord:
+        """Push a new match onto the collector.
+
+        Provider-backed relationships supply the bound row explicitly (or
+        expose it via ``current_record``) instead of a data cursor.
+        """
         start_node_value = relationship.source.value() if relationship.source else None
         rel_data = relationship.get_data()
-        current_record = rel_data.current() if rel_data else None
+        explicit = record is not _UNSET or relationship.access is not None
+        current_record: Any
+        if explicit:
+            current_record = (
+                record
+                if record is not _UNSET and record is not None
+                else relationship.current_record(0)
+            )
+        else:
+            current_record = rel_data.current() if rel_data else None
         default_type = relationship.type or ""
         if current_record and isinstance(current_record, dict):
             actual_type = current_record.get('_type', default_type)
         else:
             actual_type = default_type
-        rel_props: Dict[str, Any] = (rel_data.properties() or {}) if rel_data else {}
+        rel_props: Dict[str, Any]
+        if explicit:
+            rel_props = {}
+            if isinstance(current_record, dict):
+                rel_props = {
+                    k: v
+                    for k, v in current_record.items()
+                    if k not in ("left_id", "right_id", "_type")
+                }
+        else:
+            rel_props = (rel_data.properties() or {}) if rel_data else {}
         match: RelationshipMatchRecord = {
             **rel_props,
             "type": actual_type,

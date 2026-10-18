@@ -1,13 +1,14 @@
 """Executes a FlowQuery statement and retrieves the results."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..graph.bindings import Bindings
 from ..graph.data_cache import DataCache
 from ..graph.data_resolver import DataResolver
 from ..graph.node import Node as GraphNode
 from ..graph.relationship import Relationship as GraphRelationship
+from ..graph.source_context import SourceContext, SourceOptions, empty_source_stats
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.binding_reference import BindingReference
 from ..parsing.expressions.parameter_reference import ParameterReference
@@ -62,6 +63,21 @@ class RunnerOptions:
     """
 
     provenance: bool = False
+    #: Tuning for backend-aware virtual sources registered with
+    #: ``register_node_source`` / ``register_relationship_source`` or opted
+    #: in with ``set_node_source_capabilities`` /
+    #: ``set_relationship_source_capabilities`` (page size, batch size,
+    #: cache capacity, start-point reordering and an external cancellation
+    #: ``signal``).  Ignored by legacy definitions.
+    sources: Optional[SourceOptions] = None
+    #: Additional named parameters.  A ``$name`` reference resolves to
+    #: ``parameters[name]`` when present, otherwise to ``args[name]``.
+    #: Statement-backed sources receive their request as ``$request``.
+    parameters: Optional[Dict[str, Any]] = None
+    #: Internal: receives every row emitted by the final RETURN.
+    row_sink: Optional[Callable[[Dict[str, Any]], Any]] = field(default=None, repr=False)
+    #: Internal: source context inherited by statement-backed sources.
+    inner_source_context: Optional[SourceContext] = field(default=None, repr=False)
 
 
 @dataclass
@@ -195,6 +211,8 @@ class Runner:
         self._args = args
         self._options = options or RunnerOptions()
         self._provenance: Optional[List[RowProvenance]] = None
+        self._source_context: Optional[SourceContext] = None
+        self._cancel_requested = False
 
         if ast is not None:
             self._is_top_level = False
@@ -236,7 +254,68 @@ class Runner:
 
         Raises:
             Exception: If an error occurs during execution
+            QueryCancelledError: If the run was cancelled
         """
+        resolver = DataResolver.get_instance()
+        inherited = self._options.inner_source_context
+        previous_context = resolver.source_context
+        sink = self._options.row_sink
+        last = self._statements[-1].last if self._statements else None
+        failed = False
+        try:
+            await self._run_statements(resolver, inherited, previous_context, sink, last)
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            if sink is not None and isinstance(last, Return):
+                last.set_row_sink(None)
+            resolver.source_context = previous_context
+            if self._is_top_level and self._source_context is not None:
+                try:
+                    await self._source_context.close()
+                except Exception:
+                    if not failed:
+                        raise
+
+    def cancel(self) -> None:
+        """Cancel a running (or not yet started) query.
+
+        In-flight provider reads are aborted and :meth:`run` raises
+        :class:`QueryCancelledError`.
+        """
+        self._cancel_requested = True
+        if self._is_top_level and self._source_context is not None:
+            self._source_context.cancel()
+
+    @property
+    def source_stats(self) -> Dict[str, Any]:
+        """Provider interaction counters of the last top-level run.
+
+        Keys: ``calls`` (``scan``/``lookup``/``expand``), ``pages``,
+        ``rows``, ``cacheHits``, ``cacheMisses``, ``batches``,
+        ``materializations``, ``fallbacks``, ``cancellations``,
+        ``peakBufferedRows`` and ``plans``.
+        """
+        if self._source_context is not None:
+            return self._source_context.stats
+        return empty_source_stats()
+
+    @staticmethod
+    def _assign_source_context(node: ASTNode, ctx: Optional[SourceContext]) -> None:
+        if isinstance(node, Match):
+            node.source_context = ctx
+        for child in node.get_children():
+            Runner._assign_source_context(child, ctx)
+
+    async def _run_statements(
+        self,
+        resolver: DataResolver,
+        inherited: Optional[SourceContext],
+        previous_context: Optional[SourceContext],
+        sink: Optional[Callable[[Dict[str, Any]], Any]],
+        last: Optional[Operation],
+    ) -> None:
         if self._is_top_level:
             # NOTE: We intentionally do NOT clear the virtual-source
             # registry here.  Plain ``dict`` records aren't weakref-able
@@ -249,14 +328,29 @@ class Runner:
             # :func:`id`, so re-used object ids naturally overwrite
             # stale entries; in practice the map's footprint stays
             # bounded by the live record set.
-            DataResolver.get_instance().data_cache = DataCache(
-                provenance=self._options.provenance
+            self._source_context = SourceContext(
+                self._options.sources or SourceOptions(),
+                self._options.provenance is True,
             )
+            resolver.data_cache = DataCache(
+                provenance=self._options.provenance,
+                source_context=self._source_context,
+            )
+        else:
+            self._source_context = inherited or previous_context
+        if self._cancel_requested and self._source_context is not None:
+            self._source_context.cancel()
+        resolver.source_context = self._source_context
         if self._options.provenance:
             self._provenance = []
             self._enable_provenance()
+        if sink is not None and isinstance(last, Return):
+            last.set_row_sink(sink)
         bindings_singleton = Bindings.get_instance()
         for stmt in self._statements:
+            if self._source_context is not None:
+                self._source_context.throw_if_cancelled()
+            Runner._assign_source_context(stmt.ast, self._source_context)
             self._bind_parameters(stmt.ast)
             # Refresh any stale refreshable bindings referenced by
             # this statement.  Sub-query evaluation is async but
@@ -378,8 +472,11 @@ class Runner:
         """
         if isinstance(node, ParameterReference):
             args = self._args or {}
+            parameters = self._options.parameters
             key = node.name[1:] if node.name.startswith("$") else node.name
-            if key == "args":
+            if parameters is not None and key in parameters:
+                node.parameter_value = parameters[key]
+            elif key == "args":
                 node.parameter_value = args
             else:
                 node.parameter_value = args.get(key)

@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - "src/**"
+      - "flowquery-py/src/**"
 
 permissions:
   contents: write
@@ -69,8 +70,12 @@ jobs:
           npm version "${NEW_VERSION}" --no-git-tag-version
           cd ..
 
+          # The TypeScript and Python packages are versioned in lockstep.
+          sed -i "s/^version = \".*\"/version = \"${NEW_VERSION}\"/" flowquery-py/pyproject.toml
+          grep -q "^version = \"${NEW_VERSION}\"" flowquery-py/pyproject.toml
+
           # Commit the version bump
-          git add package.json package-lock.json flowquery-vscode/package.json
+          git add package.json package-lock.json flowquery-vscode/package.json flowquery-py/pyproject.toml
           git commit --no-verify -m "chore: bump version to ${NEW_VERSION} [skip ci]"
 
           # Include any changes from formatters/linters in the commit
@@ -94,6 +99,10 @@ jobs:
 
             sleep 5
           done
+
+          # Tag the release on the pushed bump commit so the PyPI and npm
+          # publish workflows build exactly this version.
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Package TypeScript library
         run: |
@@ -136,6 +145,7 @@ jobs:
         with:
           token: ${{ secrets.PAT_TOKEN }}
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ steps.version.outputs.sha }}
           name: Release ${{ steps.version.outputs.tag }}
           body: |
             Automated release from main branch

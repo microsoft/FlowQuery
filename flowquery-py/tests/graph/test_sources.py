@@ -8,16 +8,24 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
+from flowquery.compute.flowquery import FlowQuery
 from flowquery.compute.runner import Runner, RunnerOptions
 from flowquery.graph.database import Database
 from flowquery.graph.source_context import SourceOptions
 from flowquery.graph.source_provider import (
+    NodeSource,
     QueryCancelledError,
+    RelationshipSource,
     SourceCapabilityError,
+    SourceProvider,
+    SourceRequest,
     SourceResponseError,
     SourceUnsupportedError,
     cursor_pages,
+    in_memory_node_source,
+    in_memory_relationship_source,
     matches_predicate,
+    normalize_capabilities,
 )
 
 db = Database.get_instance()
@@ -848,3 +856,223 @@ class TestStatementBackedSources:
         await Runner(_definition("StmtRe")).run()
         _, runner = await query("MATCH (a:StmtRe) RETURN a.id")
         assert runner.source_stats["calls"]["scan"] == 0
+
+
+_PEOPLE_BODY = (
+    f"{{ UNWIND {literal(PEOPLE)} AS r WITH r, $request AS req "
+    "WHERE req IS NULL OR req.operation = 'scan' OR r.id IN req.ids "
+    "RETURN r.id AS id, r.name AS name, req.operation AS op }"
+)
+_KNOWS_BODY = (
+    f"{{ UNWIND {literal(KNOWS)} AS r WITH r, $request AS req "
+    "WHERE req IS NULL OR req.operation = 'scan' "
+    "OR (req.side = 'left' AND r.left_id IN req.ids) "
+    "OR (req.side = 'right' AND r.right_id IN req.ids) "
+    "RETURN r.left_id AS left_id, r.right_id AS right_id }"
+)
+
+
+class TestDeclarativeCapabilities:
+    """``CREATE VIRTUAL ... WITH CAPABILITIES { ... } AS { ... }``."""
+
+    async def test_opts_nodes_and_relationships_in(self) -> None:
+        await Runner(
+            f"CREATE VIRTUAL (:DeclP) WITH CAPABILITIES {{lookup: true, streaming: true}} AS {_PEOPLE_BODY}"
+        ).run()
+        await Runner(
+            "CREATE VIRTUAL (:DeclP)-[:DECL_K]-(:DeclP) "
+            "with capabilities {expand: {left: true, right: true}, maxBatchSize: 2} "
+            f"AS {_KNOWS_BODY}"
+        ).run()
+        assert db.nodes["DeclP"].provider.capabilities == {
+            "version": V,
+            "lookup": True,
+            "streaming": True,
+        }
+        results, runner = await query(
+            "MATCH (a:DeclP {id: 1})-[:DECL_K]->(b:DeclP) RETURN b.id AS b, b.op AS op"
+        )
+        assert ordered(results) == ordered([{"b": 2, "op": "lookup"}, {"b": 3, "op": "lookup"}])
+        assert runner.source_stats["calls"]["scan"] == 0
+        assert runner.source_stats["calls"]["expand"] > 0
+
+    async def test_nested_predicate_capabilities(self) -> None:
+        await Runner(
+            "CREATE VIRTUAL (:DeclPred) WITH CAPABILITIES {"
+            " predicates: {operators: ['eq', 'in'], properties: ['id']}"
+            f"}} AS {{ UNWIND {literal(PEOPLE)} AS r WITH r, $request AS req "
+            "WHERE req.predicate IS NULL OR r.id = req.predicate.value "
+            "RETURN r.id AS id, r.name AS name }"
+        ).run()
+        results, _ = await query("MATCH (a:DeclPred {id: 3}) RETURN a.name AS name")
+        assert results == [{"name": "Cid"}]
+        assert db.nodes["DeclPred"].provider.capabilities["predicates"] == {
+            "operators": ["eq", "in"],
+            "properties": ["id"],
+        }
+
+    async def test_redefining_without_capabilities_restores_legacy(self) -> None:
+        await Runner(f"CREATE VIRTUAL (:DeclRe) WITH CAPABILITIES {{}} AS {_PEOPLE_BODY}").run()
+        assert db.nodes["DeclRe"].provider is not None
+        await Runner(f"CREATE VIRTUAL (:DeclRe) AS {_PEOPLE_BODY}").run()
+        assert db.nodes["DeclRe"].provider is None
+
+    async def test_invalid_capabilities_reject_the_definition(self) -> None:
+        with pytest.raises(SourceCapabilityError):
+            await Runner(
+                "CREATE VIRTUAL (:DeclBad) WITH CAPABILITIES "
+                f"{{predicates: {{operators: ['like']}}}} AS {_PEOPLE_BODY}"
+            ).run()
+        assert "DeclBad" not in db.nodes
+        with pytest.raises(SourceCapabilityError, match="unsupported capability version"):
+            await Runner(
+                f"CREATE VIRTUAL (:DeclBad) WITH CAPABILITIES {{version: 2}} AS {_PEOPLE_BODY}"
+            ).run()
+
+    def test_with_requires_capabilities_and_a_map(self) -> None:
+        with pytest.raises(Exception, match="Expected CAPABILITIES"):
+            Runner(f"CREATE VIRTUAL (:X) WITH {{lookup: true}} AS {_PEOPLE_BODY}")
+        with pytest.raises(Exception, match="Expected capabilities map"):
+            Runner(f"CREATE VIRTUAL (:X) WITH CAPABILITIES AS {_PEOPLE_BODY}")
+
+
+def _define_in_memory(prefix: str) -> None:
+    db.register_node_source(f"{prefix}P", in_memory_node_source(PEOPLE))
+    db.register_node_source(f"{prefix}C", in_memory_node_source(CITIES, max_batch_size=1))
+    db.register_relationship_source(
+        f"{prefix}K", f"{prefix}P", f"{prefix}P", in_memory_relationship_source(KNOWS)
+    )
+    db.register_relationship_source(
+        f"{prefix}L",
+        f"{prefix}P",
+        f"{prefix}C",
+        in_memory_relationship_source(LIVES, cacheable=False),
+    )
+
+
+class TestInMemorySources:
+    @pytest.mark.parametrize("statement", DIFFERENTIAL_QUERIES)
+    async def test_match_legacy(self, statement: str) -> None:
+        await ensure_legacy()
+        _define_in_memory("Mem")
+        legacy, _ = await query(bind(statement, "Leg"))
+        sourced, _ = await query(bind(statement, "Mem"), opts(page_size=2))
+        if "ORDER BY" in statement:
+            assert sourced == legacy
+        else:
+            assert ordered(sourced) == ordered(legacy)
+
+    async def test_use_lookup_expand_and_push_down(self) -> None:
+        _define_in_memory("MemS")
+        results, runner = await query(
+            "MATCH (a:MemSP {id: 1})-[:MemSK]->(b:MemSP) WHERE b.age > 30 RETURN b.name AS name"
+        )
+        assert results == [{"name": "Cid"}]
+        assert runner.source_stats["calls"]["scan"] == 0
+        assert runner.source_stats["calls"]["lookup"] > 0
+        assert runner.source_stats["calls"]["expand"] > 0
+
+    async def test_lookup_ids_are_type_sensitive(self) -> None:
+        db.register_node_source(
+            "MemT", in_memory_node_source([{"id": 1, "n": "int"}, {"id": "1", "n": "str"}])
+        )
+        results, _ = await query("MATCH (a:MemT {id: '1'}) RETURN a.n AS n")
+        assert results == [{"n": "str"}]
+
+
+class TestPythonProviderApi:
+    """Base classes, snake_case aliases and the SourceRequest envelope."""
+
+    async def test_base_classes_complete_capabilities(self) -> None:
+        seen: List[Any] = []
+
+        class People(NodeSource):
+            capabilities = {"cacheable": True, "max_batch_size": 2}
+
+            async def scan(self, request: SourceRequest, context: Any) -> Any:
+                return PEOPLE
+
+            async def lookup(self, request: SourceRequest, context: Any) -> Any:
+                seen.append(request)
+                return [p for p in PEOPLE if p["id"] in request.ids]
+
+        class Knows(RelationshipSource):
+            def scan(self, request: SourceRequest, context: Any) -> Any:
+                return KNOWS
+
+            def expand(self, request: SourceRequest, context: Any) -> Any:
+                key = "left_id" if request.side == "left" else "right_id"
+                return [k for k in KNOWS if k[key] in request.ids]
+
+        assert People.capabilities == {
+            "version": V,
+            "cacheable": True,
+            "maxBatchSize": 2,
+            "lookup": True,
+        }
+        assert Knows.capabilities == {"version": V, "expand": {"left": True, "right": True}}
+        assert isinstance(People(), SourceProvider)
+
+        FlowQuery.register_node_source("BaseP", People())
+        FlowQuery.register_relationship_source("BASE_K", "BaseP", "BaseP", Knows())
+        results, runner = await query(
+            "MATCH (a:BaseP {id: 1})-[:BASE_K]->(b:BaseP) RETURN b.id AS b"
+        )
+        assert ordered(results) == ordered([{"b": 2}, {"b": 3}])
+        assert runner.source_stats["calls"]["scan"] == 0
+        assert all(len(r.ids) <= 2 for r in seen)
+
+    def test_abstract_scan_is_required(self) -> None:
+        class Broken(NodeSource):
+            pass
+
+        with pytest.raises(TypeError):
+            Broken()  # type: ignore[abstract]
+
+    def test_declared_lookup_without_method_is_rejected(self) -> None:
+        class NoLookup(NodeSource):
+            capabilities = {"lookup": True}
+
+            def scan(self, request: SourceRequest, context: Any) -> Any:
+                return []
+
+        with pytest.raises(SourceCapabilityError, match="lookup"):
+            FlowQuery.register_node_source("NoLookupP", NoLookup())
+
+    async def test_snake_case_capabilities_on_plain_providers(self) -> None:
+        requests: List[Any] = []
+
+        def lookup(request: Any, context: Any) -> Any:
+            requests.append(request)
+            return [p for p in PEOPLE if p["id"] in request["ids"]]
+
+        provider = source(
+            {"version": V, "lookup": True, "max_batch_size": 1},
+            scan=lambda request, context: PEOPLE,
+            lookup=lookup,
+        )
+        db.register_node_source("SnakeP", provider)
+        results, _ = await query("MATCH (a:SnakeP) WHERE a.id IN [1, 2] RETURN a.id AS id")
+        assert ordered(results) == ordered([{"id": 1}, {"id": 2}])
+
+    def test_source_request_aliases(self) -> None:
+        request = SourceRequest(
+            {"operation": "expand", "pageSize": 7, "sourceLabel": "A", "ids": [1]}
+        )
+        assert request["page_size"] == 7
+        assert request.page_size == 7
+        assert request.get("source_label") == "A"
+        assert "page_size" in request
+        assert request.ids == [1]
+        assert request.get("missing", "d") == "d"
+        assert request == {"operation": "expand", "pageSize": 7, "sourceLabel": "A", "ids": [1]}
+        with pytest.raises(AttributeError):
+            request.nothing
+        with pytest.raises(KeyError):
+            request["nothing_here"]
+
+    def test_normalize_capabilities(self) -> None:
+        assert normalize_capabilities(
+            {"version": 1, "max_batch_size": 3, "predicates": {"operators": [], "string_ordering": "binary"}}
+        ) == {"version": 1, "maxBatchSize": 3, "predicates": {"operators": [], "stringOrdering": "binary"}}
+        assert normalize_capabilities({"maxBatchSize": 5, "max_batch_size": 3}) == {"maxBatchSize": 5}

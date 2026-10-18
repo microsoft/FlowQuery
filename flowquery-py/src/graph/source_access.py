@@ -8,7 +8,7 @@ from contextlib import aclosing
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from .source_context import SourceContext, canonical_key
-from .source_provider import SourceRow, SourceUnsupportedError
+from .source_provider import SourceRow, SourceUnsupportedError, normalize_capabilities
 
 PushTerm = Dict[str, Any]
 PushedPredicate = Dict[str, Any]
@@ -176,7 +176,7 @@ class SourceEntry:
         self.provider = provider
         self.name = name
         self._unsupported: set[str] = set()
-        self.caps: Dict[str, Any] = getattr(provider, "capabilities", None) or {}
+        self.caps: Dict[str, Any] = normalize_capabilities(getattr(provider, "capabilities", None)) or {}
         max_batch: Any = self.caps.get("maxBatchSize")
         limit: float = max_batch if _is_number(max_batch) else math.inf
         self.batch_size = int(min(ctx.options.max_batch_size, limit))

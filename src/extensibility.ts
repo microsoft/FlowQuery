@@ -55,9 +55,12 @@ export {
     QueryCancelledError,
     cursorPages,
     matchesPredicate,
+    inMemoryNodeSource,
+    inMemoryRelationshipSource,
 } from "./graph/source_provider";
 export type {
     SourceRow,
+    InMemorySourceOptions,
     PredicateOperator,
     SourcePredicate,
     PredicateCapabilities,

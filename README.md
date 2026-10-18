@@ -998,18 +998,43 @@ Query-level tuning goes in `RunnerOptions.sources`. The defaults are:
 - `maxPrefetchRows: 1024`
 - `reorder: true`
 
-**Statement-backed sources.** An existing `CREATE VIRTUAL` definition can opt into the same contract. Each request then runs the sub-query with `$request` bound to the request: `operation`, `label`/`type`, `ids`, `side`, `predicate` and `pageSize`.
+**In-memory sources.** `inMemoryNodeSource(rows)` and `inMemoryRelationshipSource(rows)` are ready-made providers over arrays. They support lookup, expansion from both sides, every predicate operator and paging, which makes them handy for tests, examples and small reference data. Options are `{ cacheable?: boolean, maxBatchSize?: number }`.
 
 ```typescript
-await new FlowQuery(`
-    CREATE VIRTUAL (:Ticket) AS {
-        LOAD JSON FROM f"https://api.example.com/tickets?ids={join(coalesce($request.ids, []), ',')}" AS t
-        RETURN t.id AS id, t.title AS title
-    }`).run();
-FlowQuery.setNodeSourceCapabilities("Ticket", { version: 1, lookup: true, streaming: true });
+import { inMemoryNodeSource, inMemoryRelationshipSource } from "flowquery/extensibility";
+
+FlowQuery.registerNodeSource(
+    "Person",
+    inMemoryNodeSource([
+        { id: 1, name: "Ada" },
+        { id: 2, name: "Bob" },
+    ])
+);
+FlowQuery.registerRelationshipSource(
+    "KNOWS",
+    "Person",
+    "Person",
+    inMemoryRelationshipSource([{ left_id: 1, right_id: 2 }])
+);
 ```
 
-With `streaming: true`, eligible sub-queries (no `ORDER BY` or aggregation in the final `RETURN`) hand rows over page by page. Pass `null` to opt out again. Redefining or deleting the label also clears the opt-in.
+**Statement-backed sources.** A `CREATE VIRTUAL` definition can opt into the same contract declaratively with a `WITH CAPABILITIES { ... }` clause between the pattern and `AS`. Each request then runs the sub-query with `$request` bound to the request: `operation`, `label`/`type`, `ids`, `side`, `predicate` and `pageSize`.
+
+```cypher
+CREATE VIRTUAL (:Ticket) WITH CAPABILITIES {lookup: true, streaming: true} AS {
+    LOAD JSON FROM f"https://api.example.com/tickets?ids={join(coalesce($request.ids, []), ',')}" AS t
+    RETURN t.id AS id, t.title AS title
+}
+
+CREATE VIRTUAL (:Ticket)-[:BLOCKS]-(:Ticket)
+WITH CAPABILITIES {expand: {left: true}, maxBatchSize: 50, predicates: {operators: ['eq', 'in']}} AS {
+    ...
+}
+```
+
+The map takes the same keys as the capabilities object; `version` defaults to the current contract version. Invalid capabilities reject the whole definition. With `streaming: true`, eligible sub-queries (no `ORDER BY` or aggregation in the final `RETURN`) hand rows over page by page. Redefining the label without `WITH CAPABILITIES`, or deleting it, restores eager loading.
+
+The same opt-in is available programmatically with `FlowQuery.setNodeSourceCapabilities(label, capabilities)` and `FlowQuery.setRelationshipSourceCapabilities(type, sourceLabel, targetLabel, capabilities)`; pass `null` to opt out.
 
 ### Reserved Keywords as Identifiers
 

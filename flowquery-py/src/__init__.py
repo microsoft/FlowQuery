@@ -28,14 +28,21 @@ from .graph.source_context import SourceOptions
 from .graph.source_provider import (
     PREDICATE_OPERATORS,
     SOURCE_CONTRACT_VERSION,
+    NodeSource,
     QueryCancelledError,
+    RelationshipSource,
     SourceCapabilityError,
     SourceError,
+    SourceProvider,
     SourceReadContext,
+    SourceRequest,
     SourceResponseError,
+    SourceResult,
     SourceSignal,
     SourceUnsupportedError,
     cursor_pages,
+    in_memory_node_source,
+    in_memory_relationship_source,
     matches_predicate,
 )
 from .io.command_line import CommandLine
@@ -104,7 +111,14 @@ __all__ = [
     "SourceResponseError",
     "SourceUnsupportedError",
     "QueryCancelledError",
+    "SourceProvider",
+    "SourceRequest",
+    "SourceResult",
+    "NodeSource",
+    "RelationshipSource",
     "cursor_pages",
     "matches_predicate",
+    "in_memory_node_source",
+    "in_memory_relationship_source",
 ]
 

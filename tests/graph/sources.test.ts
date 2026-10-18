@@ -11,6 +11,8 @@ import {
     SourceRow,
     SourceUnsupportedError,
     cursorPages,
+    inMemoryNodeSource,
+    inMemoryRelationshipSource,
     matchesPredicate,
 } from "../../src/graph/source_provider";
 
@@ -875,5 +877,143 @@ describe("backend-aware virtual sources", () => {
             const { runner } = await query("MATCH (a:StmtRe) RETURN a.id");
             expect(runner.sourceStats.calls.scan).toBe(0);
         });
+    });
+});
+
+describe("declarative capabilities and in-memory sources", () => {
+    beforeAll(async () => {
+        await defineLegacy("Leg2");
+    });
+
+    const peopleBody = `{
+        UNWIND ${literal(PEOPLE)} AS r
+        WITH r, $request AS req
+        WHERE req IS NULL OR req.operation = 'scan' OR r.id IN req.ids
+        RETURN r.id AS id, r.name AS name, req.operation AS op
+    }`;
+    const knowsBody = `{
+        UNWIND ${literal(KNOWS)} AS r
+        WITH r, $request AS req
+        WHERE req IS NULL OR req.operation = 'scan'
+            OR (req.side = 'left' AND r.left_id IN req.ids)
+            OR (req.side = 'right' AND r.right_id IN req.ids)
+        RETURN r.left_id AS left_id, r.right_id AS right_id
+    }`;
+
+    test("CREATE VIRTUAL ... WITH CAPABILITIES opts nodes and relationships in", async () => {
+        await new Runner(
+            `CREATE VIRTUAL (:DeclP) WITH CAPABILITIES {lookup: true, streaming: true} AS ${peopleBody}`
+        ).run();
+        await new Runner(
+            `CREATE VIRTUAL (:DeclP)-[:DECL_K]-(:DeclP)
+             with capabilities {expand: {left: true, right: true}, maxBatchSize: 2}
+             AS ${knowsBody}`
+        ).run();
+        expect(db.nodes.get("DeclP")!.provider!.capabilities).toEqual({
+            version: V,
+            lookup: true,
+            streaming: true,
+        });
+        const { results, runner } = await query(
+            "MATCH (a:DeclP {id: 1})-[:DECL_K]->(b:DeclP) RETURN b.id AS b, b.op AS op"
+        );
+        expect(sorted(results)).toEqual(
+            sorted([
+                { b: 2, op: "lookup" },
+                { b: 3, op: "lookup" },
+            ])
+        );
+        expect(runner.sourceStats.calls.scan).toBe(0);
+        expect(runner.sourceStats.calls.expand).toBeGreaterThan(0);
+    });
+
+    test("predicate capabilities can be declared with nested maps and lists", async () => {
+        await new Runner(
+            `CREATE VIRTUAL (:DeclPred) WITH CAPABILITIES {
+                predicates: {operators: ['eq', 'in'], properties: ['id']}
+            } AS {
+                UNWIND ${literal(PEOPLE)} AS r
+                WITH r, $request AS req
+                WHERE req.predicate IS NULL OR r.id = req.predicate.value
+                RETURN r.id AS id, r.name AS name
+            }`
+        ).run();
+        const { results } = await query("MATCH (a:DeclPred {id: 3}) RETURN a.name AS name");
+        expect(results).toEqual([{ name: "Cid" }]);
+        expect(db.nodes.get("DeclPred")!.provider!.capabilities.predicates).toEqual({
+            operators: ["eq", "in"],
+            properties: ["id"],
+        });
+    });
+
+    test("redefining without WITH CAPABILITIES restores legacy loading", async () => {
+        await new Runner(`CREATE VIRTUAL (:DeclRe) WITH CAPABILITIES {} AS ${peopleBody}`).run();
+        expect(db.nodes.get("DeclRe")!.provider).not.toBeNull();
+        await new Runner(`CREATE VIRTUAL (:DeclRe) AS ${peopleBody}`).run();
+        expect(db.nodes.get("DeclRe")!.provider).toBeNull();
+    });
+
+    test("invalid declared capabilities reject the definition", async () => {
+        await expect(
+            new Runner(
+                `CREATE VIRTUAL (:DeclBad) WITH CAPABILITIES {predicates: {operators: ['like']}} AS ${peopleBody}`
+            ).run()
+        ).rejects.toThrow(SourceCapabilityError);
+        expect(db.nodes.has("DeclBad")).toBe(false);
+        await expect(
+            new Runner(
+                `CREATE VIRTUAL (:DeclBad) WITH CAPABILITIES {version: 2} AS ${peopleBody}`
+            ).run()
+        ).rejects.toThrow(/unsupported capability version/);
+    });
+
+    test("WITH must be followed by CAPABILITIES and a map", () => {
+        expect(
+            () => new Runner(`CREATE VIRTUAL (:X) WITH {lookup: true} AS ${peopleBody}`)
+        ).toThrow(/Expected CAPABILITIES/);
+        expect(() => new Runner(`CREATE VIRTUAL (:X) WITH CAPABILITIES AS ${peopleBody}`)).toThrow(
+            /Expected capabilities map/
+        );
+    });
+
+    const defineInMemory = (prefix: string) => {
+        db.registerNodeSource(`${prefix}P`, inMemoryNodeSource(PEOPLE));
+        db.registerNodeSource(`${prefix}C`, inMemoryNodeSource(CITIES, { maxBatchSize: 1 }));
+        db.registerRelationshipSource(
+            `${prefix}K`,
+            `${prefix}P`,
+            `${prefix}P`,
+            inMemoryRelationshipSource(KNOWS)
+        );
+        db.registerRelationshipSource(
+            `${prefix}L`,
+            `${prefix}P`,
+            `${prefix}C`,
+            inMemoryRelationshipSource(LIVES, { cacheable: false })
+        );
+    };
+
+    test.each(DIFFERENTIAL_QUERIES)("in-memory sources match legacy: %s", async (statement) => {
+        defineInMemory("Mem");
+        const legacy = await query(bind(statement, "Leg2"));
+        const sourced = await query(bind(statement, "Mem"), { sources: { pageSize: 2 } });
+        if (statement.includes("ORDER BY")) {
+            expect(sourced.results).toEqual(legacy.results);
+        } else {
+            expect(sorted(sourced.results)).toEqual(sorted(legacy.results));
+        }
+    });
+
+    test("in-memory sources use lookups, expansion and push-down", async () => {
+        defineInMemory("MemS");
+        const { results, runner } = await query(
+            "MATCH (a:MemSP {id: 1})-[:MemSK]->(b:MemSP) WHERE b.age > 30 RETURN b.name AS name"
+        );
+        expect(results).toEqual([{ name: "Cid" }]);
+        expect(runner.sourceStats.calls.scan).toBe(0);
+        expect(runner.sourceStats.calls.lookup).toBeGreaterThan(0);
+        expect(runner.sourceStats.calls.expand).toBeGreaterThan(0);
+        const caps = db.nodes.get("MemSP")!.provider!.capabilities;
+        expect(caps).toMatchObject({ version: V, lookup: true, cacheable: true });
     });
 });

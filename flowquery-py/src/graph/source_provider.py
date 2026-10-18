@@ -23,8 +23,23 @@ from __future__ import annotations
 
 import json
 import math
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterable,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Protocol,
+    Union,
+    runtime_checkable,
+)
 
 SOURCE_CONTRACT_VERSION = 1
 
@@ -32,6 +47,72 @@ PREDICATE_OPERATORS: List[str] = ["eq", "gt", "gte", "lt", "lte", "in"]
 
 SourceRow = Dict[str, Any]
 SourcePredicate = Dict[str, Any]
+
+#: Anything a provider method may return.
+SourceResult = Union[
+    List[SourceRow],
+    Awaitable[List[SourceRow]],
+    Iterable[List[SourceRow]],
+    AsyncIterable[List[SourceRow]],
+]
+
+
+def _to_camel(key: str) -> str:
+    head, *rest = key.split("_")
+    return head + "".join(part[:1].upper() + part[1:] for part in rest)
+
+
+class SourceRequest(Dict[str, Any]):
+    """Request envelope passed to provider methods.
+
+    A plain ``dict`` with the camelCase keys shared with TypeScript
+    (``request["pageSize"]``), which also accepts snake_case keys
+    (``request["page_size"]``, ``request.get("source_label")``) and
+    attribute access (``request.ids``, ``request.page_size``).
+    """
+
+    def __missing__(self, key: Any) -> Any:
+        if isinstance(key, str) and "_" in key:
+            camel = _to_camel(key)
+            if camel in self:
+                return dict.__getitem__(self, camel)
+        raise KeyError(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: Any) -> bool:
+        if dict.__contains__(self, key):
+            return True
+        return isinstance(key, str) and "_" in key and dict.__contains__(self, _to_camel(key))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+def normalize_capabilities(caps: Any) -> Any:
+    """Returns ``caps`` with snake_case keys (``max_batch_size``,
+    ``string_ordering`` ...) converted to their camelCase names.  An
+    explicit camelCase key wins over its snake_case alias."""
+    if not isinstance(caps, dict):
+        return caps
+    out: Dict[str, Any] = {}
+    for key, value in caps.items():
+        camel = _to_camel(key) if isinstance(key, str) else key
+        if isinstance(value, dict):
+            value = normalize_capabilities(value)
+        if camel != key and camel in caps:
+            continue
+        out[camel] = value
+    return out
 
 
 class SourceSignal:
@@ -180,7 +261,7 @@ def _has_method(provider: Any, method: str) -> bool:
 def validate_node_provider(provider: Any, name: str) -> None:
     if provider is None or isinstance(provider, (str, int, float, bool, list, tuple)):
         raise SourceCapabilityError(f"Source {name}: provider object is required", name)
-    caps: Any = getattr(provider, "capabilities", None)
+    caps: Any = normalize_capabilities(getattr(provider, "capabilities", None))
     _validate_base(caps, name)
     if not _has_method(provider, "scan"):
         raise SourceCapabilityError(f"Source {name}: provider must implement scan()", name)
@@ -193,7 +274,7 @@ def validate_node_provider(provider: Any, name: str) -> None:
 def validate_relationship_provider(provider: Any, name: str) -> None:
     if provider is None or isinstance(provider, (str, int, float, bool, list, tuple)):
         raise SourceCapabilityError(f"Source {name}: provider object is required", name)
-    caps: Any = getattr(provider, "capabilities", None)
+    caps: Any = normalize_capabilities(getattr(provider, "capabilities", None))
     _validate_base(caps, name)
     if not _has_method(provider, "scan"):
         raise SourceCapabilityError(f"Source {name}: provider must implement scan()", name)
@@ -285,3 +366,174 @@ def matches_predicate(predicate: Optional[SourcePredicate], row: SourceRow) -> b
     if op == "lte":
         return bool(value <= bound)
     return True
+
+
+@runtime_checkable
+class SourceProvider(Protocol):
+    """Structural type of any source provider (node or relationship).
+
+    ``lookup`` (nodes), ``expand`` (relationships), ``open_read_context``
+    and ``close_read_context`` are optional and therefore not part of the
+    protocol; they are checked at registration against ``capabilities``.
+    """
+
+    capabilities: Dict[str, Any]
+
+    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult: ...
+
+
+def _complete_capabilities(cls: type, method: str, implied: Any) -> None:
+    caps = cls.__dict__.get("capabilities")
+    if caps is None:
+        caps = dict(getattr(cls, "capabilities", None) or {})
+    if not isinstance(caps, dict):
+        return
+    caps = normalize_capabilities(caps)
+    caps.setdefault("version", SOURCE_CONTRACT_VERSION)
+    if method in cls.__dict__ and method not in caps:
+        caps[method] = implied
+    cls.capabilities = caps  # type: ignore[attr-defined]
+
+
+class NodeSource(ABC):
+    """Convenience base class for node providers.
+
+    Subclasses implement ``scan`` and may implement
+    ``lookup(request, context)``.  ``capabilities`` may be omitted or
+    partial: ``version`` defaults to the current contract version,
+    snake_case keys are accepted, and ``lookup`` is declared automatically
+    when the subclass defines ``lookup()``.
+
+    Example::
+
+        class People(NodeSource):
+            capabilities = {"cacheable": True, "max_batch_size": 50}
+
+            async def scan(self, request, context):
+                return await api.people()
+
+            async def lookup(self, request, context):
+                return await api.people_by_ids(request.ids)
+    """
+
+    capabilities: Dict[str, Any] = {"version": SOURCE_CONTRACT_VERSION}
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        _complete_capabilities(cls, "lookup", True)
+
+    @abstractmethod
+    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        """Returns all rows (optionally pre-filtered by ``request.predicate``)."""
+
+
+class RelationshipSource(ABC):
+    """Convenience base class for relationship providers.
+
+    Subclasses implement ``scan`` and may implement
+    ``expand(request, context)``, which is then declared for both sides
+    (``{"left": True, "right": True}``) unless ``capabilities`` says
+    otherwise.  Rows carry ``left_id`` and ``right_id``.
+    """
+
+    capabilities: Dict[str, Any] = {"version": SOURCE_CONTRACT_VERSION}
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        _complete_capabilities(cls, "expand", {"left": True, "right": True})
+
+    @abstractmethod
+    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        """Returns all rows (optionally pre-filtered by ``request.predicate``)."""
+
+
+def _pages_of(rows: List[SourceRow], page_size: Any) -> Iterator[List[SourceRow]]:
+    size = page_size if _is_int(page_size) and page_size > 0 else (len(rows) or 1)
+    for i in range(0, len(rows), size):
+        yield rows[i : i + size]
+
+
+def _filter_rows(
+    rows: List[SourceRow],
+    predicate: Optional[SourcePredicate],
+    field_name: Optional[str],
+    ids: Optional[List[Any]],
+) -> List[SourceRow]:
+    from .source_context import canonical_key
+
+    wanted = None if ids is None else {canonical_key(i) for i in ids}
+    return [
+        row
+        for row in rows
+        if (wanted is None or (field_name is not None and field_name in row
+                               and canonical_key(row[field_name]) in wanted))
+        and matches_predicate(predicate, row)
+    ]
+
+
+def _in_memory_capabilities(cacheable: bool, max_batch_size: Optional[int]) -> Dict[str, Any]:
+    caps: Dict[str, Any] = {
+        "version": SOURCE_CONTRACT_VERSION,
+        "cacheable": cacheable,
+        "streaming": True,
+        "predicates": {"operators": list(PREDICATE_OPERATORS), "stringOrdering": "binary"},
+    }
+    if max_batch_size is not None:
+        caps["maxBatchSize"] = max_batch_size
+    return caps
+
+
+class _InMemoryNodeSource(NodeSource):
+    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
+        self.rows = rows
+        self.capabilities = {**_in_memory_capabilities(cacheable, max_batch_size), "lookup": True}
+
+    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
+                         request.get("pageSize"))
+
+    def lookup(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        rows = _filter_rows(self.rows, request.get("predicate"), "id", request.get("ids") or [])
+        return _pages_of(rows, request.get("pageSize"))
+
+
+class _InMemoryRelationshipSource(RelationshipSource):
+    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
+        self.rows = rows
+        self.capabilities = {
+            **_in_memory_capabilities(cacheable, max_batch_size),
+            "expand": {"left": True, "right": True},
+        }
+
+    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
+                         request.get("pageSize"))
+
+    def expand(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
+        field_name = "left_id" if request.get("side") == "left" else "right_id"
+        rows = _filter_rows(self.rows, request.get("predicate"), field_name, request.get("ids") or [])
+        return _pages_of(rows, request.get("pageSize"))
+
+
+def in_memory_node_source(
+    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
+) -> NodeSource:
+    """A ready-made node source over a list of rows (each with an ``id``).
+
+    Supports lookup, every predicate operator and paging; handy for tests,
+    examples and small reference data.  The list is read on every request,
+    so later mutations are visible.
+
+    Example::
+
+        FlowQuery.register_node_source("Person", in_memory_node_source([{"id": 1, "name": "Ada"}]))
+    """
+    return _InMemoryNodeSource(rows, cacheable, max_batch_size)
+
+
+def in_memory_relationship_source(
+    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
+) -> RelationshipSource:
+    """A ready-made relationship source over a list of rows (each with
+    ``left_id`` and ``right_id``), supporting expansion from both sides."""
+    return _InMemoryRelationshipSource(rows, cacheable, max_batch_size)

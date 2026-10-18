@@ -14,6 +14,7 @@ from .source_provider import (
     QueryCancelledError,
     SourceError,
     SourceReadContext,
+    SourceRequest,
     SourceResponseError,
     SourceRow,
     SourceSignal,
@@ -394,7 +395,7 @@ class SourceContext:
         rc = await self.read_context(provider)
         self.stats["calls"][op] += 1
         try:
-            result = getattr(provider, op)({"version": 1, **request}, rc)
+            result = getattr(provider, op)(SourceRequest({"version": 1, **request}), rc)
         except Exception as e:
             raise self._wrap(e, name, op) from e
         if isinstance(result, list):

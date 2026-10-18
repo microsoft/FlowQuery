@@ -353,6 +353,9 @@ class Pattern extends ASTNode {
         } finally {
             for (let j = plan.rels.length - 1; j >= 0; j--) {
                 plan.rels[j].popMatch();
+                if (plan.rels[j].access === null) {
+                    plan.rels[j].clearFrame(0);
+                }
             }
         }
     }

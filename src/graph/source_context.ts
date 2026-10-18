@@ -348,7 +348,11 @@ class SourceContext {
                             yield this._page(step.value, name, operation, kind);
                         }
                     } finally {
-                        await closeIterator(iterator);
+                        // A generator suspended inside its own await only
+                        // handles return() once that await settles; don't
+                        // let a non-cooperative provider block cancellation.
+                        const closing = closeIterator(iterator);
+                        if (!this.cancelled) await closing;
                     }
                 }
                 if (typeof result[Symbol.iterator] === "function") {

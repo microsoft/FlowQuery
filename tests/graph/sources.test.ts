@@ -624,6 +624,59 @@ describe("backend-aware virtual sources", () => {
         drop("SlowP");
     });
 
+    test("var-length relationship predicates are not pushed below the minimum hop", async () => {
+        const edges = [
+            { left_id: 1, right_id: 2, since: 2010 },
+            { left_id: 2, right_id: 3, since: 2012 },
+            { left_id: 3, right_id: 4, since: 2012 },
+        ];
+        await new Runner(
+            `CREATE VIRTUAL (:LegP)-[:VARK]-(:LegP) AS { UNWIND ${literal(edges)} AS r RETURN r.left_id AS left_id, r.right_id AS right_id, r.since AS since }`
+        ).run();
+        db.registerNodeSource("VarP", new ArrayNodes(PEOPLE, FULL_NODE));
+        db.registerRelationshipSource("VARK", "VarP", "VarP", new ArrayRels(edges, FULL_REL));
+        const statement = (p: string) =>
+            `MATCH (a:${p})-[:VARK*2..2 {since: 2012}]->(b:${p}) RETURN a.id AS a, b.id AS b`;
+        const legacy = await query(statement("LegP"));
+        const sourced = await query(statement("VarP"));
+        expect(sorted(legacy.results)).toEqual(
+            sorted([
+                { a: 1, b: 3 },
+                { a: 2, b: 4 },
+            ])
+        );
+        expect(sorted(sourced.results)).toEqual(sorted(legacy.results));
+    });
+
+    test("reversed plans bind legacy relationships for later references", async () => {
+        db.registerNodeSource("RefP", new ArrayNodes(PEOPLE, FULL_NODE));
+        await new Runner(
+            `CREATE VIRTUAL (:RefP)-[:REF_LR]-(:RefP) AS { UNWIND ${literal(KNOWS)} AS r RETURN r.left_id AS left_id, r.right_id AS right_id }`
+        ).run();
+        const statement =
+            "MATCH (a:RefP)-[r:REF_LR]->(b:RefP {id: 3}) MATCH (c:RefP)-[r]->(d:RefP) RETURN a.id AS a, c.id AS c, d.id AS d";
+        const reordered = await query(statement);
+        const forward = await query(statement, { sources: { reorder: false } });
+        expect(reordered.results.length).toBeGreaterThan(0);
+        expect(sorted(reordered.results)).toEqual(sorted(forward.results));
+    });
+
+    test("cancellation does not wait for a non-cooperative async generator", async () => {
+        db.registerNodeSource("SlowG", {
+            capabilities: { version: V },
+            async *scan() {
+                await new Promise(() => undefined);
+                yield [];
+            },
+        });
+        const runner = new Runner("MATCH (a:SlowG) RETURN a");
+        const running = runner.run();
+        await new Promise((r) => setTimeout(r, 10));
+        runner.cancel();
+        await expect(running).rejects.toThrow(QueryCancelledError);
+        drop("SlowG");
+    });
+
     test("read contexts are opened once per query and closed afterwards", async () => {
         const p = defineSources("Snap");
         await query("MATCH (a:SnapP)-[:SnapK]->(b:SnapP) RETURN a.id, b.id");

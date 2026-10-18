@@ -139,14 +139,19 @@ class Relationship extends ASTNode {
     }
     /** The relationship row bound at `hop` (deferred frames or legacy data cursor). */
     public currentRecord(hop: number = 0): RelationshipRecord | null {
-        if (this._access !== null) {
-            return (this._frames.get(hop) as RelationshipRecord | undefined) ?? null;
+        const frame = this._frames.get(hop) as RelationshipRecord | undefined;
+        if (frame !== undefined || this._access !== null) {
+            return frame ?? null;
         }
         return this._data?.current(hop) ?? null;
     }
     /** @internal Bind a row for `hop` (used by reversed plans). */
     public setFrame(hop: number, record: RelationshipRecord): void {
         this._frames.set(hop, record);
+    }
+    /** @internal Unbind the row for `hop` (end of a reversed match). */
+    public clearFrame(hop: number): void {
+        this._frames.delete(hop);
     }
     /** @internal Push a match for an explicitly supplied row. */
     public pushMatch(record: RelationshipRecord, traversalId: string): void {
@@ -223,7 +228,10 @@ class Relationship extends ASTNode {
             if (hop === 0 && this.hops?.multi() && this.hops.min === 0 && this._target) {
                 yield* this._target.find(left_id, hop);
             }
-            const { terms, args } = this.sourceTerms();
+            const { terms: allTerms, args } = this.sourceTerms();
+            // Hops below the minimum are traversed without a property check,
+            // so their edges must not be filtered by the source either.
+            const terms = hop + 1 >= this.hops!.min ? allTerms : [];
             const target = this._target;
             for await (const page of this._access!.expand(left_id, this.anchorSide, terms, args)) {
                 if (

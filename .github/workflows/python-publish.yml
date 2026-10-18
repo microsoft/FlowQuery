@@ -1,11 +1,11 @@
 name: Publish Python Package to PyPI
 
+# The Python package is versioned in lockstep with the TypeScript package:
+# release.yml bumps both versions and publishes a GitHub release, which
+# triggers this workflow (and npm-publish.yml) to publish that version.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "flowquery-py/src/**"
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       target:
@@ -18,70 +18,11 @@ on:
           - pypi
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  bump-version:
-    name: Bump version
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    concurrency:
-      group: flowquery-pypi-${{ github.ref_name }}
-      cancel-in-progress: false
-    outputs:
-      new_version: ${{ steps.bump.outputs.new_version }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN }}
-
-      - name: Bump Python package version
-        id: bump
-        working-directory: flowquery-py
-        run: |
-          # Get current version from pyproject.toml
-          CURRENT=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
-          echo "Current version: $CURRENT"
-
-          # Parse and bump patch version
-          IFS='.' read -r major minor patch <<< "$CURRENT"
-          NEW_VERSION="$major.$minor.$((patch + 1))"
-          echo "New version: $NEW_VERSION"
-
-          # Update pyproject.toml
-          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" pyproject.toml
-
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore(py): bump version to $NEW_VERSION [skip ci]"
-
-          for attempt in 1 2 3; do
-            git fetch origin main:refs/remotes/origin/main
-
-            if ! git rebase origin/main; then
-              git rebase --abort || true
-            elif git push origin HEAD:main; then
-              break
-            fi
-
-            if [ "$attempt" -eq 3 ]; then
-              echo "Failed to push Python version bump after 3 attempts."
-              exit 1
-            fi
-
-            sleep 5
-          done
-
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-
   build:
     name: Build distribution
-    needs: [bump-version]
-    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -90,12 +31,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
-      - name: Pull latest changes
-        if: needs.bump-version.result == 'success'
-        run: git pull origin main
+      - name: Verify version matches the release tag
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
+          if [ "v${VERSION}" != "${TAG}" ]; then
+            echo "pyproject.toml version ${VERSION} does not match release tag ${TAG}."
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -142,7 +89,7 @@ jobs:
     name: Publish to PyPI
     if: >-
       !cancelled() && needs.build.result == 'success' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'release' ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi'))
     needs: build
     runs-on: ubuntu-latest

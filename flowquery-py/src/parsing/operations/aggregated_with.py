@@ -22,6 +22,14 @@ class AggregatedWith(Return):
     async def run(self) -> None:
         await self._group_by.run()
 
+    @property
+    def saturated(self) -> bool:
+        return False
+
+    @property
+    def supports_row_sink(self) -> bool:
+        return False
+
     def add_provenance_source(self, source: ProvenanceSource) -> None:
         """Forward upstream provenance sources into the embedded
         :class:`GroupBy` so each group accumulates the union of

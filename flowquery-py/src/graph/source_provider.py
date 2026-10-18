@@ -1,0 +1,287 @@
+"""Public contract for backend-aware virtual source providers.
+
+A provider is any object exposing a ``capabilities`` dict attribute and the
+methods ``scan(request, context)`` and, optionally, ``lookup(request, context)``
+(node providers), ``expand(request, context)`` (relationship providers),
+``estimate(request)`` (node providers), ``open_read_context()`` and
+``close_read_context(snapshot)``.
+
+Request and capability dictionaries use the same camelCase keys as the
+TypeScript implementation (``pageSize``, ``sourceLabel``, ``maxBatchSize``,
+``stringOrdering`` ...), so providers observe an identical envelope.
+
+A provider method may return a list of rows, an awaitable resolving to a list
+of rows, a synchronous iterable of pages (lists of rows) or an asynchronous
+iterable of pages.
+
+The ``context`` argument is a :class:`SourceReadContext` with a ``signal``
+attribute (a :class:`SourceSignal`, exposing ``aborted``, ``reason`` and
+``is_set()``) and the ``snapshot`` returned by ``open_read_context()``.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
+
+SOURCE_CONTRACT_VERSION = 1
+
+PREDICATE_OPERATORS: List[str] = ["eq", "gt", "gte", "lt", "lte", "in"]
+
+SourceRow = Dict[str, Any]
+SourcePredicate = Dict[str, Any]
+
+
+class SourceSignal:
+    """Cancellation signal handed to providers (mirrors an AbortSignal).
+
+    Check ``signal.aborted`` (or ``signal.is_set()``) to detect cancellation and
+    ``await signal.wait()`` to block until the query is cancelled or finished.
+    """
+
+    def __init__(self) -> None:
+        import asyncio
+
+        self._event = asyncio.Event()
+        self.reason: Optional[BaseException] = None
+        self._listeners: List[Callable[[], None]] = []
+
+    @property
+    def aborted(self) -> bool:
+        return self._event.is_set()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    async def wait(self) -> None:
+        await self._event.wait()
+
+    def add_listener(self, listener: Callable[[], None]) -> None:
+        self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[], None]) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
+    def abort(self, reason: BaseException) -> None:
+        if self._event.is_set():
+            return
+        self.reason = reason
+        self._event.set()
+        for listener in list(self._listeners):
+            listener()
+
+
+@dataclass
+class SourceReadContext:
+    """Per-query read context passed to provider methods."""
+
+    signal: SourceSignal
+    snapshot: Any = None
+    _owner: Any = field(default=None, repr=False, compare=False)
+
+
+class SourceError(Exception):
+    def __init__(
+        self,
+        message: str,
+        source: str = "",
+        operation: str = "",
+        cause: Optional[BaseException] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.source = source
+        self.operation = operation
+        self.cause = cause
+        if cause is not None:
+            self.__cause__ = cause
+
+
+class SourceCapabilityError(SourceError):
+    def __init__(self, message: str, source: str = "") -> None:
+        super().__init__(message, source, "register")
+
+
+class SourceResponseError(SourceError):
+    def __init__(self, message: str, source: str = "", operation: str = "") -> None:
+        super().__init__(message, source, operation)
+
+
+class SourceUnsupportedError(SourceError):
+    def __init__(
+        self,
+        message: str = "Operation not supported",
+        source: str = "",
+        operation: str = "",
+    ) -> None:
+        super().__init__(message, source, operation)
+
+
+class QueryCancelledError(Exception):
+    def __init__(self, message: str = "Query cancelled") -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _json(value: Any) -> str:
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_base(caps: Any, name: str) -> None:
+    if not isinstance(caps, dict):
+        raise SourceCapabilityError(f"Source {name}: capabilities object is required", name)
+    version = caps.get("version")
+    if not _is_int(version) or version != SOURCE_CONTRACT_VERSION:
+        raise SourceCapabilityError(
+            f"Source {name}: unsupported capability version {_json(version) if 'version' in caps else 'undefined'}; "
+            f"expected {SOURCE_CONTRACT_VERSION}",
+            name,
+        )
+    if "maxBatchSize" in caps and caps["maxBatchSize"] is not None:
+        mbs = caps["maxBatchSize"]
+        integral = _is_int(mbs) or (isinstance(mbs, float) and math.isfinite(mbs) and mbs.is_integer())
+        if not integral or mbs < 1:
+            raise SourceCapabilityError(f"Source {name}: maxBatchSize must be a positive integer", name)
+    if "predicates" in caps and caps["predicates"] is not None:
+        p = caps["predicates"]
+        if not isinstance(p, dict) or not isinstance(p.get("operators"), list):
+            raise SourceCapabilityError(f"Source {name}: predicates.operators must be an array", name)
+        for op in p["operators"]:
+            if op not in PREDICATE_OPERATORS:
+                raise SourceCapabilityError(
+                    f"Source {name}: unknown predicate operator {_json(op)}; "
+                    f"supported: {', '.join(PREDICATE_OPERATORS)}",
+                    name,
+                )
+        if p.get("properties") is not None and not isinstance(p.get("properties"), list):
+            raise SourceCapabilityError(
+                f"Source {name}: predicates.properties must be an array of column names", name
+            )
+        if p.get("stringOrdering") is not None and p.get("stringOrdering") != "binary":
+            raise SourceCapabilityError(
+                f'Source {name}: predicates.stringOrdering must be "binary" when set', name
+            )
+
+
+def _has_method(provider: Any, method: str) -> bool:
+    return callable(getattr(provider, method, None))
+
+
+def validate_node_provider(provider: Any, name: str) -> None:
+    if provider is None or isinstance(provider, (str, int, float, bool, list, tuple)):
+        raise SourceCapabilityError(f"Source {name}: provider object is required", name)
+    caps: Any = getattr(provider, "capabilities", None)
+    _validate_base(caps, name)
+    if not _has_method(provider, "scan"):
+        raise SourceCapabilityError(f"Source {name}: provider must implement scan()", name)
+    if caps.get("lookup") and not _has_method(provider, "lookup"):
+        raise SourceCapabilityError(
+            f"Source {name}: capabilities.lookup is true but lookup() is not implemented", name
+        )
+
+
+def validate_relationship_provider(provider: Any, name: str) -> None:
+    if provider is None or isinstance(provider, (str, int, float, bool, list, tuple)):
+        raise SourceCapabilityError(f"Source {name}: provider object is required", name)
+    caps: Any = getattr(provider, "capabilities", None)
+    _validate_base(caps, name)
+    if not _has_method(provider, "scan"):
+        raise SourceCapabilityError(f"Source {name}: provider must implement scan()", name)
+    if "expand" in caps:
+        expand = caps["expand"]
+        if not isinstance(expand, dict):
+            raise SourceCapabilityError(
+                f"Source {name}: capabilities.expand must be an object like {{ left: true, right: true }}",
+                name,
+            )
+        if (expand.get("left") or expand.get("right")) and not _has_method(provider, "expand"):
+            raise SourceCapabilityError(
+                f"Source {name}: capabilities.expand is declared but expand() is not implemented",
+                name,
+            )
+
+
+async def cursor_pages(
+    fetch_page: Callable[[Optional[str]], Awaitable[Dict[str, Any]]],
+) -> AsyncGenerator[List[SourceRow], None]:
+    """Adapts a cursor-paginated fetch function into an async iterable of pages.
+
+    ``fetch_page(cursor)`` must resolve to ``{"rows": [...], "cursor": next_or_None}``.
+    """
+    cursor: Optional[str] = None
+    while True:
+        page = await fetch_page(cursor)
+        if not isinstance(page, dict) or not isinstance(page.get("rows"), list):
+            raise SourceResponseError("Cursor page must be an object with a rows array")
+        yield page["rows"]
+        nxt = page.get("cursor")
+        if nxt is None:
+            return
+        if nxt == cursor:
+            raise SourceResponseError(f"Invalid continuation token: {nxt} repeated")
+        cursor = nxt
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _same_primitive(a: Any, b: Any) -> bool:
+    if _is_number(a):
+        return _is_number(b)
+    if isinstance(a, str):
+        return isinstance(b, str)
+    return False
+
+
+def _is_range_comparable(value: Any, bound: Any) -> bool:
+    if value is None:
+        return False
+    if not (_is_number(bound) or isinstance(bound, str)):
+        return False
+    return _same_primitive(value, bound)
+
+
+def _matches_equality(row: SourceRow, prop: str, values: List[Any]) -> bool:
+    if prop not in row:
+        return False
+    value = row[prop]
+    if not (_is_number(value) or isinstance(value, str)):
+        return True
+    return any(_same_primitive(value, v) and value == v for v in values)
+
+
+def matches_predicate(predicate: Optional[SourcePredicate], row: SourceRow) -> bool:
+    """Evaluates a pushed predicate against a row, the way FlowQuery would."""
+    if predicate is None:
+        return True
+    op = predicate.get("op")
+    if op == "and":
+        return all(matches_predicate(t, row) for t in predicate.get("terms", []))
+    if op == "eq":
+        return _matches_equality(row, predicate["property"], [predicate.get("value")])
+    if op == "in":
+        return _matches_equality(row, predicate["property"], list(predicate.get("values", [])))
+    value: Any = row.get(predicate.get("property", ""))
+    bound: Any = predicate.get("value")
+    if not _is_range_comparable(value, bound):
+        return True
+    if op == "gt":
+        return bool(value > bound)
+    if op == "gte":
+        return bool(value >= bound)
+    if op == "lt":
+        return bool(value < bound)
+    if op == "lte":
+        return bool(value <= bound)
+    return True

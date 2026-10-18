@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from .data_cache import DataCache
 from .database import Database
@@ -12,6 +12,8 @@ from .node_reference import NodeReference
 from .physical_relationship import PhysicalRelationship
 from .relationship import Relationship
 from .relationship_data import RelationshipData
+from .source_access import NodeSourceAccess, RelationshipSourceAccess
+from .source_context import SourceContext
 from .virtual_sources import attach_virtual_source, get_virtual_source
 
 
@@ -24,6 +26,7 @@ class DataResolver:
 
     def __init__(self) -> None:
         self._data_cache: DataCache = DataCache()
+        self._source_context: Optional[SourceContext] = None
 
     @classmethod
     def get_instance(cls) -> 'DataResolver':
@@ -41,11 +44,64 @@ class DataResolver:
         Each top-level Runner creates its own DataCache instance."""
         self._data_cache = cache
 
+    @property
+    def source_context(self) -> Optional[SourceContext]:
+        """Source context of the most recently started top-level query."""
+        return self._source_context
+
+    @source_context.setter
+    def source_context(self, ctx: Optional[SourceContext]) -> None:
+        self._source_context = ctx
+
+    @staticmethod
+    def _deferrable(physical: Any, ctx: SourceContext) -> bool:
+        return getattr(physical, "provider", None) is not None and not (
+            ctx.provenance and physical.statement is not None
+        )
+
+    def get_access(
+        self, element: Union[Node, Relationship], ctx: SourceContext
+    ) -> Optional[Union[NodeSourceAccess, RelationshipSourceAccess]]:
+        """Returns provider-backed access for an element when every physical
+        definition it can match is backed by a source provider; otherwise
+        None, and the element is loaded eagerly through get_data."""
+        db = Database.get_instance()
+        if isinstance(element, Node):
+            candidates: List[Any]
+            if len(element.labels) == 0:
+                candidates = list(db.nodes.items())
+            else:
+                candidates = [
+                    (label, db.nodes[label]) for label in element.labels if label in db.nodes
+                ]
+            if len(candidates) == 0 or not all(
+                DataResolver._deferrable(p, ctx) for _, p in candidates
+            ):
+                return None
+            return NodeSourceAccess(
+                ctx, [{"label": label, "provider": p.provider} for label, p in candidates]
+            )
+        entries = self._get_relationship_entries(element, db)
+        if len(entries) == 0 or not all(DataResolver._deferrable(p, ctx) for _, p in entries):
+            return None
+        return RelationshipSourceAccess(
+            ctx,
+            [
+                {
+                    "type": t,
+                    "sourceLabel": p.source.label if p.source is not None else None,
+                    "targetLabel": p.target.label if p.target is not None else None,
+                    "provider": p.provider,
+                }
+                for t, p in entries
+            ],
+        )
+
     async def schema(self) -> List[Dict[str, Any]]:
         """Returns the graph schema with node/relationship labels and sample data."""
         return [item async for item in self._schema()]
 
-    async def _schema(self) -> AsyncIterator[Dict[str, Any]]:
+    async def _schema(self) -> AsyncGenerator[Dict[str, Any], None]:
         """Async generator for graph schema."""
         db = Database.get_instance()
         for label, physical_node in db.nodes.items():

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .physical_node import PhysicalNode
 from .physical_relationship import PhysicalRelationship
+
+if TYPE_CHECKING:
+    from .source_context import SourceContext
 
 
 class DataCache:
@@ -24,9 +27,14 @@ class DataCache:
     provenance, so we trade re-execution for correctness here.
     """
 
-    def __init__(self, provenance: bool = False) -> None:
+    def __init__(
+        self,
+        provenance: bool = False,
+        source_context: Optional["SourceContext"] = None,
+    ) -> None:
         self._cache: Dict[str, List[Dict[str, Any]]] = {}
         self._provenance = provenance
+        self._source_context = source_context
 
     async def get(
         self,
@@ -35,12 +43,25 @@ class DataCache:
         args: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         if self._provenance:
-            return await physical.data(args, provenance=True)
+            return await self._load(physical, args, True)
         if args is not None:
-            return await physical.data(args)
+            return await self._load(physical, args, False)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
-        data = await physical.data(None)
+        data = await self._load(physical, None, False)
         self._cache[key] = data
         return data
+
+    async def _load(
+        self,
+        physical: Union[PhysicalNode, PhysicalRelationship],
+        args: Optional[Dict[str, Any]],
+        provenance: bool,
+    ) -> List[Dict[str, Any]]:
+        # Keep the legacy call shape for definitions without a provider.
+        if self._source_context is None or getattr(physical, "provider", None) is None:
+            if provenance:
+                return await physical.data(args, provenance=True)
+            return await physical.data(args)
+        return await physical.data(args, provenance, self._source_context)

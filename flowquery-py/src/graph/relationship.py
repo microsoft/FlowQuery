@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Union
+from contextlib import aclosing
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
 
 from ..parsing.ast_node import ASTNode
 from .hops import Hops
 from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
+from .source_access import SourceTerms, build_terms
 
 if TYPE_CHECKING:
     from .node import Node
@@ -28,6 +30,8 @@ class Relationship(ASTNode):
         self._value: Optional[Union[RelationshipMatchRecord, List[RelationshipMatchRecord]]] = None
         self._matches: RelationshipMatchCollector = RelationshipMatchCollector()
         self._properties: Dict[str, Any] = {}
+        self._access: Any = None
+        self._frames: Dict[int, Dict[str, Any]] = {}
 
     @property
     def identifier(self) -> Optional[str]:
@@ -132,6 +136,56 @@ class Relationship(ASTNode):
     def get_data(self) -> Optional['RelationshipData']:
         return self._data
 
+    def set_access(self, access: Any) -> None:
+        """Internal: provider-backed access; when set, rows are fetched on demand."""
+        self._access = access
+        self._frames.clear()
+
+    @property
+    def access(self) -> Any:
+        return self._access
+
+    def source_terms(self) -> SourceTerms:
+        return build_terms(self._properties, [])
+
+    @property
+    def anchor_side(self) -> str:
+        """Stored endpoint matched against the traversal's current node id."""
+        return "right" if self._direction == "left" else "left"
+
+    @property
+    def next_field(self) -> str:
+        """Stored endpoint holding the id of the next node in traversal order."""
+        return "left_id" if self._direction == "left" else "right_id"
+
+    def current_record(self, hop: int = 0) -> Optional[Dict[str, Any]]:
+        """The relationship row bound at ``hop`` (deferred frames or legacy data cursor)."""
+        if hop in self._frames:
+            return self._frames[hop]
+        if self._access is not None:
+            return None
+        if self._data is None:
+            return None
+        return self._data.current(hop)
+
+    def set_frame(self, hop: int, record: Dict[str, Any]) -> None:
+        """Internal: bind a row for ``hop`` (used by reversed plans)."""
+        self._frames[hop] = record
+
+    def clear_frame(self, hop: int) -> None:
+        """Internal: unbind the row for ``hop`` (end of a reversed match)."""
+        self._frames.pop(hop, None)
+
+    def push_match(self, record: Dict[str, Any], traversal_id: str) -> None:
+        """Internal: push a match for an explicitly supplied row."""
+        self._matches.push(self, traversal_id, record)
+        self._value = self._matches.value()
+
+    def pop_match(self) -> None:
+        """Internal: pop the most recent match."""
+        self._matches.pop()
+        self._value = self._matches.value()
+
     def set_value(self, relationship: 'Relationship', traversal_id: str = "") -> None:
         """Set value by pushing match to collector."""
         self._matches.push(relationship, traversal_id)
@@ -151,8 +205,13 @@ class Relationship(ASTNode):
     def _left_id_or_right_id(self) -> str:
         return "left_id" if self._direction == "left" else "right_id"
 
-    async def find(self, left_id: str, hop: int = 0) -> AsyncIterator[None]:
+    async def find(self, left_id: str, hop: int = 0) -> AsyncGenerator[None, None]:
         """Find relationships starting from the given node ID."""
+        if self._access is not None:
+            async with aclosing(self._deferred_find(left_id, hop)) as gen:
+                async for _ in gen:
+                    yield
+            return
         # Save original source node
         original = self._source
         if hop > 0:
@@ -197,3 +256,77 @@ class Relationship(ASTNode):
         finally:
             # Restore original source node
             self._source = original
+
+    async def _deferred_find(self, left_id: Any, hop: int) -> AsyncGenerator[None, None]:
+        original = self._source
+        if hop > 0:
+            self._source = self._target
+        try:
+            if (
+                hop == 0
+                and self._hops is not None
+                and self._hops.multi()
+                and self._hops.min == 0
+                and self._target is not None
+            ):
+                async with aclosing(self._target.find(left_id, hop)) as zero:
+                    async for _ in zero:
+                        yield
+            all_terms, args = self.source_terms()
+            # Hops below the minimum are not property-checked, so nothing is pushed.
+            terms = all_terms if hop + 1 >= self._hops.min else []
+            target = self._target
+            access = self._access
+            async with aclosing(access.expand(left_id, self.anchor_side, terms, args)) as pages:
+                async for page in pages:
+                    target_access = target.access if target is not None else None
+                    if (
+                        target is not None
+                        and target_access is not None
+                        and getattr(target_access, "deferred", False)
+                        and len(page) > 1
+                    ):
+                        t_terms, t_args = target.source_terms()
+                        await target_access.prefetch(
+                            [row.get(self.next_field) for row in page], t_terms, t_args
+                        )
+                    for row in page:
+                        async with aclosing(self._visit(row, left_id, hop)) as visit:
+                            async for _ in visit:
+                                yield
+        finally:
+            self._source = original
+
+    async def _visit(
+        self, record: Dict[str, Any], left_id: Any, hop: int
+    ) -> AsyncGenerator[None, None]:
+        self._frames[hop] = record
+        id_: Any = record.get(self.next_field)
+        if hop + 1 >= self._hops.min:
+            if not self.matches_record(record):
+                return
+            self.push_match(record, left_id)
+            try:
+                if self._target is not None:
+                    async with aclosing(self._target.find(id_, hop)) as found:
+                        async for _ in found:
+                            yield
+                if hop + 1 < self._hops.max and not self._matches.is_circular(id_):
+                    async with aclosing(self.find(id_, hop + 1)) as deeper:
+                        async for _ in deeper:
+                            yield
+            finally:
+                self._matches.pop()
+        else:
+            async with aclosing(self.find(id_, hop + 1)) as below:
+                async for _ in below:
+                    yield
+
+    def matches_record(self, record: Dict[str, Any]) -> bool:
+        """Re-check relationship property constraints against a provider row."""
+        for key, expression in self._properties.items():
+            if key not in record:
+                raise ValueError("Relationship does not have property")
+            if record[key] != expression.value():
+                return False
+        return True

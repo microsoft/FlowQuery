@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Optional
+from contextlib import aclosing
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.expression import Expression
 from .node_data import NodeData, NodeRecord
+from .source_access import PushedPredicate, SourceTerms, build_terms
 
 if TYPE_CHECKING:
     from .relationship import Relationship
@@ -29,6 +31,8 @@ class Node(ASTNode):
         self._incoming: Optional['Relationship'] = None
         self._outgoing: Optional['Relationship'] = None
         self._data: Optional['NodeData'] = None
+        self._access: Any = None
+        self._pushed_predicates: List[PushedPredicate] = []
 
     @property
     def identifier(self) -> Optional[str]:
@@ -111,7 +115,44 @@ class Node(ASTNode):
     def set_data(self, data: Optional['NodeData']) -> None:
         self._data = data
 
-    async def next(self) -> AsyncIterator[None]:
+    def get_data(self) -> Optional['NodeData']:
+        return self._data
+
+    def set_access(self, access: Any) -> None:
+        """Provider-backed access; when set, rows are fetched on demand."""
+        self._access = access
+
+    @property
+    def access(self) -> Any:
+        return self._access
+
+    @property
+    def pushed_predicates(self) -> List[PushedPredicate]:
+        """WHERE comparisons pushed to this node's source (set by MATCH)."""
+        return self._pushed_predicates
+
+    @pushed_predicates.setter
+    def pushed_predicates(self, predicates: List[PushedPredicate]) -> None:
+        self._pushed_predicates = predicates
+
+    def source_terms(self) -> SourceTerms:
+        return build_terms(self._properties, self._pushed_predicates)
+
+    def matches_record(self, record: Dict[str, Any]) -> bool:
+        """Residual check of the pattern's own property constraints against a row."""
+        for key, expression in self._properties.items():
+            if key not in record:
+                return False
+            if record[key] != expression.value():
+                return False
+        return True
+
+    async def next(self) -> AsyncGenerator[None, None]:
+        if self._access is not None:
+            async with aclosing(self._deferred_next()) as gen:
+                async for _ in gen:
+                    yield
+            return
         if self._data:
             self._data.reset()
             while self._data.next():
@@ -126,7 +167,12 @@ class Node(ASTNode):
                     else:
                         yield
 
-    async def find(self, id_: str, hop: int = 0) -> AsyncIterator[None]:
+    async def find(self, id_: Any, hop: int = 0) -> AsyncGenerator[None, None]:
+        if self._access is not None:
+            async with aclosing(self._deferred_find(id_, hop)) as gen:
+                async for _ in gen:
+                    yield
+            return
         if self._data:
             self._data.reset()
             while self._data.find(id_, hop):
@@ -150,3 +196,78 @@ class Node(ASTNode):
                             yield
                     else:
                         yield
+
+    async def _deferred_next(self) -> AsyncGenerator[None, None]:
+        access = self._access
+        terms, args = self.source_terms()
+        id_term = next(
+            (t for t in terms if t.get("op") == "eq" and t.get("property") == "id"), None
+        )
+
+        async def single() -> AsyncGenerator[List[Dict[str, Any]], None]:
+            assert id_term is not None
+            yield await access.lookup(id_term["value"], terms, args)
+
+        if id_term is not None and id_term.get("value") is not None and access.can_lookup():
+            pages = single()
+        else:
+            pages = access.scan(terms, args)
+        async with aclosing(pages) as page_iter:
+            async for page in page_iter:
+                rows = [row for row in page if self.matches_record(row)]
+                if self._outgoing is not None and len(rows) > 1:
+                    await Node.prefetch_chain(self, [row.get("id") for row in rows])
+                for row in rows:
+                    self.set_value(row)
+                    if self._outgoing:
+                        row_id: Any = row.get("id")
+                        async with aclosing(self._outgoing.find(row_id)) as inner:
+                            async for _ in inner:
+                                yield
+                    else:
+                        yield
+
+    async def _deferred_find(self, id_: Any, hop: int) -> AsyncGenerator[None, None]:
+        terms, args = self.source_terms()
+        rows = await self._access.lookup(id_, terms, args)
+        for row in rows:
+            self.set_value(row)
+            if self._incoming:
+                self._incoming.set_end_node(self)
+            if not self.matches_record(row):
+                continue
+            if self._outgoing:
+                async with aclosing(self._outgoing.find(row.get("id"), hop)) as inner:
+                    async for _ in inner:
+                        yield
+            else:
+                yield
+
+    @staticmethod
+    async def prefetch_chain(node: 'Node', ids: List[Any]) -> None:
+        """Batch-prefetch the single-hop provider-backed chain that follows
+        ``node`` for a page of anchor ids, so traversal issues one request
+        per batch instead of one per row."""
+        current: Node = node
+        anchors = ids
+        while current.outgoing is not None:
+            rel = current.outgoing
+            target = rel.target
+            if (
+                rel.access is None
+                or not rel.access.deferred
+                or (rel.hops is not None and rel.hops.multi())
+                or target is None
+            ):
+                return
+            rel_terms, rel_args = rel.source_terms()
+            rows = await rel.access.prefetch(anchors, rel.anchor_side, rel_terms, rel_args)
+            if rows is None:
+                return
+            next_ids = [row.get(rel.next_field) for row in rows]
+            if target.access is None or not target.access.deferred:
+                return
+            target_terms, target_args = target.source_terms()
+            await target.access.prefetch(next_ids, target_terms, target_args)
+            anchors = next_ids
+            current = target

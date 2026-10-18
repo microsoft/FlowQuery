@@ -274,6 +274,113 @@ The same chain is reflected statically in `info.sources` so callers
 can introspect the upstream dependency graph without running the
 query.
 
+## Backend-Aware Virtual Sources
+
+By default a virtual definition is loaded eagerly: its sub-query runs
+once per query and all rows are held in memory. For large or remote
+backends, a **source provider** lets FlowQuery read only what a pattern
+needs. This is opt-in: existing `CREATE VIRTUAL` definitions behave
+exactly as before.
+
+A provider is any object with a `capabilities` dict and a required
+`scan(request, context)` method. It can also implement
+`lookup(request, context)` (nodes by id) and `expand(request, context)`
+(relationships by `left_id`/`right_id`). A method may return a list of
+rows, an awaitable list, or an (async) iterable of pages. Capability and
+request keys use the same camelCase names as the TypeScript
+implementation (`pageSize`, `maxBatchSize`, `sourceLabel`, ...).
+
+```python
+from flowquery import FlowQuery, cursor_pages, matches_predicate
+
+class People:
+    capabilities = {
+        "version": 1,
+        "lookup": True,          # implements lookup()
+        "cacheable": True,       # identical reads within one query may be cached
+        "maxBatchSize": 50,      # ids per lookup/expand request
+        "predicates": {"operators": ["eq", "in", "gt", "gte", "lt", "lte"]},
+    }
+
+    def scan(self, request, context):
+        async def fetch(cursor):
+            page = await api.people(filter=request.get("predicate"), cursor=cursor)
+            return {"rows": page.rows, "cursor": page.next_cursor}
+        return cursor_pages(fetch)
+
+    async def lookup(self, request, context):
+        return await api.people_by_ids(request["ids"])
+
+class Knows:
+    capabilities = {"version": 1, "expand": {"left": True, "right": True}}
+
+    async def scan(self, request, context):
+        return await api.all_knows()
+
+    async def expand(self, request, context):
+        key = "from" if request["side"] == "left" else "to"
+        return await api.knows(**{key: request["ids"]})
+
+FlowQuery.register_node_source("Person", People())
+FlowQuery.register_relationship_source("KNOWS", "Person", "Person", Knows())
+
+fq = FlowQuery("MATCH (a:Person {id: 7})-[:KNOWS]->(b:Person) RETURN b.name LIMIT 10")
+await fq.run()
+print(fq.source_stats)  # calls, pages, rows, cacheHits, batches, plans...
+```
+
+The engine then loads correlated rows in batches instead of reading
+every person and relationship:
+
+- **Correlated loading and batching.** It issues id lookups, expands per
+  page of anchor nodes, and makes batched lookups for target nodes.
+- **Selective start points.** A chain may start from its more selective
+  end. The decision is recorded in `source_stats["plans"]`, and it can
+  change result order when there is no `ORDER BY`.
+- **Predicate push-down.** Pattern properties and `AND`-ed `WHERE`
+  comparisons (`=`, `<`, `<=`, `>`, `>=`, `IN`) against literals or
+  parameters are sent as `request["predicate"]`.
+- **Streaming with early stop under `LIMIT`.** Reading stops once the
+  limit is reached and the provider's iterator is closed.
+- **Query-scoped caching.**
+- **Cancellation.** Call `runner.cancel()` or pass
+  `SourceOptions(signal=...)` (an `asyncio.Event` or `SourceSignal`).
+  The query raises `QueryCancelledError`.
+- **Read contexts.** Optional `open_read_context()` and
+  `close_read_context(snapshot)` methods are called once per query.
+
+Providers may return a **superset**, because FlowQuery re-checks every
+row. `matches_predicate(predicate, row)` is a reference implementation
+of the predicate semantics.
+
+Errors are reported through typed exceptions:
+
+- `SourceCapabilityError`: an invalid declaration, raised at
+  registration.
+- `SourceResponseError`: malformed pages or a repeated cursor.
+- `SourceError`: any other provider failure.
+
+A provider may raise `SourceUnsupportedError` from `lookup`/`expand` to
+fall back to a scan.
+
+Query-level tuning goes in `RunnerOptions(sources=SourceOptions(...))`:
+`page_size` (256), `max_batch_size` (100), `cache_capacity` (10000),
+`max_prefetch_rows` (1024) and `reorder` (`True`).
+
+**Statement-backed sources.** An existing `CREATE VIRTUAL` definition
+can opt into the same contract. Each request runs its sub-query with
+`$request` bound to the request (`operation`, `label`/`type`, `ids`,
+`side`, `predicate`, `pageSize`):
+
+```python
+FlowQuery.set_node_source_capabilities(
+    "Ticket", {"version": 1, "lookup": True, "streaming": True}
+)
+```
+
+Pass `None` to opt out again. Redefining or deleting the label also
+clears the opt-in.
+
 ## Documentation
 
 - [Language Reference](https://github.com/microsoft/FlowQuery#language-reference) (clauses, expressions, functions, graph operations, and more)

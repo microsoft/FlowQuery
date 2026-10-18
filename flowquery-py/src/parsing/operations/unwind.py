@@ -35,8 +35,14 @@ class Unwind(Operation):
             self._value = item
             if self.next:
                 await self.next.run()
+                if self.next.saturated:
+                    break
         if self.next:
             self.next.reset()
 
     def value(self) -> Any:
         return self._value
+
+    @property
+    def saturated(self) -> bool:
+        return self.next.saturated if self.next else False

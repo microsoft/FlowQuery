@@ -14,9 +14,7 @@ class RelationshipReference extends Relationship {
     }
     public async *find(left_id: string, hop: number = 0): AsyncGenerator<void> {
         this.setValue(this._reference!);
-        const data: RelationshipRecord = this._reference!.getData()?.current(
-            hop
-        ) as RelationshipRecord;
+        const data: RelationshipRecord = this._reference!.currentRecord(hop) as RelationshipRecord;
         const followId = this._direction === "left" ? "left_id" : "right_id";
         if (this._target) {
             yield* this._target.find(data[followId], hop);

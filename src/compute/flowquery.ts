@@ -1,3 +1,10 @@
+import Database from "../graph/database";
+import {
+    NodeSourceCapabilities,
+    NodeSourceProvider,
+    RelationshipSourceCapabilities,
+    RelationshipSourceProvider,
+} from "../graph/source_provider";
 import Function from "../parsing/functions/function";
 import { FunctionMetadata } from "../parsing/functions/function_metadata";
 import Runner from "./runner";
@@ -41,6 +48,53 @@ class FlowQuery extends Runner {
      * Base Function class for creating custom plugin functions.
      */
     static Function: typeof Function;
+
+    /**
+     * Register a backend-aware node source for `label` (replacing any
+     * existing virtual definition).  See `NodeSourceProvider`.
+     */
+    static registerNodeSource(label: string, provider: NodeSourceProvider): void {
+        Database.getInstance().registerNodeSource(label, provider);
+    }
+
+    /**
+     * Register a backend-aware relationship source for
+     * `(:sourceLabel)-[:type]->(:targetLabel)`.  See `RelationshipSourceProvider`.
+     */
+    static registerRelationshipSource(
+        type: string,
+        sourceLabel: string | null,
+        targetLabel: string | null,
+        provider: RelationshipSourceProvider
+    ): void {
+        Database.getInstance().registerRelationshipSource(type, sourceLabel, targetLabel, provider);
+    }
+
+    /**
+     * Opt a `CREATE VIRTUAL (:label) AS { ... }` definition into the source
+     * contract with explicit capabilities, or pass `null` to opt out.
+     */
+    static setNodeSourceCapabilities(
+        label: string,
+        capabilities: NodeSourceCapabilities | null
+    ): void {
+        Database.getInstance().setNodeSourceCapabilities(label, capabilities);
+    }
+
+    /** Relationship counterpart of {@link FlowQuery.setNodeSourceCapabilities}. */
+    static setRelationshipSourceCapabilities(
+        type: string,
+        sourceLabel: string | null,
+        targetLabel: string | null,
+        capabilities: RelationshipSourceCapabilities | null
+    ): void {
+        Database.getInstance().setRelationshipSourceCapabilities(
+            type,
+            sourceLabel,
+            targetLabel,
+            capabilities
+        );
+    }
 }
 
 export default FlowQuery;

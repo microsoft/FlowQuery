@@ -28,6 +28,7 @@ class Return extends Projection {
     protected _provenanceSources: ProvenanceSource[] | null = null;
     protected _provenanceSink: RowProvenance[] | null = null;
     protected _provenanceRows: RowProvenance[] = [];
+    protected _rowSink: ((row: Record<string, any>) => Promise<void> | void) | null = null;
     public set where(where: Where) {
         this._where = where;
     }
@@ -42,6 +43,21 @@ class Return extends Projection {
     }
     public set orderBy(orderBy: OrderBy) {
         this._orderBy = orderBy;
+    }
+    public get saturated(): boolean {
+        return this._orderBy === null && this._limit !== null && this._limit.isLimitReached;
+    }
+    /** @internal Whether rows can be handed to a sink as they are produced. */
+    public get supportsRowSink(): boolean {
+        return this._orderBy === null && this._provenanceSink === null;
+    }
+    /**
+     * @internal Deliver each projected row to `sink` instead of buffering
+     * it (used to stream statement-backed sources).  Pass `null` to restore
+     * buffering.
+     */
+    public setRowSink(sink: ((row: Record<string, any>) => Promise<void> | void) | null): void {
+        this._rowSink = sink;
     }
     /**
      * Direct the runner-owned sink that receives the post-sorted,
@@ -92,6 +108,13 @@ class Return extends Projection {
         // Capture sort-key values while expression bindings are still live.
         if (this._orderBy !== null) {
             this._orderBy.captureSortKeys();
+        }
+        if (this._rowSink !== null) {
+            if (this._limit !== null) {
+                this._limit.increment();
+            }
+            await this._rowSink(Object.fromEntries(record));
+            return;
         }
         this._results.push(Object.fromEntries(record));
         if (this._provenanceSink !== null) {

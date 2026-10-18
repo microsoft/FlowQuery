@@ -1,11 +1,14 @@
+import DataResolver from "./data_resolver";
 import Node from "./node";
 import NodeReference from "./node_reference";
 import Pattern from "./pattern";
 import Relationship from "./relationship";
+import type SourceContext from "./source_context";
 
 class PatternExpression extends Pattern {
     private _fetched: boolean = false;
     private _evaluation: boolean = false;
+    private _fetchedContext: SourceContext | null = null;
     public set identifier(id: string | null) {
         throw new Error("Cannot set identifier on PatternExpression");
     }
@@ -35,12 +38,15 @@ class PatternExpression extends Pattern {
     public value(): boolean {
         return this._evaluation;
     }
-    public async fetchData(): Promise<void> {
-        if (this._fetched) {
+    public async fetchData(ctx: SourceContext | null = null): Promise<void> {
+        const context = ctx ?? DataResolver.getInstance().sourceContext;
+        // Source-backed access is bound to one query's context.
+        if (this._fetched && (!this.deferred || this._fetchedContext === context)) {
             return;
         }
-        await super.fetchData();
+        await super.fetchData(context);
         this._fetched = true;
+        this._fetchedContext = context;
     }
 }
 

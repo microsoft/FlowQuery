@@ -78,3 +78,35 @@ export type {
     RunnerOptions,
     StatementInfo,
 };
+
+// Backend-aware virtual source contract
+export {
+    SOURCE_CONTRACT_VERSION,
+    PREDICATE_OPERATORS,
+    SourceError,
+    SourceCapabilityError,
+    SourceResponseError,
+    SourceUnsupportedError,
+    QueryCancelledError,
+    cursorPages,
+    matchesPredicate,
+} from "./graph/source_provider";
+export type {
+    SourceRow,
+    PredicateOperator,
+    SourcePredicate,
+    PredicateCapabilities,
+    NodeSourceCapabilities,
+    RelationshipSourceCapabilities,
+    NodeScanRequest,
+    NodeLookupRequest,
+    RelationshipScanRequest,
+    RelationshipExpandRequest,
+    NodeSourceRequest,
+    RelationshipSourceRequest,
+    SourceReadContext,
+    SourceResult,
+    NodeSourceProvider,
+    RelationshipSourceProvider,
+} from "./graph/source_provider";
+export type { SourceOptions, SourceStats, SourcePlan } from "./graph/source_context";

@@ -1,14 +1,14 @@
 /**
  * FlowQuery Extensibility API
- * 
+ *
  * This module provides all the exports needed to create custom FlowQuery functions.
- * 
+ *
  * @packageDocumentation
- * 
+ *
  * @example
  * ```typescript
  * import { Function, FunctionDef } from 'flowquery/extensibility';
- * 
+ *
  * @FunctionDef({
  *     description: "Converts a string to uppercase",
  *     category: "string",
@@ -35,11 +35,43 @@ export { default as PredicateFunction } from "./parsing/functions/predicate_func
 export { default as ReducerElement } from "./parsing/functions/reducer_element";
 
 // Decorator and metadata types for function registration
-export { 
+export {
     FunctionDef,
     FunctionMetadata,
     FunctionDefOptions,
     ParameterSchema,
     OutputSchema,
-    FunctionCategory
+    FunctionCategory,
 } from "./parsing/functions/function_metadata";
+
+// Backend-aware virtual source contract
+export {
+    SOURCE_CONTRACT_VERSION,
+    PREDICATE_OPERATORS,
+    SourceError,
+    SourceCapabilityError,
+    SourceResponseError,
+    SourceUnsupportedError,
+    QueryCancelledError,
+    cursorPages,
+    matchesPredicate,
+} from "./graph/source_provider";
+export type {
+    SourceRow,
+    PredicateOperator,
+    SourcePredicate,
+    PredicateCapabilities,
+    NodeSourceCapabilities,
+    RelationshipSourceCapabilities,
+    NodeScanRequest,
+    NodeLookupRequest,
+    RelationshipScanRequest,
+    RelationshipExpandRequest,
+    NodeSourceRequest,
+    RelationshipSourceRequest,
+    SourceReadContext,
+    SourceResult,
+    NodeSourceProvider,
+    RelationshipSourceProvider,
+} from "./graph/source_provider";
+export type { SourceOptions, SourceStats, SourcePlan } from "./graph/source_context";

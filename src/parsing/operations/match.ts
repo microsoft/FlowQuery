@@ -1,11 +1,21 @@
 import Node from "../../graph/node";
 import Pattern from "../../graph/pattern";
 import Patterns from "../../graph/patterns";
+import { PushedPredicate, isStaticExpression } from "../../graph/source_access";
+import type SourceContext from "../../graph/source_context";
 import ASTNode from "../ast_node";
 import Lookup from "../data_structures/lookup";
 import Expression from "../expressions/expression";
 import Identifier from "../expressions/identifier";
-import { And, Equals } from "../expressions/operator";
+import {
+    And,
+    Equals,
+    GreaterThan,
+    GreaterThanOrEqual,
+    In,
+    LessThan,
+    LessThanOrEqual,
+} from "../expressions/operator";
 import Reference from "../expressions/reference";
 import Operation from "./operation";
 import Where from "./where";
@@ -13,6 +23,7 @@ import Where from "./where";
 class Match extends Operation {
     private _patterns: Patterns | null = null;
     private _optional: boolean = false;
+    private _sourceContext: SourceContext | null = null;
 
     constructor(patterns: Pattern[] = [], optional: boolean = false) {
         super();
@@ -25,6 +36,16 @@ class Match extends Operation {
     public get optional(): boolean {
         return this._optional;
     }
+    /** @internal Query-scoped source context assigned by the runner. */
+    public set sourceContext(ctx: SourceContext | null) {
+        this._sourceContext = ctx;
+    }
+    public get sourceContext(): SourceContext | null {
+        return this._sourceContext;
+    }
+    public get saturated(): boolean {
+        return this.next?.saturated ?? false;
+    }
     protected toString(): string {
         return this._optional ? "OptionalMatch" : "Match";
     }
@@ -36,12 +57,19 @@ class Match extends Operation {
      */
     public async run(): Promise<void> {
         this.extractWherePredicates();
-        await this._patterns!.initialize();
+        this.extractPushdownPredicates();
+        await this._patterns!.initialize(this._sourceContext);
         let matched = false;
         for await (const _ of this._patterns!.traverse()) {
+            this._sourceContext?.throwIfCancelled();
             matched = true;
             // Continue to the next operation after all patterns are matched
             await this.next?.run();
+            // Nothing downstream can change any more (e.g. LIMIT reached):
+            // stop reading so source-backed reads are closed early.
+            if (this.next?.saturated) {
+                break;
+            }
         }
         // For OPTIONAL MATCH: if nothing matched, continue with null values
         if (!matched && this._optional) {
@@ -93,6 +121,92 @@ class Match extends Operation {
                 node.setProperty(pred.property, pred.valueExpression);
             }
         }
+    }
+
+    /**
+     * Attaches range and IN comparisons from the immediately following WHERE
+     * clause to the pattern nodes so that source providers may evaluate
+     * them.  The WHERE clause stays in place and re-checks every row, so
+     * sources only need to return a superset.  Not applied to OPTIONAL
+     * MATCH, whose null-row semantics depend on the full candidate set.
+     */
+    private extractPushdownPredicates(): void {
+        const nodeMap = new Map<string, Node>();
+        for (const pattern of this._patterns!.patterns) {
+            for (const element of pattern.chain) {
+                if (element instanceof Node && element.constructor === Node) {
+                    element.pushedPredicates = [];
+                    if (element.identifier !== null) {
+                        nodeMap.set(element.identifier, element);
+                    }
+                }
+            }
+        }
+        if (this._optional || !(this.next instanceof Where)) {
+            return;
+        }
+        const where = this.next as Where;
+        for (const { identifier, predicate } of this.collectPushdownPredicates(
+            where.expression.firstChild()
+        )) {
+            const node = nodeMap.get(identifier);
+            if (node !== undefined) {
+                node.pushedPredicates = [...node.pushedPredicates, predicate];
+            }
+        }
+    }
+
+    private collectPushdownPredicates(
+        node: ASTNode
+    ): { identifier: string; predicate: PushedPredicate }[] {
+        if (node instanceof And) {
+            return [
+                ...this.collectPushdownPredicates(node.lhs),
+                ...this.collectPushdownPredicates(node.rhs),
+            ];
+        }
+        const ops: [any, PushedPredicate["op"], PushedPredicate["op"] | null][] = [
+            [GreaterThan, "gt", "lt"],
+            [GreaterThanOrEqual, "gte", "lte"],
+            [LessThan, "lt", "gt"],
+            [LessThanOrEqual, "lte", "gte"],
+            [In, "in", null],
+        ];
+        for (const [type, op, flipped] of ops) {
+            if (!(node instanceof type)) continue;
+            const operator = node as any;
+            const direct = this.pushdownTerm(operator.lhs, operator.rhs, op);
+            if (direct !== null) return [direct];
+            if (flipped !== null) {
+                const reversed = this.pushdownTerm(operator.rhs, operator.lhs, flipped);
+                if (reversed !== null) return [reversed];
+            }
+            return [];
+        }
+        return [];
+    }
+
+    private pushdownTerm(
+        lookupSide: ASTNode,
+        valueSide: ASTNode,
+        op: PushedPredicate["op"]
+    ): { identifier: string; predicate: PushedPredicate } | null {
+        if (
+            !(lookupSide instanceof Lookup) ||
+            !(lookupSide.variable instanceof Reference) ||
+            !(lookupSide.index instanceof Identifier) ||
+            !isStaticExpression(valueSide)
+        ) {
+            return null;
+        }
+        return {
+            identifier: (lookupSide.variable as Reference).identifier,
+            predicate: {
+                op,
+                property: (lookupSide.index as Identifier).value(),
+                expression: valueSide,
+            },
+        };
     }
 
     /**

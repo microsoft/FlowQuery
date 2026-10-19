@@ -27,7 +27,13 @@ import Match from "../parsing/operations/match";
 import Operation from "../parsing/operations/operation";
 import Return from "../parsing/operations/return";
 import Union from "../parsing/operations/union";
-import { WriteOperation, commitWrites, prepareWrites } from "../parsing/operations/write";
+import {
+    WriteOperation,
+    commitWrites,
+    flushWrites,
+    prepareWrites,
+    rollbackWrites,
+} from "../parsing/operations/write";
 import Parser from "../parsing/parser";
 import StatementInfoCrawler, {
     ColumnLineage,
@@ -366,15 +372,25 @@ class Runner {
                         if (!this._isTopLevel || this._sourceContext === null) {
                             throw new Error("Write clauses are only allowed in top-level queries");
                         }
-                        prepareWrites(writes, this._sourceContext);
+                        prepareWrites(stmt.first, this._sourceContext);
                     }
                     await stmt.first.initialize();
                     await stmt.first.run();
                     await stmt.first.finish();
+                    // Transactional backends get each statement's changes
+                    // before the next statement reads.
+                    const pending = this._sourceContext?.writes;
+                    if (this._isTopLevel && pending?.transactional && pending.backend !== null) {
+                        await flushWrites(this._sourceContext!, pending);
+                    }
                 }
                 await this.commitWrites();
             } catch (e) {
                 failed = true;
+                const writes = this._isTopLevel ? this._sourceContext?.writes : null;
+                if (writes) {
+                    await rollbackWrites(this._sourceContext!, writes);
+                }
                 reject(e);
             } finally {
                 if (sink !== undefined && last instanceof Return) {
@@ -409,17 +425,17 @@ class Runner {
     }
 
     /**
-     * Send the change set collected by write clauses to the backend in
-     * one call, then replace temporary refs in the results by final ids.
-     * Only runs when every statement succeeded and the query was not
-     * cancelled.
+     * Finish the query's writes: send the remaining changes (the whole
+     * change set, in one call, for non-transactional backends), commit a
+     * transactional query, then replace temporary refs in the results by
+     * final ids.  Only runs when every statement succeeded and the query
+     * was not cancelled.
      */
     private async commitWrites(): Promise<void> {
         const ctx = this._sourceContext;
         if (!this._isTopLevel || ctx === null || ctx.writes === null) return;
         const writes = ctx.writes;
         if (writes.changes.length === 0 || writes.backend === null) return;
-        ctx.throwIfCancelled();
         this._writeResult = await commitWrites(ctx, writes);
         // Aggregating projections rebuild their rows on every read, so keep
         // the rows whose temporary refs were replaced.

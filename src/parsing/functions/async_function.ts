@@ -75,13 +75,13 @@ class AsyncFunction extends Function {
      * @internal Opens the class's read context for this query (once) and
      * exposes the query's signal, snapshot and stats as `this.context`.
      */
-    public async prepareContext(): Promise<void> {
+    public async prepareContext(afterCancel: boolean = false): Promise<void> {
         const ctx = this._sourceContext;
         if (ctx === null) {
             this._context = null;
             return;
         }
-        ctx.throwIfCancelled();
+        if (!afterCancel) ctx.throwIfCancelled();
         const readContext = await ctx.readContext(this.constructor);
         this._context = {
             signal: readContext.signal,

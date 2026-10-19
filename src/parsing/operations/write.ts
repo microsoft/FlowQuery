@@ -2,6 +2,7 @@ import Database from "../../graph/database";
 import Node from "../../graph/node";
 import NodeReference from "../../graph/node_reference";
 import Pattern from "../../graph/pattern";
+import PatternExpression from "../../graph/pattern_expression";
 import Relationship from "../../graph/relationship";
 import type SourceContext from "../../graph/source_context";
 import { QueryCancelledError, SourceError } from "../../graph/source_provider";
@@ -14,8 +15,12 @@ import {
 } from "../../graph/write_set";
 import ASTNode from "../ast_node";
 import Expression from "../expressions/expression";
+import SubqueryExpression from "../expressions/subquery_expression";
 import FunctionFactory from "../functions/function_factory";
+import Call from "./call";
 import { definitionBackend } from "./definition_backend";
+import Load from "./load";
+import Match from "./match";
 import Operation from "./operation";
 
 /** A label or relationship type a write clause changes. */
@@ -32,6 +37,7 @@ export type WriteTarget =
 export type SetItem =
     | { kind: "property"; element: Node | Relationship; property: string; expression: Expression }
     | { kind: "merge"; element: Node | Relationship; expression: Expression }
+    | { kind: "replace"; element: Node | Relationship; expression: Expression }
     | { kind: "addLabels"; element: Node; labels: string[] }
     | { kind: "removeProperty"; element: Node | Relationship; property: string }
     | { kind: "removeLabels"; element: Node; labels: string[] };
@@ -39,7 +45,9 @@ export type SetItem =
 function itemExpressions(items: SetItem[]): ASTNode[] {
     const out: ASTNode[] = [];
     for (const item of items) {
-        if (item.kind === "property" || item.kind === "merge") out.push(item.expression);
+        if (item.kind === "property" || item.kind === "merge" || item.kind === "replace") {
+            out.push(item.expression);
+        }
     }
     return out;
 }
@@ -108,6 +116,36 @@ function updateNodeValue(node: Node, properties: Record<string, any>): void {
     node.setValue(next as any);
 }
 
+function withoutNulls(map: any): Record<string, any> {
+    const out: Record<string, any> = {};
+    if (map === null || typeof map !== "object") return out;
+    for (const [k, v] of Object.entries(map)) {
+        if (v !== null && v !== undefined) out[k] = v;
+    }
+    return out;
+}
+
+function replaceNodeValue(node: Node, properties: Record<string, any>): void {
+    const value = nodeValue(node);
+    if (value === null) return;
+    node.setValue({ id: value.id, ...withoutNulls(properties) } as any);
+}
+
+function replaceRelationshipValue(rel: Relationship, properties: Record<string, any>): void {
+    const value = rel.value();
+    if (value === null || Array.isArray(value)) return;
+    const props = withoutNulls(properties);
+    const next: any = {
+        ...props,
+        type: value.type,
+        startNode: value.startNode,
+        endNode: value.endNode,
+        properties: { ...props },
+    };
+    if (value.id !== undefined) next.id = value.id;
+    rel.overrideValue(next);
+}
+
 function updateRelationshipValue(rel: Relationship, properties: Record<string, any>): void {
     const value = rel.value();
     if (value === null || Array.isArray(value)) return;
@@ -155,7 +193,11 @@ export abstract class WriteOperation extends Operation {
     }
     public async run(): Promise<void> {
         this._context?.throwIfCancelled();
-        this.apply(this.writes);
+        const writes = this.writes;
+        this.apply(writes);
+        if (writes.transactional && writes.perRow) {
+            await flushWrites(this._context!, writes);
+        }
         await this.next?.run();
     }
     public get results(): Record<string, any>[] {
@@ -177,6 +219,17 @@ export abstract class WriteOperation extends Operation {
             if (element instanceof Relationship) {
                 const target = relationshipTarget(element);
                 if (target === null) continue;
+                if (item.kind === "replace") {
+                    const properties = { ...(item.expression.value() ?? {}) };
+                    writes.add({
+                        op: "replaceProperties",
+                        target,
+                        type: element.type,
+                        properties,
+                    });
+                    replaceRelationshipValue(element, properties);
+                    continue;
+                }
                 let properties: Record<string, any>;
                 if (item.kind === "property") {
                     properties = { [item.property]: item.expression.value() };
@@ -195,6 +248,12 @@ export abstract class WriteOperation extends Operation {
             if (value === null) continue;
             const label = labelOf(element);
             switch (item.kind) {
+                case "replace": {
+                    const properties = { ...(item.expression.value() ?? {}) };
+                    writes.add({ op: "replaceProperties", target: value.id, label, properties });
+                    replaceNodeValue(element, properties);
+                    break;
+                }
                 case "property":
                 case "merge":
                 case "removeProperty": {
@@ -256,6 +315,7 @@ export class CreateWrite extends WriteOperation {
                         properties,
                     });
                     element.setValue({ id: ref, ...properties } as any);
+                    bindNode(writes, element, ref);
                 }
             }
             for (const element of pattern.chain) {
@@ -276,14 +336,23 @@ export class CreateWrite extends WriteOperation {
                         end: end.id,
                         properties,
                     });
-                    bindRelationship(element, ref, start, end, properties);
+                    bindRelationship(writes, element, ref, start, end, properties);
                 }
             }
         }
     }
 }
 
+/** Swap a node variable's temporary id for the final one once known. */
+function bindNode(writes: WriteSet, node: Node, ref: string): void {
+    writes.bind(ref, (id) => {
+        const value = node.value();
+        if (value !== null && value.id === ref) node.setValue({ ...value, id } as any);
+    });
+}
+
 function bindRelationship(
+    writes: WriteSet,
     rel: Relationship,
     ref: string,
     start: Record<string, any>,
@@ -298,6 +367,15 @@ function bindRelationship(
         startNode: start,
         endNode: end,
         properties: { ...properties },
+    });
+    writes.bind(ref, (id) => {
+        if (rel.createdRecord !== null && rel.createdRecord.id === ref) {
+            rel.createdRecord = { ...rel.createdRecord, id };
+        }
+        const value = rel.value();
+        if (value !== null && !Array.isArray(value) && value.id === ref) {
+            rel.overrideValue({ ...value, id });
+        }
     });
 }
 
@@ -353,6 +431,7 @@ export class MergeWrite extends WriteOperation {
             const key = evaluate(node.properties);
             writes.add({ op: "mergeNode", ref, label: labelOf(node), key, onCreate, onMatch });
             node.setValue({ id: ref, ...key } as any);
+            bindNode(writes, node, ref);
             return;
         }
         const [left, right] = endpoints(rel);
@@ -372,7 +451,7 @@ export class MergeWrite extends WriteOperation {
             onCreate,
             onMatch,
         });
-        bindRelationship(rel, ref, start, end, key);
+        bindRelationship(writes, rel, ref, start, end, key);
     }
 }
 
@@ -450,7 +529,10 @@ function describe(target: WriteTarget): string {
  * effective capabilities declare `writes: true` and whose body loads
  * from `fn($request)`.
  */
-export function resolveWriteBackend(target: WriteTarget): WriteBackend {
+export function resolveWriteBackend(target: WriteTarget): {
+    backend: WriteBackend;
+    transactions: boolean;
+} {
     const db = Database.getInstance();
     const name = describe(target);
     let physical: any = undefined;
@@ -493,48 +575,74 @@ export function resolveWriteBackend(target: WriteTarget): WriteBackend {
         .getChildren()
         .map((child, i) => (i === backend.requestIndex ? null : child.value()));
     return {
-        name: backend.name,
-        functionClass: backend.functionClass,
-        requestIndex: backend.requestIndex,
-        args,
+        backend: {
+            name: backend.name,
+            functionClass: backend.functionClass,
+            requestIndex: backend.requestIndex,
+            args,
+        },
+        transactions: physical.provider.capabilities?.transactions === true,
     };
 }
 
+/** True when a clause after the statement's first write clause reads data. */
+export function readsAfterWrites(first: Operation | null): boolean {
+    let written = false;
+    for (let op = first; op !== null; op = op.next) {
+        if (op instanceof WriteOperation) {
+            written = true;
+            continue;
+        }
+        if (!written) continue;
+        if (op instanceof Match || op instanceof Load || op instanceof Call) return true;
+        if (containsRead(op)) return true;
+    }
+    return false;
+}
+
+function containsRead(node: ASTNode): boolean {
+    if (node instanceof SubqueryExpression || node instanceof PatternExpression) return true;
+    return node.getChildren().some(containsRead);
+}
+
 /**
- * Check every target of a statement's write clauses before it runs and
- * pin the query to a single backend function.
+ * Check every target of a statement's write clauses before it runs, pin
+ * the query to a single backend function and decide when changes are
+ * sent (see {@link WriteSet}).
  */
-export function prepareWrites(operations: WriteOperation[], ctx: SourceContext): void {
+export function prepareWrites(first: Operation, ctx: SourceContext): void {
+    const operations = WriteOperation.collect(first);
     if (operations.length === 0) return;
-    ctx.writes ??= new WriteSet();
+    const writes = (ctx.writes ??= new WriteSet());
     for (const op of operations) {
         for (const target of op.targets) {
-            const backend = resolveWriteBackend(target);
-            const current = ctx.writes.backend;
+            const { backend, transactions } = resolveWriteBackend(target);
+            const current = writes.backend;
             if (current === null) {
-                ctx.writes.backend = backend;
+                writes.backend = backend;
             } else if (current.functionClass !== backend.functionClass) {
                 throw new Error(
                     `A query can only write through one backend function (${current.name} and ${backend.name})`
                 );
             }
+            writes.transactional &&= transactions;
         }
     }
+    writes.perRow = writes.transactional && readsAfterWrites(first);
 }
 
-/** Send the collected change set to the backend in one call. */
-export async function commitWrites(ctx: SourceContext, writes: WriteSet): Promise<WriteResult> {
-    const backend = writes.backend!;
-    const changes: WriteChange[] = writes.changes;
+/** Call the backend function once with `request` and return its first item. */
+async function callBackend(
+    ctx: SourceContext,
+    backend: WriteBackend,
+    request: Record<string, any>,
+    afterCancel: boolean = false
+): Promise<any> {
     const fn = FunctionFactory.createAsync(backend.name);
     fn.sourceContext = ctx;
-    await fn.prepareContext();
+    await fn.prepareContext(afterCancel);
     const args = [...backend.args];
-    args[backend.requestIndex] = {
-        version: WRITE_CONTRACT_VERSION,
-        operation: "write",
-        changes,
-    };
+    args[backend.requestIndex] = { version: WRITE_CONTRACT_VERSION, ...request };
     let response: any = undefined;
     try {
         for await (const item of fn.generate(...args)) {
@@ -544,10 +652,14 @@ export async function commitWrites(ctx: SourceContext, writes: WriteSet): Promis
     } catch (e) {
         if (e instanceof QueryCancelledError) throw e;
         const message = e instanceof Error ? e.message : String(e);
+        const what =
+            request.operation === "write"
+                ? "Write"
+                : `${request.operation[0].toUpperCase()}${request.operation.slice(1)}`;
         throw new SourceError(
-            `Write through ${backend.name} failed: ${message}`,
+            `${what} through ${backend.name} failed: ${message}`,
             backend.name,
-            "write",
+            request.operation,
             e
         );
     }
@@ -555,13 +667,53 @@ export async function commitWrites(ctx: SourceContext, writes: WriteSet): Promis
         throw new SourceError(
             `Write through ${backend.name} returned an invalid response`,
             backend.name,
-            "write"
+            request.operation
         );
     }
-    return { ids: response?.ids ?? {}, stats: response?.stats ?? {}, changes };
+    return response ?? {};
 }
 
-/** True when `node` contains a write clause anywhere in its operation chain. */
-export function hasWrites(root: ASTNode): boolean {
-    return WriteOperation.collect(root.firstChild() as Operation).length > 0;
+/**
+ * Send the changes not sent yet.  In a transactional query they are
+ * applied inside the backend's open transaction, so the query's later
+ * reads see them; the query-scoped read cache is dropped.
+ */
+export async function flushWrites(ctx: SourceContext, writes: WriteSet): Promise<void> {
+    if (writes.pending === 0 || writes.backend === null) return;
+    ctx.throwIfCancelled();
+    const changes = writes.takePending();
+    writes.absorb(await callBackend(ctx, writes.backend, { operation: "write", changes }));
+    writes.sent = true;
+    ctx.clearCache();
+}
+
+/**
+ * Finish the query's writes: send the remaining changes (all of them, in
+ * one call, for non-transactional backends) and commit a transactional
+ * query.
+ */
+export async function commitWrites(ctx: SourceContext, writes: WriteSet): Promise<WriteResult> {
+    ctx.throwIfCancelled();
+    await flushWrites(ctx, writes);
+    if (writes.transactional && writes.sent && writes.backend !== null) {
+        ctx.throwIfCancelled();
+        await callBackend(ctx, writes.backend, { operation: "commit" });
+        writes.committed = true;
+    }
+    return { ids: { ...writes.ids }, stats: { ...writes.stats }, changes: writes.changes };
+}
+
+/**
+ * Roll back a transactional query whose changes were already sent.
+ * Failures are ignored so the query's own error is reported.
+ */
+export async function rollbackWrites(ctx: SourceContext, writes: WriteSet): Promise<void> {
+    if (!writes.transactional || !writes.sent || writes.committed || writes.backend === null) {
+        return;
+    }
+    try {
+        await callBackend(ctx, writes.backend, { operation: "rollback" }, true);
+    } catch {
+        // The query already failed; its error takes precedence.
+    }
 }

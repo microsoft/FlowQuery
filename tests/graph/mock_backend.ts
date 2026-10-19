@@ -95,6 +95,8 @@ export const mock = {
     opened: 0,
     closed: 0,
     failOn: null as string | null,
+    commits: 0,
+    rollbacks: 0,
     /** Requests of the current log. */
     get requests(): any[] {
         return this.log.map((e) => e.request);
@@ -107,6 +109,8 @@ export const mock = {
         this.opened = 0;
         this.closed = 0;
         this.failOn = null;
+        this.commits = 0;
+        this.rollbacks = 0;
     },
     /** Drop all data. */
     clear(): void {
@@ -134,16 +138,16 @@ export const mock = {
         }
     },
     /** Current rows of a node label (definition shape). */
-    nodeRows(label: string): SourceRow[] {
-        return [...(this.store.labels.get(label)?.values() ?? [])].map((n) => ({
+    nodeRows(label: string, store?: Store): SourceRow[] {
+        return [...((store ?? mock.store).labels.get(label)?.values() ?? [])].map((n) => ({
             id: n.id,
             ...n.properties,
         }));
     },
     /** Current rows of a relationship type (definition shape). */
-    relationshipRows(type: string): SourceRow[] {
+    relationshipRows(type: string, store?: Store): SourceRow[] {
         const out: SourceRow[] = [];
-        for (const r of this.store.relationships.values()) {
+        for (const r of (store ?? mock.store).relationships.values()) {
             if (r.type === type) {
                 out.push({ id: r.id, left_id: r.start, right_id: r.end, ...r.properties });
             }
@@ -188,9 +192,12 @@ function setProperties(target: Record<string, any>, properties: Record<string, a
     return count;
 }
 
-/** Apply a change set to a copy of the store; commit only if every change succeeds. */
-function applyChanges(changes: any[]): { ids: Record<string, any>; stats: Record<string, number> } {
-    const store = mock.store.clone();
+/** Apply a change set to a copy of `base`; the copy is only kept if every change succeeds. */
+function applyChanges(
+    changes: any[],
+    base: Store
+): { store: Store; result: { ids: Record<string, any>; stats: Record<string, number> } } {
+    const store = base.clone();
     const ids: Record<string, any> = {};
     const created: Map<string, StoredNode> = new Map();
     const stats = {
@@ -242,6 +249,15 @@ function applyChanges(changes: any[]): { ids: Record<string, any>; stats: Record
                     change.type !== undefined
                         ? findRelationship(store, change, ids)
                         : node(change.target, change.label);
+                stats.propertiesSet += setProperties(target.properties, change.properties);
+                break;
+            }
+            case "replaceProperties": {
+                const target =
+                    change.type !== undefined
+                        ? findRelationship(store, change, ids)
+                        : node(change.target, change.label);
+                for (const k of Object.keys(target.properties)) delete target.properties[k];
                 stats.propertiesSet += setProperties(target.properties, change.properties);
                 break;
             }
@@ -336,8 +352,7 @@ function applyChanges(changes: any[]): { ids: Record<string, any>; stats: Record
                 throw new Error(`Unknown change ${change.op}`);
         }
     }
-    mock.store = store;
-    return { ids, stats };
+    return { store, result: { ids, stats } };
 }
 
 function* rowsOf(pages: Iterable<SourceRow[]>): Iterable<SourceRow> {
@@ -382,9 +397,28 @@ export class MockBackend extends AsyncFunction {
         if (mock.failOn !== null && request?.operation === mock.failOn) {
             throw new Error("backend failure");
         }
+        // Inside a transaction (mocktxbackend) reads and writes use the
+        // transaction's private copy of the store.
+        const snapshot = this.context?.snapshot as { store?: Store } | undefined;
+        const tx = snapshot?.store !== undefined ? (snapshot as { store: Store }) : null;
+        const store = tx?.store ?? mock.store;
         if (request?.operation === "write") {
             mock.changeSets.push(request.changes);
-            yield applyChanges(request.changes);
+            const { store: next, result } = applyChanges(request.changes, store);
+            if (tx !== null) tx.store = next;
+            else mock.store = next;
+            yield result;
+            return;
+        }
+        if (request?.operation === "commit") {
+            if (tx !== null) mock.store = tx.store;
+            mock.commits++;
+            yield {};
+            return;
+        }
+        if (request?.operation === "rollback") {
+            mock.rollbacks++;
+            yield {};
             return;
         }
         const req = request ?? { operation: "scan", predicate: null, pageSize: 1000 };
@@ -392,14 +426,14 @@ export class MockBackend extends AsyncFunction {
             request !== null ? request.type !== undefined : (fallback ?? "").startsWith("rel:");
         let pages: any;
         if (!isRelationship) {
-            const source = inMemoryNodeSource(mock.nodeRows(request?.label ?? fallback));
+            const source = inMemoryNodeSource(mock.nodeRows(request?.label ?? fallback, store));
             pages =
                 req.operation === "lookup"
                     ? source.lookup!(req, null as any)
                     : source.scan(req, null as any);
         } else {
             const type = request?.type ?? fallback!.substring(4);
-            const source = inMemoryRelationshipSource(mock.relationshipRows(type));
+            const source = inMemoryRelationshipSource(mock.relationshipRows(type, store));
             pages =
                 req.operation === "expand"
                     ? source.expand!(req, null as any)
@@ -409,5 +443,23 @@ export class MockBackend extends AsyncFunction {
             mock.yielded++;
             yield row;
         }
+    }
+}
+
+@FunctionDef({
+    description: "Transactional mock backend: one transaction per query (tests only)",
+    category: "async",
+    parameters: [],
+    output: { description: "rows or write result", type: "object" },
+})
+export class MockTxBackend extends MockBackend {
+    static capabilities: any = { ...MockBackend.capabilities, transactions: true };
+    /** The transaction: a private copy of the store, published on commit. */
+    static openReadContext() {
+        mock.opened++;
+        return { snapshot: mock.opened, store: mock.store.clone() };
+    }
+    constructor() {
+        super("mocktxbackend");
     }
 }

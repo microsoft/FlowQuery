@@ -232,6 +232,11 @@ class SourceContext {
         if (this.options.cacheCapacity === 0) return;
         this._cache.set(key, rows);
     }
+    /** Drop cached and materialized reads (after the query wrote to a backend). */
+    public clearCache(): void {
+        this._cache = new RowCache(this.options.cacheCapacity);
+        this._materialized.clear();
+    }
     /** Coalesce concurrent identical reads within the query. */
     public coalesce(key: string, load: () => Promise<SourceRow[]>): Promise<SourceRow[]> {
         const pending = this._inflight.get(key);

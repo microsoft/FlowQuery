@@ -19,7 +19,12 @@ from .node import Node
 from .node_data import NodeData
 from .relationship import Relationship, RelationshipScope
 from .relationship_data import RelationshipData
-from .source_access import MemoryNodeAccess, MemoryRelationshipAccess, is_static_expression
+from .source_access import (
+    IDENTITY_PROPERTY,
+    MemoryNodeAccess,
+    MemoryRelationshipAccess,
+    is_static_expression,
+)
 
 if TYPE_CHECKING:
     from .source_context import SourceContext
@@ -262,11 +267,11 @@ class Pattern(ASTNode):
         if type(node).__name__ == 'NodeReference':
             return 3
         terms, _ = node.source_terms()
-        has_id = any(
-            t["op"] == "eq" and t["property"] == "id" and t.get("value") is not None
-            for t in terms
-        )
-        if has_id and (node.access is None or node.access.can_lookup()):
+        if (
+            node.access.identity_lookup(terms)
+            if node.access is not None
+            else _identity_pinned(terms)
+        ):
             return 2
         if node.access is not None and node.access.deferred and node.access.pushes(terms):
             return 1
@@ -311,13 +316,7 @@ class Pattern(ASTNode):
             if id_ is not _UNSET:
                 pages = [await access.lookup(id_, terms, args, origin)]
             else:
-                id_term = next(
-                    (t for t in terms if t["op"] == "eq" and t["property"] == "id"), None
-                )
-                if id_term is not None and id_term.get("value") is not None and access.can_lookup():
-                    pages = [await access.lookup(id_term["value"], terms, args)]
-                else:
-                    pages = access.scan(terms, args)
+                pages = access.start(terms, args)
         try:
             async with aclosing(self._reverse_pages(plan, i, node, pages, filter_rows, rel_rows)) as _gen3:
                 async for _ in _gen3:
@@ -442,6 +441,16 @@ async def _iterate(pages: Any) -> AsyncGenerator[List[Dict[str, Any]], None]:
     else:
         for page in pages:
             yield page
+
+
+def _identity_pinned(terms: Sequence[Dict[str, Any]]) -> bool:
+    """The terms pin a definition node's id (eager nodes are always definitions)."""
+    return any(
+        t["op"] == "eq"
+        and t["property"] in ("id", IDENTITY_PROPERTY)
+        and t.get("value") is not None
+        for t in terms
+    )
 
 
 @dataclass

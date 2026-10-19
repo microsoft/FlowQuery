@@ -1,4 +1,4 @@
-import { GRAPH_KEY, isGraphRecord, userProperties } from "./graph_records";
+import { GRAPH_KEY, PROPERTIES_KEY, isGraphRecord, userProperties } from "./graph_records";
 import Relationship from "./relationship";
 import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
@@ -55,7 +55,10 @@ class RelationshipMatchCollector {
         // Thread the underlying record's inner provenance onto the
         // freshly constructed match object so the snapshot can read it
         // by reference.
-        if (flat !== null) (match as any)[GRAPH_KEY] = currentRecord![GRAPH_KEY];
+        if (flat !== null) {
+            (match as any)[GRAPH_KEY] = currentRecord![GRAPH_KEY];
+            (match as any)[PROPERTIES_KEY] = { ...relProperties };
+        }
         if (currentRecord != null) {
             const src = getVirtualSource(currentRecord);
             if (src !== undefined) attachVirtualSource(match, src);

@@ -1,3 +1,4 @@
+import { isGraphRecord } from "../../graph/graph_records";
 import Function from "./function";
 import { FunctionDef } from "./function_metadata";
 
@@ -32,6 +33,11 @@ class Id extends Function {
         }
         if (typeof obj !== "object" || Array.isArray(obj)) {
             throw new Error("id() expects a node or relationship");
+        }
+
+        // Graph entities: their entity id (also for relationships).
+        if (isGraphRecord(obj)) {
+            return obj.id;
         }
 
         // If it's a RelationshipMatchRecord (has type, startNode, endNode, properties)

@@ -2,7 +2,7 @@ import Node from "../../graph/node";
 import Pattern from "../../graph/pattern";
 import Patterns from "../../graph/patterns";
 import { RelationshipScope } from "../../graph/relationship";
-import { PushedPredicate, isStaticExpression } from "../../graph/source_access";
+import { IDENTITY_PROPERTY, PushedPredicate, isStaticExpression } from "../../graph/source_access";
 import type SourceContext from "../../graph/source_context";
 import ASTNode from "../ast_node";
 import Lookup from "../data_structures/lookup";
@@ -18,6 +18,7 @@ import {
     LessThanOrEqual,
 } from "../expressions/operator";
 import Reference from "../expressions/reference";
+import Function from "../functions/function";
 import Operation from "./operation";
 import Where from "./where";
 
@@ -121,10 +122,14 @@ class Match extends Operation {
                 }
             }
         }
-        // Add extracted predicates as properties on the matching nodes
+        // Add extracted predicates as properties (or, for `id(n) = v`, the
+        // identity) of the matching nodes
         for (const pred of predicates) {
             const node = nodeMap.get(pred.nodeIdentifier);
-            if (node !== undefined && !node.properties.has(pred.property)) {
+            if (node === undefined) continue;
+            if (pred.property === IDENTITY_PROPERTY) {
+                if (node.identity === null) node.identity = pred.valueExpression;
+            } else if (!node.properties.has(pred.property)) {
                 node.setProperty(pred.property, pred.valueExpression);
             }
         }
@@ -252,6 +257,17 @@ class Match extends Operation {
         lookupSide: ASTNode,
         valueSide: ASTNode
     ): { nodeIdentifier: string; property: string; valueExpression: Expression } | null {
+        const identified = Match.identityOf(lookupSide);
+        if (identified !== null && this.isLiteralValue(valueSide)) {
+            const expr = new Expression();
+            expr.addNode(valueSide);
+            expr.finish();
+            return {
+                nodeIdentifier: identified,
+                property: IDENTITY_PROPERTY,
+                valueExpression: expr,
+            };
+        }
         if (!(lookupSide instanceof Lookup)) {
             return null;
         }
@@ -270,6 +286,16 @@ class Match extends Operation {
         expr.addNode(valueSide);
         expr.finish();
         return { nodeIdentifier, property, valueExpression: expr };
+    }
+
+    /** The variable of `id(variable)`, or `null` for any other expression. */
+    private static identityOf(node: ASTNode): string | null {
+        if (!(node instanceof Function) || node.name !== "id") return null;
+        const args = node.getChildren();
+        if (args.length !== 1) return null;
+        let arg: ASTNode = args[0];
+        if (arg instanceof Expression && arg.childCount() === 1) arg = arg.firstChild();
+        return arg instanceof Reference ? arg.identifier : null;
     }
 
     /**

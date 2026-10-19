@@ -224,7 +224,7 @@ describe("relationships across backends", () => {
             "MATCH (e:hr.Employee {name: 'e1'}), (p:Person {name: 'p2'}) CREATE (e)-[:hr.SAME_AS]->(p)"
         );
         const r = await run(
-            "MATCH (e:hr.Employee)-[:hr.SAME_AS]->(x) RETURN e.name AS e, x.name AS x, e.id AS eid, x.id AS xid"
+            "MATCH (e:hr.Employee)-[:hr.SAME_AS]->(x) RETURN e.name AS e, x.name AS x, id(e) AS eid, id(x) AS xid"
         );
         expect(r.results).toEqual([{ e: "e1", x: "p2", eid: 1, xid: 2 }]);
         const back = await run("MATCH (p:Person {name: 'p2'})<-[r]-(x) RETURN x.name AS x");
@@ -242,7 +242,7 @@ describe("relationships across backends", () => {
             "MATCH (a:hr.Employee {name: 'e1'}), (b:hr.Employee {name: 'e2'}) CREATE (a)-[:hr.KNOWS]->(b)"
         );
         const r = await run(
-            "MATCH (a:Person)-[r1:KNOWS]->(b), (x:hr.Employee)-[r2:hr.KNOWS]->(y) RETURN r1.id AS r1, r2.id AS r2"
+            "MATCH (a:Person)-[r1:KNOWS]->(b), (x:hr.Employee)-[r2:hr.KNOWS]->(y) RETURN id(r1) AS r1, id(r2) AS r2"
         );
         expect(r.results).toEqual([{ r1: 3, r2: 3 }]);
     });

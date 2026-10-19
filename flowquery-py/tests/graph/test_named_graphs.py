@@ -287,7 +287,7 @@ class TestRelationshipsAcrossBackends:
         )
         r = await run(
             "MATCH (e:hr.Employee)-[:hr.SAME_AS]->(x) "
-            "RETURN e.name AS e, x.name AS x, e.id AS eid, x.id AS xid"
+            "RETURN e.name AS e, x.name AS x, id(e) AS eid, id(x) AS xid"
         )
         assert r.results == [{"e": "e1", "x": "p2", "eid": 1, "xid": 2}]
         back = await run("MATCH (p:Person {name: 'p2'})<-[r]-(x) RETURN x.name AS x")
@@ -306,7 +306,7 @@ class TestRelationshipsAcrossBackends:
         )
         r = await run(
             "MATCH (a:Person)-[r1:KNOWS]->(b), (x:hr.Employee)-[r2:hr.KNOWS]->(y) "
-            "RETURN r1.id AS r1, r2.id AS r2"
+            "RETURN id(r1) AS r1, id(r2) AS r2"
         )
         assert r.results == [{"r1": 3, "r2": 3}]
 

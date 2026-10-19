@@ -200,17 +200,14 @@ function graphRead(request: any, store: Store): SourceRow[] {
     const ids = request.ids !== undefined ? new Set(request.ids.map(key)) : null;
     if (request.type !== undefined) {
         const field = request.side === "right" ? "right_id" : "left_id";
-        return mock.graphRelationships(store).filter(
-            (r) =>
-                (request.type === null || r.type === request.type) &&
-                (ids === null || ids.has(key(r[field]))) &&
-                matchesPredicate(request.predicate ?? null, {
-                    ...r.properties,
-                    id: r.id,
-                    left_id: r.left_id,
-                    right_id: r.right_id,
-                })
-        );
+        return mock
+            .graphRelationships(store)
+            .filter(
+                (r) =>
+                    (request.type === null || r.type === request.type) &&
+                    (ids === null || ids.has(key(r[field]))) &&
+                    matchesPredicate(request.predicate ?? null, r.properties)
+            );
     }
     const wanted: string[] = request.labels ?? (request.label != null ? [request.label] : []);
     return mock
@@ -219,7 +216,7 @@ function graphRead(request: any, store: Store): SourceRow[] {
             (n) =>
                 wanted.every((label) => n.labels.includes(label)) &&
                 (ids === null || ids.has(key(n.id))) &&
-                matchesPredicate(request.predicate ?? null, { ...n.properties, id: n.id })
+                matchesPredicate(request.predicate ?? null, n.properties)
         );
 }
 

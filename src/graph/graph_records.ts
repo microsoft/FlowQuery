@@ -8,11 +8,12 @@
  * - nodes: `{ id, labels: [...], properties: {...} }`
  * - relationships: `{ id, type, left_id, right_id, properties: {...} }`
  *
- * FlowQuery binds them as flat records (user properties plus `id`, and
- * `left_id` / `right_id` for relationships) so property access works
- * exactly like for virtual definitions.  Metadata wins in that flat
- * view; the exact stored labels, type and user properties travel in
- * internal keys that are never returned to callers.
+ * FlowQuery binds them as records whose `id` (and `left_id` / `right_id`
+ * for relationships) is the entity's identity, used for traversal.  User
+ * properties travel separately, in an internal key: property access
+ * (`n.name`, `n.id`, `{key: ...}` constraints) always reads the stored
+ * user properties, as in Cypher, and the identity is read with `id(n)`.
+ * Internal keys are never returned to callers.
  */
 
 /** The graph bound with an unnamed `USE GRAPH` (also `USE GRAPH default = ...`). */
@@ -154,7 +155,25 @@ export function labelsOf(value: Record<string, any>): string[] {
     return value._label ? [value._label] : [];
 }
 
-/** User properties of an entity value (exact for default-graph records). */
+/** A user property of an entity: the stored property for graph records, else the column. */
+export function propertyOf(record: Record<string, any>, key: string): any {
+    if (isGraphRecord(record)) {
+        const properties = userProperties(record);
+        return properties !== undefined && key in properties ? properties[key] : undefined;
+    }
+    return record[key];
+}
+
+/** The entity has user property (or column) `key`. */
+export function hasProperty(record: Record<string, any>, key: string): boolean {
+    if (isGraphRecord(record)) {
+        const properties = userProperties(record);
+        return properties !== undefined && key in properties;
+    }
+    return key in record;
+}
+
+/** User properties of an entity value (exact for graph records). */
 export function userProperties(value: Record<string, any>): Record<string, any> | undefined {
     const properties = value[PROPERTIES_KEY];
     return properties !== null && typeof properties === "object" ? properties : undefined;
@@ -178,6 +197,29 @@ export function withoutGraphKeys<T>(value: T): T {
     return stripGraphKeys(structuredClone(value));
 }
 
+const RELATIONSHIP_ENVELOPE = ["type", "startNode", "endNode", "properties"] as const;
+
+/**
+ * Rewrite a graph entity, in place, as returned to callers: its stored
+ * user properties, plus `id` (the entity id) unless the entity stores a
+ * property of that name; `id(n)` always returns the entity id.
+ * Relationship values keep their `type` / `startNode` / `endNode` /
+ * `properties` envelope.
+ */
+function publicView(value: Record<string, any>): void {
+    const id = value.id;
+    const stored = userProperties(value) ?? {};
+    const relationship = RELATIONSHIP_ENVELOPE.every((key) => key in value);
+    const envelope: Record<string, any> = {};
+    if (relationship) {
+        for (const key of RELATIONSHIP_ENVELOPE) envelope[key] = value[key];
+    }
+    for (const key of Object.keys(value)) delete value[key];
+    Object.assign(value, stored);
+    if (!("id" in stored) && id !== undefined) value.id = id;
+    Object.assign(value, envelope);
+}
+
 /**
  * Remove the internal keys of graph records, in place,
  * throughout a result value.  Other values are left untouched.
@@ -190,13 +232,7 @@ export function stripGraphKeys(value: any): any {
     }
     if (value !== null && typeof value === "object" && !(value instanceof Date)) {
         if (isGraphRecord(value)) {
-            delete value[GRAPH_KEY];
-            delete value[LABELS_KEY];
-            delete value[PROPERTIES_KEY];
-            delete value[LEFT_NAMESPACE_KEY];
-            delete value[RIGHT_NAMESPACE_KEY];
-            delete value._label;
-            delete value._type;
+            publicView(value);
         }
         for (const key of Object.keys(value)) stripGraphKeys(value[key]);
     }

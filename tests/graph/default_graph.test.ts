@@ -32,6 +32,19 @@ class MockScanBackend extends MockBackend {
 }
 
 @FunctionDef({
+    description: "Mock graph backend that filters but has no lookup or expand (tests only)",
+    category: "async",
+    parameters: [],
+    output: { description: "rows", type: "object" },
+})
+class MockPredicateBackend extends MockBackend {
+    static capabilities: any = { predicates: true, writes: true };
+    constructor() {
+        super("mockpredicatebackend");
+    }
+}
+
+@FunctionDef({
     description: "Waits for the test to open the gate (tests only)",
     category: "async",
     parameters: [],
@@ -96,7 +109,7 @@ describe("1. binding an empty backend", () => {
         expect(mock.log).toEqual([]);
         const created = await run(
             "CREATE (p:Person {name: 'Ada'}) CREATE (x:Project {name: 'Beacon'}) " +
-                "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN p.id AS person, x.id AS project"
+                "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN id(p) AS person, id(x) AS project"
         );
         const { person, project } = created.results[0];
         expect(typeof person).toBe("number");
@@ -122,7 +135,7 @@ describe("1. binding an empty backend", () => {
             ],
         ]);
         const read = await run(
-            "MATCH (p:Person)-[w:WORKS_ON]->(x:Project) RETURN p.name AS person, x.name AS project, w.role AS role, p.id AS pid"
+            "MATCH (p:Person)-[w:WORKS_ON]->(x:Project) RETURN p.name AS person, x.name AS project, w.role AS role, id(p) AS pid"
         );
         expect(read.results).toEqual([
             { person: "Ada", project: "Beacon", role: "lead", pid: person },
@@ -159,7 +172,7 @@ describe("1. binding an empty backend", () => {
 
 describe("2. MERGE", () => {
     const merge =
-        "MERGE (p:Person {name: 'Ada'}) ON CREATE SET p.created = true ON MATCH SET p.title = 'Lead' RETURN p.id AS id";
+        "MERGE (p:Person {name: 'Ada'}) ON CREATE SET p.created = true ON MATCH SET p.title = 'Lead' RETURN id(p) AS id";
 
     test("repeated MERGE keeps one node with stable identity", async () => {
         await run(BIND);
@@ -201,7 +214,7 @@ describe("2. MERGE", () => {
         await run(BIND);
         await run("CREATE (:Person {name: 'Ada'}), (:Project {name: 'Beacon'})");
         const m =
-            "MATCH (a:Person {name: 'Ada'}), (b:Project {name: 'Beacon'}) MERGE (a)-[r:WORKS_ON]->(b) ON MATCH SET r.again = true RETURN r.id AS id";
+            "MATCH (a:Person {name: 'Ada'}), (b:Project {name: 'Beacon'}) MERGE (a)-[r:WORKS_ON]->(b) ON MATCH SET r.again = true RETURN id(r) AS id";
         const first = await run(m);
         const second = await run(m);
         expect(second.results).toEqual(first.results);
@@ -236,7 +249,7 @@ describe("3. schema-free properties", () => {
             { v: 42 }
         );
         const r = await run(
-            "MATCH (n:Thing) WHERE n.`odd key` = $v RETURN n.name AS name, n.`odd key` AS odd, n.labels AS labels, n.type AS type, n.left_id AS l, n.id AS id, properties(n) AS props, labels(n) AS lbls",
+            "MATCH (n:Thing) WHERE n.`odd key` = $v RETURN n.name AS name, n.`odd key` AS odd, n.labels AS labels, n.type AS type, n.left_id AS l, n.id AS id, id(n) AS eid, properties(n) AS props, labels(n) AS lbls",
             { v: 42 }
         );
         expect(r.results).toEqual([
@@ -246,7 +259,8 @@ describe("3. schema-free properties", () => {
                 labels: "L",
                 type: "T",
                 l: 7,
-                id: 1000,
+                id: "user-id",
+                eid: 1000,
                 props: {
                     name: "a",
                     "odd key": 42,
@@ -265,11 +279,44 @@ describe("3. schema-free properties", () => {
             value: 42,
         });
         const missing = await run(
-            "MATCH (n:Thing) RETURN n.name AS name, n.`odd key` AS odd ORDER BY name"
+            "MATCH (n:Thing) RETURN n.name AS name, n.`odd key` AS odd, n.id AS id ORDER BY name"
         );
         expect(missing.results).toEqual([
-            { name: "a", odd: 42 },
-            { name: "b", odd: null },
+            { name: "a", odd: 42, id: "user-id" },
+            { name: "b", odd: null, id: null },
+        ]);
+    });
+
+    test("stored properties named id, and the entity id via id(n)", async () => {
+        await run(BIND);
+        await run("CREATE (:Item {id: 'A-1', name: 'first'}), (:Item {name: 'second'})");
+        const whole = await run("MATCH (n:Item) RETURN n ORDER BY n.name");
+        // A stored `id` is returned as stored; otherwise `id` is the entity id.
+        expect(whole.results).toEqual([
+            { n: { id: "A-1", name: "first" } },
+            { n: { name: "second", id: 1001 } },
+        ]);
+        mock.reset();
+        const byProperty = await run(
+            "MATCH (n:Item {id: 'A-1'}) RETURN n.name AS name, id(n) AS eid"
+        );
+        expect(byProperty.results).toEqual([{ name: "first", eid: 1000 }]);
+        expect(mock.requests[0]).toMatchObject({
+            operation: "scan",
+            predicate: { op: "eq", property: "id", value: "A-1" },
+        });
+        mock.reset();
+        const byIdentity = await run("MATCH (n:Item) WHERE id(n) = 1001 RETURN n.name AS name");
+        expect(byIdentity.results).toEqual([{ name: "second" }]);
+        expect(mock.requests[0]).toMatchObject({
+            operation: "lookup",
+            ids: [1001],
+            predicate: null,
+        });
+        expect((await run("MATCH (n:Item {id: 1001}) RETURN n")).results).toEqual([]);
+        await run("MATCH (n:Item {id: 'A-1'}) SET n.id = 'A-2'");
+        expect((await run("MATCH (n:Item) WHERE id(n) = 1000 RETURN n.id AS id")).results).toEqual([
+            { id: "A-2" },
         ]);
     });
 
@@ -277,11 +324,26 @@ describe("3. schema-free properties", () => {
         await run(BIND);
         await run("CREATE (a:A)-[r:REL {type: 'x', left_id: 5, id: 'u', w: 1}]->(b:B)");
         const r = await run(
-            "MATCH (:A)-[r:REL]->(:B) RETURN type(r) AS t, r.type AS rt, r.w AS w, r.left_id AS l, properties(r) AS p"
+            "MATCH (:A)-[r:REL]->(:B) RETURN type(r) AS t, r.type AS rt, r.w AS w, r.left_id AS l, r.id AS rid, id(r) AS eid, properties(r) AS p"
         );
         expect(r.results).toEqual([
-            { t: "REL", rt: "REL", w: 1, l: 5, p: { type: "x", left_id: 5, id: "u", w: 1 } },
+            {
+                t: "REL",
+                rt: "x",
+                w: 1,
+                l: 5,
+                rid: "u",
+                eid: 1002,
+                p: { type: "x", left_id: 5, id: "u", w: 1 },
+            },
         ]);
+        const whole = await run("MATCH (:A)-[r:REL]->(:B) RETURN r");
+        expect(whole.results[0].r).toMatchObject({
+            type: "REL",
+            id: "u",
+            w: 1,
+            properties: { type: "x", left_id: 5, id: "u", w: 1 },
+        });
         const missing = await run("MATCH (:A)-[r:REL {nope: 1}]->(:B) RETURN r");
         expect(missing.results).toEqual([]);
         const absent = await run("MATCH (:A)-[r:REL]->(:B) RETURN r.nope AS nope");
@@ -678,7 +740,7 @@ describe("9. query lifecycle", () => {
     test("transactions: true reads its own writes and commits or rolls back", async () => {
         await run("USE GRAPH mocktxbackend($request)");
         const r = await run(
-            "CREATE (n:T {k: 1}) WITH n MATCH (m:T) RETURN count(m) AS c, n.id AS id"
+            "CREATE (n:T {k: 1}) WITH n MATCH (m:T) RETURN count(m) AS c, id(n) AS id"
         );
         expect(r.results).toEqual([{ c: 1, id: 1000 }]);
         expect(mock.commits).toBe(1);
@@ -747,6 +809,24 @@ describe("10. optimizations and fallbacks", () => {
         expect(new Set(mock.requests.map((q) => q.operation))).toEqual(new Set(["scan"]));
         expect(mock.requests.every((q) => q.predicate === null)).toBe(true);
         expect(r.sourceStats.fallbacks).toBeGreaterThan(0);
+    });
+
+    test("filter-only backends never receive entity ids as property predicates", async () => {
+        await run("USE GRAPH mockpredicatebackend($request)");
+        await seedPeople();
+        const r = await run(
+            "MATCH (a:Person {name: 'p1'})-[:KNOWS]->(b:Person) RETURN b.name AS name ORDER BY name"
+        );
+        expect(r.results).toEqual([{ name: "p2" }, { name: "p3" }]);
+        const byId = await run("MATCH (n:Person) WHERE id(n) = 1001 RETURN n.name AS name");
+        expect(byId.results).toEqual([{ name: "p2" }]);
+        const properties = (p: any): string[] =>
+            p === null ? [] : p.op === "and" ? p.terms.flatMap(properties) : [p.property];
+        const sent = mock.requests.flatMap((q) => properties(q.predicate ?? null));
+        expect(sent).not.toContain("id");
+        expect(sent).not.toContain("left_id");
+        expect(sent).not.toContain("right_id");
+        expect(new Set(mock.requests.map((q) => q.operation))).toEqual(new Set(["scan"]));
     });
 
     test("no schema enumeration or refresh requests", async () => {

@@ -1,4 +1,4 @@
-import { isGraphRecord } from "../../graph/graph_records";
+import { isGraphRecord, propertyOf } from "../../graph/graph_records";
 import ASTNode from "../ast_node";
 
 /**
@@ -38,9 +38,10 @@ class Lookup extends ASTNode {
         if (obj === null || obj === undefined) {
             return null;
         }
-        const value = obj[this.index.value()];
-        // A default-graph entity has no fixed columns: a missing property is null.
-        return value === undefined && isGraphRecord(obj) ? null : value;
+        // Graph entities: always the stored user property (null when unset),
+        // as in Cypher; the entity id is read with id(n).
+        if (isGraphRecord(obj)) return propertyOf(obj, this.index.value()) ?? null;
+        return obj[this.index.value()];
     }
 }
 

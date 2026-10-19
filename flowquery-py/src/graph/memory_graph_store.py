@@ -162,7 +162,7 @@ class MemoryGraphStore:
                 continue
             if not all(label in n.labels for label in wanted):
                 continue
-            if not matches_predicate(request.get("predicate"), {**n.properties, "id": n.id}):
+            if not matches_predicate(request.get("predicate"), n.properties):
                 continue
             out.append({"id": n.id, "labels": list(n.labels), "properties": dict(n.properties)})
         return out
@@ -195,8 +195,7 @@ class MemoryGraphStore:
                 continue
             if rel_type is not None and r.type != rel_type:
                 continue
-            flat = {**r.properties, "id": r.id, "left_id": r.start.id, "right_id": r.end.id}
-            if not matches_predicate(request.get("predicate"), flat):
+            if not matches_predicate(request.get("predicate"), r.properties):
                 continue
             row: SourceRow = {
                 "id": r.id,

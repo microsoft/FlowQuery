@@ -64,9 +64,17 @@ export function isStaticExpression(node: ASTNode): boolean {
 }
 
 /** Evaluate static element properties and pushed WHERE predicates into push terms. */
+/**
+ * Property of the push term carrying the entity identity (`id(n) = ...`).
+ * Definitions read it as their `id` column; graphs use it for lookups by
+ * entity id and never send it as a property predicate.
+ */
+export const IDENTITY_PROPERTY = "\u0000id";
+
 export function buildTerms(
     properties: Map<string, Expression>,
-    pushed: PushedPredicate[]
+    pushed: PushedPredicate[],
+    identity: Expression | null = null
 ): SourceTerms {
     const terms: PushTerm[] = [];
     let args: Record<string, any> | null = null;
@@ -85,7 +93,18 @@ export function buildTerms(
             terms.push({ op: p.op, property: p.property, value });
         }
     }
+    if (identity !== null && isStaticExpression(identity)) {
+        terms.push({ op: "eq", property: IDENTITY_PROPERTY, value: identity.value() });
+    }
     return { terms, args };
+}
+
+/** Identity value of a lookup: the identity term, or (definitions) an `id` equality. */
+function identityOf(terms: PushTerm[], graph: boolean): any {
+    const identity = terms.find((t) => t.op === "eq" && t.property === IDENTITY_PROPERTY);
+    if (identity !== undefined) return identity.value;
+    if (graph) return undefined;
+    return terms.find((t) => t.op === "eq" && t.property === "id")?.value;
 }
 
 function isPushablePrimitive(value: any): boolean {
@@ -397,7 +416,9 @@ abstract class SourceEntry {
             }
         } else {
             this.ctx.stats.fallbacks++;
-            if (supportsKeyIn(this.caps.predicates, field)) {
+            // Graphs read every predicate as a stored user property, so the
+            // entity-id key (`id` / `left_id` / `right_id`) is matched locally.
+            if (!this.isGraph && supportsKeyIn(this.caps.predicates, field)) {
                 for (const batch of chunk(pending, this.batchSize)) {
                     this.ctx.stats.batches++;
                     const keyed = combine([
@@ -450,6 +471,28 @@ class NodeEntry extends SourceEntry {
             ? { label: this.label, labels: this.labels }
             : { label: this.label };
     }
+    /**
+     * Terms as this source reads them: definitions read the identity as
+     * their `id` column; graphs predicate user properties only (the
+     * identity is used for lookups).
+     */
+    public translate(terms: PushTerm[]): PushTerm[] {
+        if (!terms.some((t) => t.property === IDENTITY_PROPERTY)) return terms;
+        return this.isGraph
+            ? terms.filter((t) => t.property !== IDENTITY_PROPERTY)
+            : terms.map((t) => (t.property === IDENTITY_PROPERTY ? { ...t, property: "id" } : t));
+    }
+    /** The entity id the terms pin this source to, or `undefined`. */
+    public identity(terms: PushTerm[]): any {
+        const value = identityOf(terms, this.isGraph);
+        return value === null ? undefined : value;
+    }
+    public async *scan(
+        terms: PushTerm[],
+        args: Record<string, any> | null
+    ): AsyncGenerator<SourceRow[]> {
+        yield* super.scan(this.translate(terms), args);
+    }
     protected enrich(row: SourceRow): SourceRow {
         return this.label !== null ? { ...row, _label: this.label } : { ...row };
     }
@@ -461,9 +504,15 @@ class NodeEntry extends SourceEntry {
         terms: PushTerm[],
         args: Record<string, any> | null
     ): Promise<Map<string, SourceRow[]>> {
-        return this.fetchKeyed("lookup", this.nativeLookup, "id", ids, terms, args, {}) as Promise<
-            Map<string, SourceRow[]>
-        >;
+        return this.fetchKeyed(
+            "lookup",
+            this.nativeLookup,
+            "id",
+            ids,
+            this.translate(terms),
+            args,
+            {}
+        ) as Promise<Map<string, SourceRow[]>>;
     }
     public estimate(terms: PushTerm[], args: Record<string, any> | null): number | undefined {
         const provider = this.provider as NodeSourceProvider;
@@ -472,13 +521,13 @@ class NodeEntry extends SourceEntry {
             version: 1,
             operation: "scan",
             label: this.label as string,
-            predicate: predicateFor(this.caps.predicates, terms),
+            predicate: predicateFor(this.caps.predicates, this.translate(terms)),
             args,
             pageSize: this.ctx.options.pageSize,
         });
     }
     public pushes(terms: PushTerm[]): boolean {
-        return predicateFor(this.caps.predicates, terms) !== null;
+        return predicateFor(this.caps.predicates, this.translate(terms)) !== null;
     }
 }
 
@@ -628,8 +677,15 @@ export interface NodeAccess {
         args: Record<string, any> | null,
         origin?: string
     ): Promise<void>;
+    /**
+     * Rows a traversal starts from: a lookup by entity id where the terms
+     * pin one and the source supports it, otherwise a scan.
+     */
+    start(terms: PushTerm[], args: Record<string, any> | null): AsyncIterable<SourceRow[]>;
     /** Selectivity hints for start-point selection. */
     canLookup(): boolean;
+    /** Every source can answer the terms with a lookup by entity id. */
+    identityLookup(terms: PushTerm[]): boolean;
     pushes(terms: PushTerm[]): boolean;
     estimate(terms: PushTerm[], args: Record<string, any> | null): number | undefined;
 }
@@ -765,6 +821,26 @@ export class NodeSourceAccess implements NodeAccess {
     public canLookup(): boolean {
         return this._entries.every((e) => e.nativeLookup);
     }
+    public identityLookup(terms: PushTerm[]): boolean {
+        return (
+            this._entries.length > 0 &&
+            this._entries.every((e) => e.nativeLookup && e.identity(terms) !== undefined)
+        );
+    }
+    public async *start(
+        terms: PushTerm[],
+        args: Record<string, any> | null
+    ): AsyncGenerator<SourceRow[]> {
+        for (const entry of this._entries) {
+            const id = entry.identity(terms);
+            if (id !== undefined && entry.nativeLookup) {
+                const rows = await entry.lookup([id], terms, args);
+                yield rows.get(canonicalKey(id)) ?? [];
+            } else {
+                yield* entry.scan(terms, args);
+            }
+        }
+    }
     public pushes(terms: PushTerm[]): boolean {
         return this._entries.every((e) => e.pushes(terms));
     }
@@ -895,6 +971,13 @@ export class MemoryNodeAccess implements NodeAccess {
     public async prefetch(): Promise<void> {}
     public canLookup(): boolean {
         return true;
+    }
+    public identityLookup(terms: PushTerm[]): boolean {
+        return identityOf(terms, false) != null;
+    }
+    public async *start(terms: PushTerm[]): AsyncGenerator<SourceRow[]> {
+        const id = identityOf(terms, false);
+        yield id != null ? await this.lookup(id) : this._records;
     }
     public pushes(): boolean {
         return false;

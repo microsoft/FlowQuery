@@ -694,7 +694,7 @@ UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
 | `head(list)`                   | First element                          | `head([1,2,3])` → `1`                  |
 | `tail(list)`                   | All but first element                  | `tail([1,2,3])` → `[2,3]`              |
 | `last(list)`                   | Last element                           | `last([1,2,3])` → `3`                  |
-| `id(node_or_rel)`              | ID of a node or type of a relationship | `id(n)`                                |
+| `id(node_or_rel)`              | The ID of a node or graph relationship | `id(n)`                                |
 | `elementId(node)`              | String ID of a node                    | `elementId(n)` → `"1"`                 |
 | `labels(node)`                 | Labels of a node as an array           | `labels(n)` → `["Person"]`             |
 
@@ -1170,7 +1170,7 @@ From then on, every label and relationship type **without** a `CREATE VIRTUAL` d
 CREATE (p:Person {name: 'Ada'})
 CREATE (x:Project {name: 'Beacon'})
 CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x)
-RETURN p.id AS person, x.id AS project
+RETURN id(p) AS person, id(x) AS project
 ```
 
 ```cypher
@@ -1181,7 +1181,7 @@ RETURN p.name AS person, x.name AS project, w.role AS role
 ```cypher
 MERGE (p:Person {name: 'Ada'})
 ON MATCH SET p.title = 'Lead'
-RETURN p.id AS id
+RETURN id(p) AS id
 ```
 
 No definitions, property projections or schema refreshes are needed between these queries.
@@ -1244,9 +1244,16 @@ The [reference adapter](#backend-aware-virtual-sources) (`mockbackend`) implemen
 { id: 7, type: "WORKS_ON", left_id: 1, right_id: 2, properties: { role: "lead" } }     // relationships
 ```
 
-Ids are graph-wide and relationships must have one. In a pushed-down predicate, `id` (and `left_id` / `right_id` for relationships) means the metadata; every other name is a user property. As with any source, a superset is fine: FlowQuery re-checks labels, types, ids and properties.
+Ids are graph-wide and relationships must have one. Pushed-down predicates always refer to stored user properties, including properties named `id`, `type`, `left_id` or `right_id`; an entity id pinned by `WHERE id(n) = ...` is sent as a `lookup` request instead. As with any source, a superset is fine: FlowQuery re-checks labels, types, ids and properties.
 
-**Entities in queries.** A default-graph node behaves like any other node: `n.name` reads a property, `n.id` is its id, `labels(n)` returns every stored label, `type(r)` the stored type, and a property nobody has set yet is `null`. Metadata wins over a user property of the same name in that view (`n.id` is the entity id; `r.type` is the relationship type), while `properties(n)` / `properties(r)` always return the exact stored user properties, including keys such as `id`, `labels`, `type`, `left_id` or `right_id`. Returned entities contain their properties and `id` only; internal bookkeeping keys are removed.
+**Entities in queries.** As in Cypher, property access on graph entities always reads stored user properties, and metadata comes from functions, so a stored property never collides with metadata:
+
+- `n.name`, `n.id`, `r.type`, `{id: ...}` in a pattern and `WHERE n.id = ...` read the stored properties of that name (`null` when unset), whatever the name.
+- `id(n)` / `id(r)` return the entity id (`elementId(...)` the same as a string), `labels(n)` every stored label, `type(r)` the stored relationship type, and `properties(n)` / `properties(r)` the exact stored user properties.
+- Use `WHERE id(n) = ...` to find an entity by its id; FlowQuery then sends a `lookup`.
+- A returned node contains its stored properties plus `id`, the entity id, unless it stores an `id` property of its own (use `id(n)` to always get the entity id). A returned relationship also keeps its `type`, `startNode`, `endNode` and `properties`. Internal bookkeeping keys are removed.
+
+This applies to graph entities only: `CREATE VIRTUAL` definitions keep reading their columns, where `n.id` is the definition's `id` column.
 
 **Writes** use the [change-set protocol](#writing-to-backends) with `graph: true` on every request (`write`, `commit`, `rollback`), so they need `writes: true`; a read-only backend stays readable and rejects writes with a clear error. Node targets are graph-wide ids (`label` is informational and may be `null`), relationship changes carry the stored `type`, `createNode.labels` may hold zero or several labels (`CREATE (n)`, `CREATE (n:A:B)`), and `mergeNode` adds `labels` with every label of the pattern (`label` is the first). `MERGE` of a node needs at least one label; a new relationship still needs exactly one type; its endpoints may be nodes of any graph or definition (see [Named graphs](#named-graphs-and-relationships-across-graphs)). Without `transactions: true` the whole change set is sent once, when the query succeeds, and the query does not read its own writes; with it, the [transactional lifecycle](#transactions-read-your-writes) applies unchanged. The binding never enables transactions on its own. All reads and writes of a query share one read context (`openReadContext` / `closeReadContext`), signal and cleanup, exactly as for definitions.
 

@@ -36,7 +36,16 @@ def is_static_expression(node: Any) -> bool:
     return all(is_static_expression(child) for child in children)
 
 
-def build_terms(properties: Any, pushed: List[PushedPredicate]) -> SourceTerms:
+#: Property of the push term carrying the entity identity (``id(n) = ...``).
+#: Definitions read it as their ``id`` column; graphs use it for lookups by
+#: entity id and never send it as a property predicate.
+IDENTITY_PROPERTY = "\u0000id"
+
+
+def build_terms(
+    properties: Any, pushed: List[PushedPredicate], identity: Any = None
+) -> SourceTerms:
+    """Evaluate static element properties and pushed WHERE predicates into push terms."""
     terms: List[PushTerm] = []
     args: Optional[Dict[str, Any]] = None
     items = properties.items() if properties is not None else []
@@ -55,7 +64,22 @@ def build_terms(properties: Any, pushed: List[PushedPredicate]) -> SourceTerms:
                 terms.append({"op": "in", "property": p["property"], "values": value})
         else:
             terms.append({"op": p["op"], "property": p["property"], "value": value})
+    if identity is not None and is_static_expression(identity):
+        terms.append({"op": "eq", "property": IDENTITY_PROPERTY, "value": identity.value()})
     return terms, args
+
+
+def _identity_of(terms: List[PushTerm], graph: bool) -> Any:
+    """Identity value of a lookup: the identity term, or (definitions) an ``id`` equality."""
+    for t in terms:
+        if t.get("op") == "eq" and t.get("property") == IDENTITY_PROPERTY:
+            return t.get("value")
+    if graph:
+        return None
+    for t in terms:
+        if t.get("op") == "eq" and t.get("property") == "id":
+            return t.get("value")
+    return None
 
 
 def _is_number(value: Any) -> bool:
@@ -344,7 +368,9 @@ class SourceEntry:
                     )
             else:
                 self.ctx.stats["fallbacks"] += 1
-                if supports_key_in(self.caps.get("predicates"), field):
+                # Graphs read every predicate as a stored user property, so the
+                # entity-id key (`id` / `left_id` / `right_id`) is matched locally.
+                if not self.is_graph and supports_key_in(self.caps.get("predicates"), field):
                     for batch in chunk(pending, self.batch_size):
                         self.ctx.stats["batches"] += 1
                         parts: List[Dict[str, Any]] = []
@@ -395,6 +421,26 @@ class NodeEntry(SourceEntry):
         if self.labels is not None:
             return {"label": self.label, "labels": self.labels}
         return {"label": self.label}
+
+    def translate(self, terms: List[PushTerm]) -> List[PushTerm]:
+        """Terms as this source reads them: definitions read the identity as
+        their ``id`` column; graphs predicate user properties only (the
+        identity is used for lookups)."""
+        if not any(t.get("property") == IDENTITY_PROPERTY for t in terms):
+            return terms
+        if self.is_graph:
+            return [t for t in terms if t.get("property") != IDENTITY_PROPERTY]
+        return [
+            {**t, "property": "id"} if t.get("property") == IDENTITY_PROPERTY else t
+            for t in terms
+        ]
+
+    def identity(self, terms: List[PushTerm]) -> Any:
+        """The entity id the terms pin this source to, or None."""
+        return _identity_of(terms, self.is_graph)
+
+    def predicate(self, terms: List[PushTerm]) -> Optional[Dict[str, Any]]:
+        return super().predicate(self.translate(terms))
 
     def enrich(self, row: SourceRow) -> SourceRow:
         if self.label is not None:
@@ -668,8 +714,29 @@ class NodeSourceAccess:
             rows.extend(found.get(k, []))
         return rows
 
+    async def start(
+        self, terms: List[PushTerm], args: Optional[Dict[str, Any]]
+    ) -> AsyncGenerator[List[SourceRow], None]:
+        """Rows a traversal starts from: a lookup by entity id where the terms
+        pin one and the source supports it, otherwise a scan."""
+        for entry in self.entries:
+            id_ = entry.identity(terms)
+            if id_ is not None and entry.native_lookup:
+                rows = await entry.lookup([id_], terms, args)
+                yield rows.get(canonical_key(id_), [])
+            else:
+                async with aclosing(entry.scan(terms, args)) as pages:
+                    async for page in pages:
+                        yield page
+
     def can_lookup(self) -> bool:
         return all(e.native_lookup for e in self.entries)
+
+    def identity_lookup(self, terms: List[PushTerm]) -> bool:
+        """Every source can answer the terms with a lookup by entity id."""
+        return len(self.entries) > 0 and all(
+            e.native_lookup and e.identity(terms) is not None for e in self.entries
+        )
 
     def pushes(self, terms: List[PushTerm]) -> bool:
         return all(e.pushes(terms) for e in self.entries)
@@ -812,8 +879,17 @@ class MemoryNodeAccess:
             self._index = index_rows(self.records, "id")
         return _rows_for_origin(self._index.get(canonical_key(id_), []), origin)
 
+    async def start(
+        self, terms: List[PushTerm], args: Optional[Dict[str, Any]]
+    ) -> AsyncGenerator[List[SourceRow], None]:
+        id_ = _identity_of(terms, False)
+        yield await self.lookup(id_, terms, args) if id_ is not None else self.records
+
     def can_lookup(self) -> bool:
         return True
+
+    def identity_lookup(self, terms: List[PushTerm]) -> bool:
+        return _identity_of(terms, False) is not None
 
     def pushes(self, terms: List[PushTerm]) -> bool:
         return False

@@ -3,9 +3,11 @@ import Expression from "../parsing/expressions/expression";
 import {
     commonNamespace,
     endpointNamespace,
+    hasProperty,
     labelsOf,
     namespaceOf,
     originMatches,
+    propertyOf,
 } from "./graph_records";
 import NodeData, { NodeRecord } from "./node_data";
 import Relationship from "./relationship";
@@ -19,6 +21,7 @@ class Node extends ASTNode {
     protected _allLabels: boolean = false;
     /** Graph named by a qualified label, `(n:hr.Person)`; `null` when unqualified. */
     protected _graph: string | null = null;
+    protected _identity: Expression | null = null;
     protected _properties: Map<string, Expression> = new Map();
     protected _value: NodeRecord | null = null;
 
@@ -80,20 +83,38 @@ class Node extends ASTNode {
         this._properties = properties;
     }
     private _matchesProperties(hop: number = 0): boolean {
-        const data: NodeData = this._data!;
+        if (this._properties.size === 0 && this._identity === null) return true;
+        const record: NodeRecord = this._data!.current(hop)!;
+        if (record === null) {
+            throw new Error("No current node data available");
+        }
+        return this.matchesConstraints(record);
+    }
+    /**
+     * The row satisfies the pattern's identity (`id(n) = ...`) and property
+     * constraints.  Graph nodes are matched on their stored user
+     * properties; definition rows on their columns.
+     */
+    private matchesConstraints(record: NodeRecord): boolean {
+        if (this._identity !== null && record.id !== this._identity.value()) {
+            return false;
+        }
         for (const [key, expression] of this._properties) {
-            const record: NodeRecord = data.current(hop)!;
-            if (record === null) {
-                throw new Error("No current node data available");
-            }
-            if (!(key in record)) {
+            if (!hasProperty(record, key)) {
                 return false;
             }
-            if (record[key] !== expression.value()) {
+            if (propertyOf(record, key) !== expression.value()) {
                 return false;
             }
         }
         return true;
+    }
+    /** `id(n) = value` from the WHERE clause (set by MATCH), or `null`. */
+    public get identity(): Expression | null {
+        return this._identity;
+    }
+    public set identity(expression: Expression | null) {
+        this._identity = expression;
     }
     public setProperty(key: string, value: Expression): void {
         this._properties.set(key, value);
@@ -140,7 +161,7 @@ class Node extends ASTNode {
         this._pushedPredicates = predicates;
     }
     public sourceTerms(): SourceTerms {
-        return buildTerms(this._properties, this._pushedPredicates);
+        return buildTerms(this._properties, this._pushedPredicates, this._identity);
     }
     /** Every label of `(n:A:B)` is carried by the row (always true otherwise). */
     public matchesLabels(record: NodeRecord): boolean {
@@ -150,16 +171,7 @@ class Node extends ASTNode {
     }
     /** Residual check of the pattern's own property constraints against a row. */
     public matchesRecord(record: NodeRecord): boolean {
-        if (!this.matchesLabels(record)) return false;
-        for (const [key, expression] of this._properties) {
-            if (!(key in record)) {
-                return false;
-            }
-            if (record[key] !== expression.value()) {
-                return false;
-            }
-        }
-        return true;
+        return this.matchesLabels(record) && this.matchesConstraints(record);
     }
     public async *next(): AsyncGenerator<void> {
         if (this._access !== null) {
@@ -214,13 +226,9 @@ class Node extends ASTNode {
     private async *_deferredNext(): AsyncGenerator<void> {
         const access = this._access!;
         const { terms, args } = this.sourceTerms();
-        const idTerm = terms.find((t) => t.op === "eq" && t.property === "id");
-        const pages: AsyncIterable<NodeRecord[]> =
-            idTerm !== undefined && idTerm.value != null && access.canLookup()
-                ? (async function* () {
-                      yield (await access.lookup(idTerm.value, terms, args)) as NodeRecord[];
-                  })()
-                : (access.scan(terms, args) as AsyncIterable<NodeRecord[]>);
+        const pages: AsyncIterable<NodeRecord[]> = access.start(terms, args) as AsyncIterable<
+            NodeRecord[]
+        >;
         for await (const page of pages) {
             const rows = page.filter((row) => this.matchesRecord(row));
             if (this._outgoing !== null && rows.length > 1) {

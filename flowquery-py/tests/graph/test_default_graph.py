@@ -43,6 +43,19 @@ class MockScanBackend(MockBackend):
 
 
 @FunctionDef({
+    "description": "Mock graph backend that filters but has no lookup or expand (tests only)",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "rows", "type": "object"},
+})
+class MockPredicateBackend(MockBackend):
+    capabilities: Any = {"predicates": True, "writes": True}
+
+    def __init__(self, name: str = "mockpredicatebackend") -> None:
+        super().__init__(name)
+
+
+@FunctionDef({
     "description": "Waits for the test to open the gate (tests only)",
     "category": "async",
     "parameters": [],
@@ -136,7 +149,7 @@ class TestBindingAnEmptyBackend:
         assert mock.log == []
         created = await run(
             "CREATE (p:Person {name: 'Ada'}) CREATE (x:Project {name: 'Beacon'}) "
-            "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN p.id AS person, x.id AS project"
+            "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN id(p) AS person, id(x) AS project"
         )
         person = created.results[0]["person"]
         project = created.results[0]["project"]
@@ -164,7 +177,7 @@ class TestBindingAnEmptyBackend:
         ]
         read = await run(
             "MATCH (p:Person)-[w:WORKS_ON]->(x:Project) RETURN p.name AS person, "
-            "x.name AS project, w.role AS role, p.id AS pid"
+            "x.name AS project, w.role AS role, id(p) AS pid"
         )
         assert read.results == [{"person": "Ada", "project": "Beacon", "role": "lead", "pid": person}]
         other = await run("MATCH (n:Nobody) RETURN n")
@@ -196,7 +209,7 @@ class TestBindingAnEmptyBackend:
 
 MERGE = (
     "MERGE (p:Person {name: 'Ada'}) ON CREATE SET p.created = true "
-    "ON MATCH SET p.title = 'Lead' RETURN p.id AS id"
+    "ON MATCH SET p.title = 'Lead' RETURN id(p) AS id"
 )
 
 
@@ -239,7 +252,7 @@ class TestMerge:
         await run("CREATE (:Person {name: 'Ada'}), (:Project {name: 'Beacon'})")
         m = (
             "MATCH (a:Person {name: 'Ada'}), (b:Project {name: 'Beacon'}) "
-            "MERGE (a)-[r:WORKS_ON]->(b) ON MATCH SET r.again = true RETURN r.id AS id"
+            "MERGE (a)-[r:WORKS_ON]->(b) ON MATCH SET r.again = true RETURN id(r) AS id"
         )
         first = await run(m)
         second = await run(m)
@@ -274,7 +287,7 @@ class TestSchemaFreeProperties:
         )
         r = await run(
             "MATCH (n:Thing) WHERE n.`odd key` = $v RETURN n.name AS name, n.`odd key` AS odd, "
-            "n.labels AS labels, n.type AS type, n.left_id AS l, n.id AS id, "
+            "n.labels AS labels, n.type AS type, n.left_id AS l, n.id AS id, id(n) AS eid, "
             "properties(n) AS props, labels(n) AS lbls",
             {"v": 42},
         )
@@ -285,7 +298,8 @@ class TestSchemaFreeProperties:
                 "labels": "L",
                 "type": "T",
                 "l": 7,
-                "id": 1000,
+                "id": "user-id",
+                "eid": 1000,
                 "props": {
                     "name": "a",
                     "odd key": 42,
@@ -299,19 +313,64 @@ class TestSchemaFreeProperties:
             }
         ]
         assert last(mock.requests)["predicate"] == {"op": "eq", "property": "odd key", "value": 42}
-        missing = await run("MATCH (n:Thing) RETURN n.name AS name, n.`odd key` AS odd ORDER BY name")
-        assert missing.results == [{"name": "a", "odd": 42}, {"name": "b", "odd": None}]
+        missing = await run(
+            "MATCH (n:Thing) RETURN n.name AS name, n.`odd key` AS odd, n.id AS id ORDER BY name"
+        )
+        assert missing.results == [
+            {"name": "a", "odd": 42, "id": "user-id"},
+            {"name": "b", "odd": None, "id": None},
+        ]
+
+    async def test_stored_properties_named_id_and_the_entity_id_via_id_n(self) -> None:
+        await run(BIND)
+        await run("CREATE (:Item {id: 'A-1', name: 'first'}), (:Item {name: 'second'})")
+        whole = await run("MATCH (n:Item) RETURN n ORDER BY n.name")
+        # A stored `id` is returned as stored; otherwise `id` is the entity id.
+        assert whole.results == [
+            {"n": {"id": "A-1", "name": "first"}},
+            {"n": {"name": "second", "id": 1001}},
+        ]
+        mock.reset()
+        by_property = await run("MATCH (n:Item {id: 'A-1'}) RETURN n.name AS name, id(n) AS eid")
+        assert by_property.results == [{"name": "first", "eid": 1000}]
+        assert mock.requests[0]["operation"] == "scan"
+        assert mock.requests[0]["predicate"] == {"op": "eq", "property": "id", "value": "A-1"}
+        mock.reset()
+        by_identity = await run("MATCH (n:Item) WHERE id(n) = 1001 RETURN n.name AS name")
+        assert by_identity.results == [{"name": "second"}]
+        assert mock.requests[0]["operation"] == "lookup"
+        assert mock.requests[0]["ids"] == [1001]
+        assert mock.requests[0]["predicate"] is None
+        assert (await run("MATCH (n:Item {id: 1001}) RETURN n")).results == []
+        await run("MATCH (n:Item {id: 'A-1'}) SET n.id = 'A-2'")
+        assert (await run("MATCH (n:Item) WHERE id(n) = 1000 RETURN n.id AS id")).results == [
+            {"id": "A-2"}
+        ]
 
     async def test_relationship_metadata_and_user_properties_stay_apart(self) -> None:
         await run(BIND)
         await run("CREATE (a:A)-[r:REL {type: 'x', left_id: 5, id: 'u', w: 1}]->(b:B)")
         r = await run(
             "MATCH (:A)-[r:REL]->(:B) RETURN type(r) AS t, r.type AS rt, r.w AS w, "
-            "r.left_id AS l, properties(r) AS p"
+            "r.left_id AS l, r.id AS rid, id(r) AS eid, properties(r) AS p"
         )
         assert r.results == [
-            {"t": "REL", "rt": "REL", "w": 1, "l": 5, "p": {"type": "x", "left_id": 5, "id": "u", "w": 1}}
+            {
+                "t": "REL",
+                "rt": "x",
+                "w": 1,
+                "l": 5,
+                "rid": "u",
+                "eid": 1002,
+                "p": {"type": "x", "left_id": 5, "id": "u", "w": 1},
+            }
         ]
+        whole = await run("MATCH (:A)-[r:REL]->(:B) RETURN r")
+        rel = whole.results[0]["r"]
+        assert rel["type"] == "REL"
+        assert rel["id"] == "u"
+        assert rel["w"] == 1
+        assert rel["properties"] == {"type": "x", "left_id": 5, "id": "u", "w": 1}
         missing = await run("MATCH (:A)-[r:REL {nope: 1}]->(:B) RETURN r")
         assert missing.results == []
         absent = await run("MATCH (:A)-[r:REL]->(:B) RETURN r.nope AS nope")
@@ -690,7 +749,7 @@ class TestQueryLifecycle:
 
     async def test_transactions_read_their_own_writes_and_commit_or_roll_back(self) -> None:
         await run("USE GRAPH mocktxbackend($request)")
-        r = await run("CREATE (n:T {k: 1}) WITH n MATCH (m:T) RETURN count(m) AS c, n.id AS id")
+        r = await run("CREATE (n:T {k: 1}) WITH n MATCH (m:T) RETURN count(m) AS c, id(n) AS id")
         assert r.results == [{"c": 1, "id": 1000}]
         assert mock.commits == 1
         commit = next(q for q in mock.requests if q.get("operation") == "commit")
@@ -752,6 +811,31 @@ class TestOptimizationsAndFallbacks:
         assert {q["operation"] for q in mock.requests} == {"scan"}
         assert all(q["predicate"] is None for q in mock.requests)
         assert r.source_stats["fallbacks"] > 0
+
+    async def test_filter_only_backends_never_receive_entity_ids_as_property_predicates(
+        self,
+    ) -> None:
+        await run("USE GRAPH mockpredicatebackend($request)")
+        await seed_people()
+        r = await run(
+            "MATCH (a:Person {name: 'p1'})-[:KNOWS]->(b:Person) RETURN b.name AS name ORDER BY name"
+        )
+        assert r.results == [{"name": "p2"}, {"name": "p3"}]
+        by_id = await run("MATCH (n:Person) WHERE id(n) = 1001 RETURN n.name AS name")
+        assert by_id.results == [{"name": "p2"}]
+
+        def properties(p: Any) -> List[str]:
+            if p is None:
+                return []
+            if p["op"] == "and":
+                return [x for t in p["terms"] for x in properties(t)]
+            return [p["property"]]
+
+        sent = [x for q in mock.requests for x in properties(q.get("predicate"))]
+        assert "id" not in sent
+        assert "left_id" not in sent
+        assert "right_id" not in sent
+        assert {q["operation"] for q in mock.requests} == {"scan"}
 
     async def test_no_schema_enumeration_or_refresh_requests(self) -> None:
         await run(BIND)

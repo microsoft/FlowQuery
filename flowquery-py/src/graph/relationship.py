@@ -10,8 +10,10 @@ from .graph_records import (
     common_namespace,
     endpoint_matches,
     endpoint_namespace,
+    has_property,
     is_graph_record,
     namespace_of,
+    property_of,
 )
 from .hops import Hops
 from .relationship_data import RelationshipData
@@ -192,12 +194,12 @@ class Relationship(ASTNode):
             record = self._data.current(hop)
             if record is None:
                 raise ValueError("No current relationship data available")
-            if key not in record:
-                # Default-graph relationships have no fixed columns.
+            if not has_property(record, key):
+                # Graph relationships have no fixed columns.
                 if is_graph_record(record):
                     return False
                 raise ValueError("Relationship does not have property")
-            if record[key] != expression.value():
+            if property_of(record, key) != expression.value():
                 return False
         return True
 
@@ -483,11 +485,11 @@ class Relationship(ASTNode):
     def matches_record(self, record: Dict[str, Any]) -> bool:
         """Re-check relationship property constraints against a provider row."""
         for key, expression in self._properties.items():
-            if key not in record:
-                # Default-graph relationships have no fixed columns.
+            if not has_property(record, key):
+                # Graph relationships have no fixed columns.
                 if is_graph_record(record):
                     return False
                 raise ValueError("Relationship does not have property")
-            if record[key] != expression.value():
+            if property_of(record, key) != expression.value():
                 return False
         return True

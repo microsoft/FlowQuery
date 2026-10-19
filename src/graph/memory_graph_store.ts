@@ -136,7 +136,7 @@ export class MemoryGraphStore {
         for (const n of candidates) {
             if (n.graph !== graph) continue;
             if (!wanted.every((label) => n.labels.includes(label))) continue;
-            if (!matchesPredicate(request.predicate ?? null, { ...n.properties, id: n.id })) {
+            if (!matchesPredicate(request.predicate ?? null, n.properties)) {
                 continue;
             }
             out.push({ id: n.id, labels: [...n.labels], properties: { ...n.properties } });
@@ -173,8 +173,7 @@ export class MemoryGraphStore {
         for (const r of candidates) {
             if (r.graph !== graph) continue;
             if (request.type !== null && r.type !== request.type) continue;
-            const flat = { ...r.properties, id: r.id, left_id: r.start.id, right_id: r.end.id };
-            if (!matchesPredicate(request.predicate ?? null, flat)) continue;
+            if (!matchesPredicate(request.predicate ?? null, r.properties)) continue;
             const row: SourceRow = {
                 id: r.id,
                 type: r.type,

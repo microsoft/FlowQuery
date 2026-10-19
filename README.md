@@ -916,6 +916,34 @@ CALL schema() YIELD kind, label, type, from_label, to_label, properties, sample
 RETURN kind, label, properties
 ```
 
+#### Relationship Uniqueness
+
+Within one `MATCH` clause, including its comma-separated patterns and variable-length hops, each relationship is bound at most once (openCypher "relationship isomorphism"). A pattern therefore cannot walk out over a relationship and back over the same one:
+
+```cypher
+// Ben's co-workers on the same project: Ben is not returned as his own co-worker
+MATCH (b:Person {name: 'Ben'})-[:WORKS_ON]->(p:Project)<-[:WORKS_ON]-(c:Person)
+RETURN c.name AS coworker
+```
+
+Nodes may repeat, and separate `MATCH` clauses stay independent, so `MATCH (a)-[:W]->(x) MATCH (x)<-[:W]-(b)` still returns `a` as a `b`. Relationships are compared by type plus their `id` column when the definition returns one, otherwise by type plus the whole row, so two parallel relationships with identical rows and no `id` count as one.
+
+#### Query Parameters
+
+Queries can take named parameters instead of splicing values into the query text. Pass them in `RunnerOptions.parameters` and reference them as `$name`:
+
+```typescript
+const runner = new FlowQuery(
+    "MATCH (p:Person {name: $name})-[:KNOWS]->(f) WHERE f.age >= $minAge RETURN f.name",
+    null,
+    null,
+    { parameters: { name: "Ada", minAge: 30 } }
+);
+await runner.run();
+```
+
+Parameters work anywhere an expression does (`UNWIND $ids AS id`, `LOAD JSON FROM $url`, `SET n.title = $title`) and are pushed to backends exactly like literals. A missing value fails when the query runs (`Missing value for parameter $name`), so a parsed query can be run with different parameter maps. `$args` and `$request` are reserved for virtual definitions unless supplied explicitly.
+
 #### Filter Pass-Down (Parameter References)
 
 Virtual node/relationship definitions can reference `$paramName` or `$args.paramName` to receive filter values from `MATCH` constraints and `WHERE` equality predicates. This enables dynamic data loading (e.g., API calls parameterized by match constraints).
@@ -933,108 +961,175 @@ MATCH (t:Todo {id: 3}) RETURN t.title
 MATCH (t:Todo) WHERE t.id = 3 RETURN t.title
 ```
 
-`$`-prefixed identifiers are **only** allowed inside virtual definitions. Non-equality operators in `WHERE` (`>`, `<`, `CONTAINS`, etc.) are **not** extracted as pass-down parameters. `OR` predicates are also not extracted.
+Inside a definition, `$args` is the pass-down map and `$name` is `$args.name`; names the pass-down map doesn't contain fall back to the query's parameters (and are otherwise `null`), so a definition such as `UNWIND $people AS p RETURN p.id AS id, p.name AS name` can read a list passed with the query. Non-equality operators in `WHERE` (`>`, `<`, `CONTAINS`, etc.) are **not** extracted as pass-down parameters. `OR` predicates are also not extracted.
 
 #### Backend-Aware Virtual Sources
 
-By default a virtual definition is loaded eagerly: its sub-query runs once per query and all rows are held in memory. For large or remote backends, a **source provider** lets FlowQuery read only what a pattern needs. This is opt-in: existing `CREATE VIRTUAL` definitions behave exactly as before.
+By default a virtual definition is loaded eagerly: its sub-query runs once per query and all rows are held in memory. For large or remote backends, a definition can opt into the **source contract** so FlowQuery reads only what a pattern needs. Existing `CREATE VIRTUAL` definitions behave exactly as before.
 
-A provider declares versioned capabilities and implements a required `scan` plus optional `lookup` (nodes by id) and `expand` (relationships by `left_id`/`right_id`):
+A definition opts in with `WITH CAPABILITIES { ... }` between the pattern and `AS`. Each request then runs the sub-query with `$request` bound to the request envelope: `operation` (`scan`, `lookup` or `expand`), `label` or `type`/`sourceLabel`/`targetLabel`, `ids`, `side`, `predicate`, `args` and `pageSize`. Most backends load from one async function that serves every request:
 
-```typescript
-import FlowQuery from "flowquery";
-import { cursorPages, matchesPredicate } from "flowquery/extensibility";
+```cypher
+CREATE VIRTUAL (:Person)
+WITH CAPABILITIES {lookup: true, streaming: true, predicates: true}
+AS {
+    LOAD JSON FROM backend($request) AS n
+    RETURN n.id AS id, n.name AS name, n.joined AS joined
+}
 
-FlowQuery.registerNodeSource("Person", {
-    capabilities: {
-        version: 1,
-        lookup: true, // implements lookup()
-        cacheable: true, // identical reads within one query may be cached
-        maxBatchSize: 50, // ids per lookup/expand request
-        predicates: { operators: ["eq", "in", "gt", "gte", "lt", "lte"] },
-    },
-    // Any SourceResult: an array, a promise of an array, or a (async) iterable of pages.
-    scan: (req, ctx) =>
-        cursorPages((cursor) => api.people({ filter: req.predicate, cursor, signal: ctx.signal })),
-    lookup: (req) => api.peopleByIds(req.ids),
-});
-
-FlowQuery.registerRelationshipSource("KNOWS", "Person", "Person", {
-    capabilities: { version: 1, expand: { left: true, right: true } },
-    scan: () => api.allKnows(),
-    expand: (req) => api.knows({ [req.side === "left" ? "from" : "to"]: req.ids }),
-});
-
-const fq = new FlowQuery("MATCH (a:Person {id: 7})-[:KNOWS]->(b:Person) RETURN b.name LIMIT 10");
-await fq.run();
-console.log(fq.sourceStats); // calls, pages, rows, cache hits, batches, plans...
+CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person)
+WITH CAPABILITIES {expand: true, maxBatchSize: 50, predicates: {operators: ['eq', 'in']}}
+AS {
+    LOAD JSON FROM backend($request) AS r
+    RETURN r.left_id AS left_id, r.right_id AS right_id, r.since AS since
+}
 ```
 
-With these capabilities, the query above issues a `lookup` for id 7, one batched `expand` for its outgoing relationships and batched `lookup`s for the targets, instead of loading every person and relationship. What the engine does with a provider:
+Statements that ignore part of the request stay correct, because FlowQuery re-checks every row. A small definition over a list (for tests, examples or reference data) needs no function at all:
+
+```cypher
+CREATE VIRTUAL (:Person) WITH CAPABILITIES {lookup: true} AS {
+    UNWIND $people AS p
+    WITH p WHERE $request IS NULL OR $request.operation = 'scan' OR p.id IN $request.ids
+    RETURN p.id AS id, p.name AS name
+}
+```
+
+**Capabilities.** The map declares what the source evaluates natively. FlowQuery only plans with what is declared:
+
+| Key            | Meaning                                                                                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lookup`       | Nodes: answers `lookup` requests (`ids`).                                                                                                                      |
+| `expand`       | Relationships: answers `expand` requests by `left_id` and/or `right_id` (`{left: true, right: true}`; `true` is shorthand for both).                           |
+| `predicates`   | `{operators: [...], properties?: [...], stringOrdering?: ...}`: filters evaluated exactly. `true` means every operator (`eq`, `in`, `gt`, `gte`, `lt`, `lte`). |
+| `streaming`    | Rows are handed over page by page (eligible sub-queries: no `ORDER BY` or aggregation in the final `RETURN`).                                                  |
+| `cacheable`    | Identical reads within one query may be cached.                                                                                                                |
+| `maxBatchSize` | Maximum ids per `lookup`/`expand` request.                                                                                                                     |
+| `writes`       | The backend function accepts change sets (see [Writing to Backends](#writing-to-backends)).                                                                    |
+
+`version` defaults to the current contract version, node-only keys are ignored for relationships and the reverse, and invalid capabilities reject the whole definition with `SourceCapabilityError`. Redefining the label without capabilities, or deleting it, restores eager loading.
+
+**Capabilities declared by the function.** Instead of repeating the clause in every definition, the async function can declare its capabilities once. When a definition body has exactly one `LOAD ... FROM fn($request)` and `fn` declares capabilities, the clause can be omitted:
+
+```typescript
+@FunctionDef({
+    description: "Graph backend",
+    category: "async",
+    parameters: [],
+    output: { description: "rows", type: "object" },
+})
+class Backend extends AsyncFunction {
+    static capabilities = {
+        lookup: true,
+        expand: true,
+        streaming: true,
+        predicates: true,
+        writes: true,
+    };
+    // Or answer per label/type, once when CREATE VIRTUAL runs:
+    // static capabilities(req) { return req.label === "Audit" ? { lookup: true } : { ... }; }
+    async *generate(request: any) {
+        /* serve scan / lookup / expand / write */
+    }
+}
+```
+
+```cypher
+CREATE VIRTUAL (:Person) AS { LOAD JSON FROM backend($request) AS n RETURN n.id AS id, n.name AS name }
+```
+
+The capabilities are derived once, when `CREATE VIRTUAL` runs. An explicit `WITH CAPABILITIES` map overrides the declared keys, for example `{predicates: false}` switches push-down off. Functions without declared capabilities behave exactly as before. To see what FlowQuery plans with, list the effective capabilities:
+
+```cypher
+LOAD JSON FROM source_capabilities() AS s RETURN s.kind, s.label, s.type, s.mode, s.capabilities
+```
+
+**Function context.** While it runs, an async function sees the query through `this.context`:
+
+- `signal`: aborted when the query is cancelled or finishes; pass it to `fetch` so a cancelled query aborts in-flight calls.
+- `snapshot`: the value returned by the class's static `openReadContext()`. It is opened once per query, before the first call, and shared by every scan, lookup and expand of that query. Static `closeReadContext(snapshot)` runs once when the query ends, including on error or cancellation. Use it for a consistent read snapshot or a transaction.
+- `stats`: the query's source counters.
+
+```typescript
+class Backend extends AsyncFunction {
+    static openReadContext() {
+        return db.beginRead();
+    }
+    static closeReadContext(tx: any) {
+        tx.close();
+    }
+    async *generate(request: any) {
+        const { signal, snapshot } = this.context!;
+        yield* await (snapshot as any).query(request, { signal });
+    }
+}
+```
+
+**Reference adapter.** FlowQuery's own tests use a complete in-memory backend written this way: [`tests/graph/mock_backend.ts`](https://github.com/microsoft/FlowQuery/blob/main/tests/graph/mock_backend.ts) (Python: [`flowquery-py/tests/graph/mock_backend.py`](https://github.com/microsoft/FlowQuery/blob/main/flowquery-py/tests/graph/mock_backend.py)). One async function, `mockbackend($request)`, declares its capabilities once, opens and closes a per-query read context, serves `scan` / `lookup` / `expand` requests, and applies write change sets atomically (resolving temporary ids, returning `{ids, stats}` and rejecting a plain `DELETE` of a connected node). It is a good starting point for an adapter: replace the in-memory store with calls to your backend. It is test code, not part of the package API.
+
+What the engine does with a source:
 
 - **Correlated loading and batching.** Relationships are expanded per page of anchor nodes, and target nodes are fetched with batched lookups. Each request carries at most `min(sources.maxBatchSize, capabilities.maxBatchSize)` distinct ids.
 - **Selective start points.** A chain such as `(a)-[:R]->(b)-[:R]->(c {id: 3})` may start from the more selective end (a bound reference, an id lookup or a pushable predicate). The decision is recorded in `sourceStats.plans`. This can change result order, which is never guaranteed without `ORDER BY`.
 - **Predicate push-down.** Pattern property constraints and top-level `AND`-ed `WHERE` comparisons (`=`, `<`, `<=`, `>`, `>=`, `IN`) on a node's properties, compared against literals or parameters, are sent as `request.predicate` when the capabilities allow it. The legacy `$args` map is still sent as `request.args`.
-- **Streaming and early termination.** Pages are consumed as they arrive. Once a `LIMIT` without `ORDER BY` or aggregation is satisfied, reading stops: the provider's iterator is closed and `ctx.signal` is aborted when the query ends.
+- **Streaming and early termination.** Pages are consumed as they arrive. Once a `LIMIT` without `ORDER BY` or aggregation is satisfied, reading stops and the query's signal is aborted when the query ends.
 - **Query-scoped caching.** Reads of `cacheable` sources are cached for the duration of one query only. The cache is bounded by `sources.cacheCapacity` rows.
 - **Cancellation.** Call `runner.cancel()`, or pass `sources: { signal }`. In-flight reads are aborted and `run()` rejects with `QueryCancelledError`.
-- **Read contexts.** An optional `openReadContext()`/`closeReadContext(snapshot)` pair is called once per query, which is useful for snapshots or transactions. The value is available as `ctx.snapshot`.
 
-Providers may return a **superset**: FlowQuery always re-checks every row. Property constraints, anchor ids and the `WHERE` clause are evaluated as usual, so a provider may ignore predicates, ids or page sizes and still be correct. Predicates are never pushed for `null`, booleans, non-finite numbers, non-primitive `IN` items or into `OPTIONAL MATCH`. String ranges are pushed only when `stringOrdering: "binary"` is declared. `matchesPredicate(predicate, row)` is a reference implementation of these semantics for in-memory providers.
+A source may return a **superset**: FlowQuery always re-checks every row. Property constraints, anchor ids and the `WHERE` clause are evaluated as usual, so a source may ignore predicates, ids or page sizes and still be correct, but it must never omit a row FlowQuery's own comparison would accept. Predicates are never pushed for `null`, booleans, non-finite numbers, non-primitive `IN` items or into `OPTIONAL MATCH`. `matchesPredicate(predicate, row)` is a reference implementation of these semantics.
 
-Errors are reported through typed exceptions:
+**String ranges** (`<`, `<=`, `>`, `>=` on strings) are pushed only to sources that declare how they order strings:
 
-- `SourceCapabilityError`: an invalid declaration, raised at registration.
-- `SourceResponseError`: malformed pages or a repeated cursor.
-- `SourceError`: any other provider failure, wrapped with the source name.
+- `stringOrdering: "binary"`: the host language's string comparison (UTF-16 code units in TypeScript, code points in Python).
+- `stringOrdering: "codepoint"`: Unicode code-point order, which is UTF-8 byte order, as used by SQLite's `BINARY` collation, most key-value stores and Rust/Go strings. The two orders only disagree for characters above U+FFFF compared with U+E000–U+FFFF, so in TypeScript a bound is pushed only when it has no code units at or above U+D800; other bounds are evaluated by FlowQuery. In Python both values mean the same.
 
-A provider may throw `SourceUnsupportedError` from `lookup`/`expand` to fall back to a scan.
+Collation-aware or case-insensitive backends should not declare `stringOrdering`.
 
-Query-level tuning goes in `RunnerOptions.sources`. The defaults are:
+Errors are reported through typed exceptions: `SourceCapabilityError` (invalid declaration), `SourceResponseError` (malformed pages or a repeated cursor) and `SourceError` (any other failure, wrapped with the source name).
 
-- `pageSize: 256`
-- `maxBatchSize: 100`
-- `cacheCapacity: 10000`
-- `maxPrefetchRows: 1024`
-- `reorder: true`
+Query-level tuning goes in `RunnerOptions.sources`. The defaults are `pageSize: 256`, `maxBatchSize: 100`, `cacheCapacity: 10000`, `maxPrefetchRows: 1024` and `reorder: true`.
 
-**In-memory sources.** `inMemoryNodeSource(rows)` and `inMemoryRelationshipSource(rows)` are ready-made providers over arrays. They support lookup, expansion from both sides, every predicate operator and paging, which makes them handy for tests, examples and small reference data. Options are `{ cacheable?: boolean, maxBatchSize?: number }`.
+**Deprecated programmatic API.** `FlowQuery.registerNodeSource`, `registerRelationshipSource`, `setNodeSourceCapabilities` and `setRelationshipSourceCapabilities` still work but log a one-time deprecation warning and will be removed in the next major release. Move each provider's `scan`/`lookup`/`expand` into one async function, use `this.context.signal` / `this.context.snapshot` instead of the provider's `ctx`, and define the labels with `CREATE VIRTUAL ... AS { LOAD JSON FROM fn($request) ... }`. The in-memory providers (`inMemoryNodeSource`, `inMemoryRelationshipSource`) are no longer exported; use a definition over a list as shown above.
 
-```typescript
-import { inMemoryNodeSource, inMemoryRelationshipSource } from "flowquery/extensibility";
+#### Writing to Backends
 
-FlowQuery.registerNodeSource(
-    "Person",
-    inMemoryNodeSource([
-        { id: 1, name: "Ada" },
-        { id: 2, name: "Bob" },
-    ])
-);
-FlowQuery.registerRelationshipSource(
-    "KNOWS",
-    "Person",
-    "Person",
-    inMemoryRelationshipSource([{ left_id: 1, right_id: 2 }])
-);
-```
-
-**Statement-backed sources.** A `CREATE VIRTUAL` definition can opt into the same contract declaratively with a `WITH CAPABILITIES { ... }` clause between the pattern and `AS`. Each request then runs the sub-query with `$request` bound to the request: `operation`, `label`/`type`, `ids`, `side`, `predicate` and `pageSize`.
+`CREATE`, `MERGE`, `SET`, `REMOVE` and `DELETE` change data behind statement-backed definitions whose capabilities include `writes: true` (declared by the function or in `WITH CAPABILITIES`):
 
 ```cypher
-CREATE VIRTUAL (:Ticket) WITH CAPABILITIES {lookup: true, streaming: true} AS {
-    LOAD JSON FROM f"https://api.example.com/tickets?ids={join(coalesce($request.ids, []), ',')}" AS t
-    RETURN t.id AS id, t.title AS title
-}
-
-CREATE VIRTUAL (:Ticket)-[:BLOCKS]-(:Ticket)
-WITH CAPABILITIES {expand: {left: true}, maxBatchSize: 50, predicates: {operators: ['eq', 'in']}} AS {
-    ...
-}
+CREATE (n:Person {name: 'Ada'})
+MATCH (b:Person {name: 'Ben'}) CREATE (a:Person {name: 'Ada'})-[:KNOWS {since: 2020}]->(b)
+MERGE (p:Person {name: 'Ben'}) ON CREATE SET p.team = 'Core' ON MATCH SET p.seen = true
+MATCH (a:Person {id: 1}), (b:Person {id: 2}) MERGE (a)-[:KNOWS]->(b)
+MATCH (p:Person {id: 7}) SET p.title = 'CTO', p += {team: 'Core'}, p:Manager
+MATCH (p:Person {id: 7}) REMOVE p.title, p:Intern
+MATCH (:Person {id: 1})-[r:KNOWS]->() DELETE r
+MATCH (p:Person {id: 13}) DETACH DELETE p
 ```
 
-The map takes the same keys as the capabilities object; `version` defaults to the current contract version. Invalid capabilities reject the whole definition. With `streaming: true`, eligible sub-queries (no `ORDER BY` or aggregation in the final `RETURN`) hand rows over page by page. Redefining the label without `WITH CAPABILITIES`, or deleting it, restores eager loading.
+While the query runs, FlowQuery collects the changes into one ordered change set. New nodes and relationships get temporary ids (`"$1"`, `"$2"`, ...) that later changes can refer to. When the query succeeds, the change set goes to the definitions' backend function in **one call**, passed in place of `$request`:
 
-The same opt-in is available programmatically with `FlowQuery.setNodeSourceCapabilities(label, capabilities)` and `FlowQuery.setRelationshipSourceCapabilities(type, sourceLabel, targetLabel, capabilities)`; pass `null` to opt out.
+```js
+{ version: 1, operation: "write", changes: [
+    { op: "createNode", ref: "$1", labels: ["Person"], properties: { name: "Ada" } },
+    { op: "createRelationship", ref: "$2", type: "KNOWS", start: "$1", end: 42, properties: { since: 2020 } },
+    { op: "mergeNode", ref: "$3", label: "Person", key: { name: "Ben" }, onCreate: { team: "Core" }, onMatch: { seen: true } },
+    { op: "mergeRelationship", ref: "$4", type: "KNOWS", start: 1, end: 2, key: {}, onCreate: {}, onMatch: {} },
+    { op: "setProperties", target: 7, label: "Person", properties: { title: "CTO" } }, // null removes a property
+    { op: "addLabels", target: 7, label: "Person", labels: ["Manager"] },
+    { op: "removeLabels", target: 7, label: "Person", labels: ["Intern"] },
+    { op: "deleteRelationship", target: 99, type: "KNOWS" },
+    { op: "deleteNode", target: 13, label: "Person", detach: true },
+] }
+```
+
+Node targets carry their `label`, relationship targets their `type`; a relationship `target` is its `id` column when the definition returns one, otherwise `{left_id, right_id}`. The backend applies the list **atomically** and yields `{ ids: { "$1": 1001, ... }, stats: { nodesCreated, ... } }`. `MERGE` is resolved by the backend inside its transaction, which avoids read-then-write races. A plain `DELETE` of a node that still has relationships must fail in the backend.
+
+The outcome is available as `runner.writeResult` (`changes`, `ids`, `stats`), and `RETURN` after a write returns FlowQuery's values with temporary ids replaced by the final ids. Deliberate limits:
+
+- **No read-your-writes inside a query.** `MATCH` sees the store as it was when the query started; changes take effect when the query finishes. Later statements of a multi-statement query don't see them either.
+- **One transaction per query**, through one backend function. A failing or cancelled query sends nothing; a failing backend write fails the query.
+- Writes to labels without a definition, to eager definitions or to definitions without `writes: true` are rejected before the query runs. Write clauses are not allowed inside definitions.
+- `SET n = {...}` (replace all properties) and schema changes are not supported.
 
 ### Reserved Keywords as Identifiers
 
@@ -1044,6 +1139,8 @@ Reserved words (`return`, `with`, `from`, `to`, etc.) can be used as:
 - Property keys: `data.from`, `data.to`
 - Map keys: `{return: 1}`
 - Node labels and relationship types: `(:Return)-[:With]->()`
+
+Backtick-quoted identifiers can hold any characters, e.g. ``(:`Odd label`)``, ``m.`odd key` ``, ``AS `odd key` ``. A backtick inside one is written as two backticks, the openCypher escape (```(:`a``b`)``` is the label ``a`b``), or with a backslash (``(:`a\`b`)``).
 
 ### Introspection
 
@@ -1088,9 +1185,11 @@ RETURN f.name, f.description, f.category
 ├─────────────────────────────────────────────────────────────┤
 │  CREATE VIRTUAL (:Label) AS { subquery }                    │
 │  CREATE VIRTUAL (:L1)-[:TYPE]-(:L2) AS { subquery }         │
+│  CREATE VIRTUAL (:Label) WITH CAPABILITIES {...} AS {...}   │
 │  DELETE VIRTUAL (:Label)                                    │
 │  DELETE VIRTUAL (:L1)-[:TYPE]-(:L2)                         │
 │  MATCH (n:Label {prop: val}), ...  [WHERE cond]             │
+│  MATCH (n:Label {prop: $param})      -- query parameter     │
 │  MATCH (n) ...                       -- unlabeled (all)     │
 │  MATCH (n:L1|L2) ...                 -- ORed node labels    │
 │  MATCH (a)-[:TYPE]->(b)              -- rightward           │
@@ -1099,6 +1198,14 @@ RETURN f.name, f.description, f.category
 │  MATCH (a)-[:T1|T2]->(b)             -- ORed types          │
 │  MATCH p=(a)-[:TYPE]->(b)            -- pattern variable    │
 │  OPTIONAL MATCH (a)-[:TYPE]->(b)     -- null if no match    │
+├─────────────────────────────────────────────────────────────┤
+│  WRITES (definitions with writes: true)                     │
+├─────────────────────────────────────────────────────────────┤
+│  CREATE (n:Label {...})  ·  CREATE (a)-[:TYPE {...}]->(b)   │
+│  MERGE (n:Label {key}) [ON CREATE SET ...] [ON MATCH SET ..]│
+│  SET n.prop = v, n += {...}, n:Label                        │
+│  REMOVE n.prop, n:Label                                     │
+│  DELETE r  ·  DETACH DELETE n                               │
 ├─────────────────────────────────────────────────────────────┤
 │  WHERE OPERATORS                                            │
 ├─────────────────────────────────────────────────────────────┤

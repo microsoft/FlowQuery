@@ -10,10 +10,12 @@ from ..graph.node import Node as GraphNode
 from ..graph.pattern import Pattern
 from ..graph.relationship import Relationship as GraphRelationship
 from ..graph.source_context import SourceContext, SourceOptions, empty_source_stats
+from ..graph.write_set import WriteResult, replace_refs
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.binding_reference import BindingReference
 from ..parsing.expressions.parameter_reference import ParameterReference
 from ..parsing.expressions.subquery_expression import SubqueryExpression
+from ..parsing.functions.async_function import AsyncFunction
 from ..parsing.operations.aggregated_with import AggregatedWith
 from ..parsing.operations.create_node import CreateNode
 from ..parsing.operations.create_relationship import CreateRelationship
@@ -24,6 +26,7 @@ from ..parsing.operations.match import Match
 from ..parsing.operations.operation import Operation
 from ..parsing.operations.return_op import Return
 from ..parsing.operations.union import Union
+from ..parsing.operations.write import WriteOperation, commit_writes, prepare_writes
 from ..parsing.parser import Parser
 from ..parsing.statement_info_crawler import (
     ColumnLineage,
@@ -216,6 +219,8 @@ class Runner:
         self._provenance: Optional[List[RowProvenance]] = None
         self._source_context: Optional[SourceContext] = None
         self._cancel_requested = False
+        self._write_result: Optional[WriteResult] = None
+        self._committed_results: Optional[List[Dict[str, Any]]] = None
 
         if ast is not None:
             self._is_top_level = False
@@ -265,6 +270,8 @@ class Runner:
         sink = self._options.row_sink
         last = self._statements[-1].last if self._statements else None
         failed = False
+        self._write_result = None
+        self._committed_results = None
         try:
             await self._run_statements(resolver, inherited, previous_context, sink, last)
         except BaseException:
@@ -306,10 +313,34 @@ class Runner:
 
     @staticmethod
     def _assign_source_context(node: ASTNode, ctx: Optional[SourceContext]) -> None:
-        if isinstance(node, Match):
+        if isinstance(node, (Match, AsyncFunction, WriteOperation)):
             node.source_context = ctx
         for child in node.get_children():
             Runner._assign_source_context(child, ctx)
+
+    async def _commit_writes(self) -> None:
+        """Send the change set collected by write clauses to the backend in
+        one call, then replace temporary refs in the results by final ids.
+        Only runs when every statement succeeded and the query was not
+        cancelled."""
+        ctx = self._source_context
+        if not self._is_top_level or ctx is None or ctx.writes is None:
+            return
+        writes = ctx.writes
+        if len(writes.changes) == 0 or writes.backend is None:
+            return
+        ctx.throw_if_cancelled()
+        self._write_result = await commit_writes(ctx, writes)
+        # Aggregating projections rebuild their rows on every read, so keep
+        # the rows whose temporary refs were replaced.
+        self._committed_results = replace_refs(self.results, self._write_result.ids, writes.refs)
+
+    @property
+    def write_result(self) -> Optional[WriteResult]:
+        """Outcome of the last run's write clauses: the change set sent to
+        the backend, the final ids of temporary refs and the backend's stats.
+        ``None`` when the query wrote nothing."""
+        return self._write_result
 
     async def _run_statements(
         self,
@@ -364,9 +395,15 @@ class Runner:
             self._collect_binding_names(stmt.ast, names)
             for name in names:
                 await bindings_singleton.materialize(name)
+            writes = WriteOperation.collect(stmt.first)
+            if len(writes) > 0:
+                if not self._is_top_level or self._source_context is None:
+                    raise ValueError("Write clauses are only allowed in top-level queries")
+                prepare_writes(writes, self._source_context)
             await stmt.first.initialize()
             await stmt.first.run()
             await stmt.first.finish()
+        await self._commit_writes()
 
     def _enable_provenance(self) -> None:
         """Walks the terminal statement's operation chain and wires
@@ -498,6 +535,8 @@ class Runner:
             return [v for v in node.properties.values() if isinstance(v, ASTNode)]
         if isinstance(node, SubqueryExpression):
             return [node.subquery]
+        if isinstance(node, WriteOperation):
+            return node.evaluated
         return []
 
     def _resolve_parameter(self, ref: ParameterReference) -> Any:
@@ -534,6 +573,8 @@ class Runner:
         Returns:
             The results from the last operation (typically a RETURN statement)
         """
+        if self._committed_results is not None:
+            return self._committed_results
         return self._statements[-1].last.results
 
     @property

@@ -97,6 +97,15 @@ from .operations.update import Update
 from .operations.update_delete import UpdateDelete
 from .operations.where import Where
 from .operations.with_op import With
+from .operations.write import (
+    CreateWrite,
+    DeleteWrite,
+    MergeWrite,
+    RemoveWrite,
+    SetItem,
+    SetWrite,
+    WriteOperation,
+)
 from .parser_state import ParserState
 
 
@@ -183,6 +192,11 @@ class Parser(BaseParser):
 
     def _validate_is_create_or_delete(self, root: ASTNode) -> None:
         """Validates that all operations in a statement are CREATE, DELETE, REFRESH, LET, or UPDATE."""
+        # Statements with write clauses may precede the last statement;
+        # their changes are applied when the whole query succeeds.
+        first = root.first_child()
+        if WriteOperation.collect(first if isinstance(first, Operation) else None):
+            return
         op = root.first_child()
         while op is not None:
             if not isinstance(
@@ -321,11 +335,12 @@ class Parser(BaseParser):
                 Update,
                 UpdateDelete,
                 Merge,
+                WriteOperation,
             ),
         ):
             raise ValueError(
                 "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, "
-                "DROP, REFRESH, LET, UPDATE, or MERGE statement"
+                "DROP, REFRESH, LET, UPDATE, MERGE, SET, or REMOVE statement"
             )
 
         return root
@@ -343,7 +358,9 @@ class Parser(BaseParser):
             self._parse_refresh() or
             self._parse_let() or
             self._parse_update() or
-            self._parse_merge()
+            self._parse_merge() or
+            self._parse_set_write() or
+            self._parse_remove_write()
         )
 
     def _parse_with(self) -> Optional[With]:
@@ -528,6 +545,223 @@ class Parser(BaseParser):
             call.yielded = expressions  # type: ignore[assignment]
         return call
 
+    def _assert_writes_allowed(self, clause: str) -> None:
+        if self._state.in_virtual_definition:
+            raise ValueError(
+                f"{clause} is not allowed inside virtual node or relationship definitions"
+            )
+
+    def _parse_create_write(self) -> CreateWrite:
+        """``CREATE (n:Label {...})[, (a)-[:TYPE {...}]->(b) ...]``"""
+        self._assert_writes_allowed("CREATE")
+        patterns = list(self._parse_patterns())
+        if len(patterns) == 0:
+            raise ValueError("Expected graph pattern after CREATE")
+        for pattern in patterns:
+            for element in pattern.chain:
+                if isinstance(element, Relationship):
+                    if isinstance(element, RelationshipReference):
+                        raise ValueError(
+                            f"CREATE cannot reuse relationship variable {element.identifier}"
+                        )
+                    if len(element.types) != 1:
+                        raise ValueError("CREATE requires exactly one relationship type")
+                    if element.hops is not None and element.hops.multi():
+                        raise ValueError("CREATE does not support variable-length relationships")
+                elif isinstance(element, NodeReference):
+                    if len(element.properties) > 0 or len(element.labels) > 0:
+                        raise ValueError(
+                            "CREATE cannot add labels or properties to bound variable "
+                            f"{element.identifier}"
+                        )
+                elif len(element.labels) != 1:
+                    raise ValueError("CREATE requires exactly one label for each new node")
+        return CreateWrite(patterns)
+
+    def _parse_merge_write(self) -> MergeWrite:
+        """``MERGE (n:Label {key}) | (a)-[r:TYPE {key}]->(b)`` with ``ON CREATE|MATCH SET``."""
+        self._assert_writes_allowed("MERGE")
+        pattern = self._parse_pattern()
+        if pattern is None:
+            raise ValueError("Expected graph pattern after MERGE")
+        chain = pattern.chain
+        if len(chain) == 1:
+            node = chain[0]
+            if isinstance(node, NodeReference) or not isinstance(node, Node) or len(node.labels) != 1:
+                raise ValueError("MERGE of a node requires a new variable with exactly one label")
+        elif (
+            len(chain) == 3
+            and isinstance(chain[0], NodeReference)
+            and isinstance(chain[2], NodeReference)
+        ):
+            rel = chain[1]
+            if (
+                not isinstance(rel, Relationship)
+                or isinstance(rel, RelationshipReference)
+                or len(rel.types) != 1
+                or (rel.hops is not None and rel.hops.multi())
+            ):
+                raise ValueError("MERGE of a relationship requires exactly one type and one hop")
+        else:
+            raise ValueError(
+                "MERGE supports a single node, or one relationship between two bound nodes"
+            )
+        on_create: List[SetItem] = []
+        on_match: List[SetItem] = []
+        while True:
+            saved = self._token_index
+            self._skip_whitespace_and_comments()
+            if not self.token.is_on():
+                self._token_index = saved
+                break
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if self.token.is_create():
+                target = on_create
+            elif self.token.is_match():
+                target = on_match
+            else:
+                raise ValueError("Expected CREATE or MATCH after ON")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_set():
+                raise ValueError("Expected SET after ON CREATE / ON MATCH")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            for item in self._parse_set_items("SET"):
+                if item.kind not in ("property", "merge"):
+                    raise ValueError("ON CREATE / ON MATCH SET only supports property updates")
+                if not any(item.element is element for element in chain):
+                    raise ValueError("ON CREATE / ON MATCH SET must update the merged element")
+                target.append(item)
+        return MergeWrite(pattern, on_create, on_match)
+
+    def _parse_set_write(self) -> Optional[SetWrite]:
+        if not self.token.is_set():
+            return None
+        self._assert_writes_allowed("SET")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        return SetWrite(self._parse_set_items("SET"))
+
+    def _parse_remove_write(self) -> Optional[RemoveWrite]:
+        if not self.token.is_remove():
+            return None
+        self._assert_writes_allowed("REMOVE")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        return RemoveWrite(self._parse_set_items("REMOVE"))
+
+    def _parse_delete_write(self, detach: bool) -> DeleteWrite:
+        clause = "DETACH DELETE" if detach else "DELETE"
+        self._assert_writes_allowed(clause)
+        elements: List[Node | Relationship] = []
+        while True:
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError(f"Expected variable after {clause}")
+            elements.append(self._resolve_write_variable(self.token.value or "", clause))
+            self.set_next_token()
+            saved = self._token_index
+            self._skip_whitespace_and_comments()
+            if not self.token.is_comma():
+                self._token_index = saved
+                break
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        return DeleteWrite(elements, detach)
+
+    def _parse_set_items(self, clause: str) -> List[SetItem]:
+        """Items of ``SET`` (``n.p = v``, ``n += map``, ``n:Label``) or
+        ``REMOVE`` (``n.p``, ``n:Label``)."""
+        items: List[SetItem] = []
+        while True:
+            if not self.token.is_identifier_or_keyword():
+                raise ValueError(f"Expected variable in {clause}")
+            name = self.token.value or ""
+            element = self._resolve_write_variable(name, clause)
+            self.set_next_token()
+            if self.token.is_dot():
+                self.set_next_token()
+                if not self.token.is_identifier_or_keyword():
+                    raise ValueError(f"Expected property name after {name}.")
+                prop = self.token.value or ""
+                self.set_next_token()
+                if clause == "REMOVE":
+                    items.append(SetItem(kind="removeProperty", element=element, property=prop))
+                else:
+                    self._skip_whitespace_and_comments()
+                    if not self.token.is_equals():
+                        raise ValueError(f"Expected '=' after {name}.{prop}")
+                    self.set_next_token()
+                    self._skip_whitespace_and_comments()
+                    expression = self._parse_expression()
+                    if expression is None:
+                        raise ValueError("Expected expression")
+                    items.append(
+                        SetItem(kind="property", element=element, property=prop, expression=expression)
+                    )
+            elif self.token.is_colon():
+                if not isinstance(element, Node):
+                    raise ValueError(f"{clause} labels requires a node variable")
+                labels: List[str] = []
+                while self.token.is_colon():
+                    self.set_next_token()
+                    if not self.token.is_identifier_or_keyword():
+                        raise ValueError("Expected label")
+                    labels.append(self.token.value or "")
+                    self.set_next_token()
+                items.append(
+                    SetItem(
+                        kind="addLabels" if clause == "SET" else "removeLabels",
+                        element=element,
+                        labels=labels,
+                    )
+                )
+            else:
+                self._skip_whitespace_and_comments()
+                peek = self.peek()
+                if clause == "SET" and self.token.is_add() and peek is not None and peek.is_equals():
+                    self.set_next_token()
+                    self.set_next_token()
+                    self._skip_whitespace_and_comments()
+                    expression = self._parse_expression()
+                    if expression is None:
+                        raise ValueError("Expected map expression after +=")
+                    items.append(SetItem(kind="merge", element=element, expression=expression))
+                elif clause == "SET" and self.token.is_equals():
+                    raise ValueError(
+                        f"SET {name} = {{...}} is not supported; use SET {name} += {{...}}"
+                    )
+                else:
+                    raise ValueError(f"Expected property, label or += after {name} in {clause}")
+            saved = self._token_index
+            self._skip_whitespace_and_comments()
+            if not self.token.is_comma():
+                self._token_index = saved
+                break
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+        return items
+
+    def _resolve_write_variable(self, name: str, clause: str) -> Node | Relationship:
+        """The node or relationship a write clause variable is bound to."""
+        reference: Optional[ASTNode] = self._state.variables.get(name)
+        if isinstance(reference, Expression) and reference.child_count() > 0:
+            first = reference.first_child()
+            if isinstance(first, Reference):
+                reference = first.referred
+        if (
+            isinstance(reference, Relationship)
+            and reference.hops is not None
+            and reference.hops.multi()
+        ):
+            raise ValueError(f"{clause} does not support variable-length relationship {name}")
+        if isinstance(reference, (Node, Relationship)):
+            return reference
+        raise ValueError(
+            f"{clause} target {name} must be a node or relationship bound by MATCH, CREATE or MERGE"
+        )
+
     def _parse_match(self) -> Optional[Match]:
         optional = False
         if self.token.is_optional():
@@ -551,6 +785,8 @@ class Parser(BaseParser):
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_left_parenthesis():
+            return self._parse_create_write()
         is_static = False
         if self.token.is_static():
             is_static = True
@@ -684,11 +920,27 @@ class Parser(BaseParser):
             return CreateNode(node, query, is_static, refresh_every_ms, capabilities)
 
     def _parse_delete(self) -> Optional[Operation]:
-        """Parse DELETE/DROP VIRTUAL or DROP BINDING statement."""
+        """Parse DELETE/DROP VIRTUAL, DROP BINDING or a ``[DETACH] DELETE`` write."""
+        if self.token.is_detach():
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            if not self.token.is_delete():
+                raise ValueError("Expected DELETE after DETACH")
+            self.set_next_token()
+            self._expect_and_skip_whitespace_and_comments()
+            return self._parse_delete_write(True)
         if not self.token.is_delete() and not self.token.is_drop():
             return None
+        is_delete = self.token.is_delete()
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if (
+            is_delete
+            and not self.token.is_binding()
+            and not self.token.is_virtual()
+            and self.token.is_identifier_or_keyword()
+        ):
+            return self._parse_delete_write(False)
         if self.token.is_binding():
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
@@ -937,13 +1189,16 @@ class Parser(BaseParser):
         expression, sub_query = self._parse_let_update_rhs()
         return Update(name, expression, sub_query)
 
-    def _parse_merge(self) -> Optional[Merge]:
+    def _parse_merge(self) -> Optional[Operation]:
         """Parses a ``MERGE INTO <name> [AS <target>] USING <rhs>
-        [AS <source>] ON <on-clause> <when-clauses>`` statement."""
+        [AS <source>] ON <on-clause> <when-clauses>`` statement, or a graph
+        ``MERGE (pattern)`` write."""
         if not self.token.is_merge():
             return None
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        if self.token.is_left_parenthesis():
+            return self._parse_merge_write()
         if not self.token.is_into():
             raise ValueError("Expected INTO after MERGE")
         self.set_next_token()

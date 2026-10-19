@@ -4,7 +4,8 @@ Extends Runner with extensibility features such as function listing
 and plugin registration, keeping the Runner focused on execution.
 """
 
-from typing import Any, Dict, List, Optional, Type
+import warnings
+from typing import Any, Dict, List, Optional, Set, Type
 
 from ..parsing.functions.function import Function
 from ..parsing.functions.function_factory import FunctionFactory
@@ -13,6 +14,21 @@ from ..parsing.functions.function_metadata import (
     get_function_metadata,
 )
 from .runner import Runner
+
+_warned: Set[str] = set()
+
+
+def _deprecated(api: str) -> None:
+    """Emit a deprecation warning once per process for `api`."""
+    if api in _warned:
+        return
+    _warned.add(api)
+    warnings.warn(
+        f"FlowQuery: {api} is deprecated and will be removed in the next major release; "
+        "define backend-aware sources with CREATE VIRTUAL ... WITH CAPABILITIES { ... } AS { ... } instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 class FlowQuery(Runner):
@@ -73,9 +89,14 @@ class FlowQuery(Runner):
 
         Replaces any existing virtual definition for the label.  The provider
         exposes ``capabilities`` and ``scan`` (and optionally ``lookup``).
+
+        .. deprecated::
+            Use ``CREATE VIRTUAL (:Label) WITH CAPABILITIES { ... } AS { ... }``
+            over an async function instead.  Removed in the next major release.
         """
         from ..graph.database import Database
 
+        _deprecated("FlowQuery.register_node_source")
         Database.get_instance().register_node_source(label, provider)
 
     @staticmethod
@@ -86,9 +107,15 @@ class FlowQuery(Runner):
         provider: Any,
     ) -> None:
         """Register a backend-aware relationship source for
-        ``(:source_label)-[:rel_type]->(:target_label)``."""
+        ``(:source_label)-[:rel_type]->(:target_label)``.
+
+        .. deprecated::
+            Use ``CREATE VIRTUAL (:A)-[:TYPE]-(:B) WITH CAPABILITIES { ... } AS { ... }``
+            instead.  Removed in the next major release.
+        """
         from ..graph.database import Database
 
+        _deprecated("FlowQuery.register_relationship_source")
         Database.get_instance().register_relationship_source(
             rel_type, source_label, target_label, provider
         )
@@ -98,9 +125,15 @@ class FlowQuery(Runner):
         label: str, capabilities: Optional[Dict[str, Any]]
     ) -> None:
         """Opt a ``CREATE VIRTUAL (:label) AS { ... }`` definition into the
-        source contract with explicit capabilities, or pass ``None`` to opt out."""
+        source contract with explicit capabilities, or pass ``None`` to opt out.
+
+        .. deprecated::
+            Declare capabilities with ``WITH CAPABILITIES { ... }`` (or on the
+            async function) instead.  Removed in the next major release.
+        """
         from ..graph.database import Database
 
+        _deprecated("FlowQuery.set_node_source_capabilities")
         Database.get_instance().set_node_source_capabilities(label, capabilities)
 
     @staticmethod
@@ -110,9 +143,15 @@ class FlowQuery(Runner):
         target_label: Optional[str],
         capabilities: Optional[Dict[str, Any]],
     ) -> None:
-        """Relationship counterpart of :meth:`set_node_source_capabilities`."""
+        """Relationship counterpart of :meth:`set_node_source_capabilities`.
+
+        .. deprecated::
+            Declare capabilities with ``WITH CAPABILITIES { ... }`` (or on the
+            async function) instead.  Removed in the next major release.
+        """
         from ..graph.database import Database
 
+        _deprecated("FlowQuery.set_relationship_source_capabilities")
         Database.get_instance().set_relationship_source_capabilities(
             rel_type, source_label, target_label, capabilities
         )

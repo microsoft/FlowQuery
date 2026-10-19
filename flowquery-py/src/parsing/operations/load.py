@@ -11,6 +11,7 @@ from ...compute.provenance import (
     ProvenanceSource,
     RowSegment,
 )
+from ...graph.source_provider import QueryCancelledError
 from ...graph.virtual_sources import get_virtual_source
 from ..ast_node import ASTNode
 from ..components.headers import Headers
@@ -132,11 +133,21 @@ class Load(Operation):
         async_func = self.async_function
         if async_func is None:
             return
+        await async_func.prepare_context()
+        ctx = async_func.source_context
         args = async_func.get_arguments()
-        async for item in async_func.generate(*args):
-            self._value = item
-            if self.next:
-                await self.next.run()
+        generator = async_func.generate(*args)
+        try:
+            async for item in generator:
+                if ctx is not None:
+                    ctx.throw_if_cancelled()
+                self._value = item
+                if self.next:
+                    await self.next.run()
+        finally:
+            aclose = getattr(generator, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     async def _load_from_url(self) -> None:
         """Loads data from a URL source."""
@@ -182,6 +193,8 @@ class Load(Operation):
     async def run(self) -> None:
         try:
             await self.load()
+        except QueryCancelledError:
+            raise
         except Exception as e:
             async_func = self.async_function
             source = async_func.name if async_func else self.from_

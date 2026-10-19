@@ -44,8 +44,12 @@ class Call(Projection):
         if self._function is None:
             raise ValueError("No function set for Call operation.")
 
+        await self._function.prepare_context()
+        ctx = self._function.source_context
         args = self._function.get_arguments()
         async for item in self._function.generate(*args):
+            if ctx is not None:
+                ctx.throw_if_cancelled()
             if not self.is_last:
                 self._map.reset()
                 if isinstance(item, dict):

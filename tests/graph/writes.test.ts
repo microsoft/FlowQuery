@@ -85,6 +85,15 @@ describe("change sets", () => {
         ]);
     });
 
+    test("aggregated RETURN after CREATE gets the final ids", async () => {
+        const runner = await run(
+            "UNWIND ['E', 'F'] AS name CREATE (n:WP {name: name}) RETURN collect(n.id) AS ids"
+        );
+        const { ids } = runner.writeResult!;
+        expect(runner.results).toEqual([{ ids: [ids["$1"], ids["$2"]] }]);
+        expect(runner.results[0].ids.every((id: any) => typeof id === "number")).toBe(true);
+    });
+
     test("SET, REMOVE and labels produce entries in order", async () => {
         const runner = await run(
             "MATCH (p:WP {id: 13}) SET p.title = 'CTO', p += {team: 'Core'} SET p:Manager REMOVE p.team, p:Intern RETURN p.title AS title, p.team AS team"

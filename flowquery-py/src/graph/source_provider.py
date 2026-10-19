@@ -101,21 +101,68 @@ class SourceRequest(Dict[str, Any]):
             raise AttributeError(name) from None
 
 
-def normalize_capabilities(caps: Any) -> Any:
-    """Returns ``caps`` with snake_case keys (``max_batch_size``,
-    ``string_ordering`` ...) converted to their camelCase names.  An
-    explicit camelCase key wins over its snake_case alias."""
-    if not isinstance(caps, dict):
-        return caps
+def _camel_keys(caps: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for key, value in caps.items():
         camel = _to_camel(key) if isinstance(key, str) else key
         if isinstance(value, dict):
-            value = normalize_capabilities(value)
+            value = _camel_keys(value)
         if camel != key and camel in caps:
             continue
         out[camel] = value
     return out
+
+
+def normalize_capabilities(caps: Any, kind: Optional[str] = None) -> Any:
+    """Returns ``caps`` with snake_case keys (``max_batch_size``,
+    ``string_ordering`` ...) converted to their camelCase names.  An
+    explicit camelCase key wins over its snake_case alias.
+
+    With ``kind`` (``"node"`` or ``"relationship"``) shorthands are also
+    expanded and fields that don't apply to ``kind`` are dropped:
+    ``predicates: True`` means every operator (without string-range
+    push-down), ``expand: True`` means ``{left: True, right: True}``,
+    ``False`` removes either, nodes drop ``expand``, relationships drop
+    ``lookup`` and ``version`` defaults to the contract version.  Unknown
+    fields are kept and validated later.
+    """
+    if not isinstance(caps, dict):
+        return caps
+    out: Dict[str, Any] = _camel_keys(caps)
+    if kind is None:
+        return out
+    out = {"version": SOURCE_CONTRACT_VERSION, **out}
+    if "predicates" in out:
+        if out["predicates"] is True:
+            out["predicates"] = {"operators": list(PREDICATE_OPERATORS)}
+        elif out["predicates"] is False or out["predicates"] is None:
+            del out["predicates"]
+    if "expand" in out:
+        if out["expand"] is True:
+            out["expand"] = {"left": True, "right": True}
+        elif out["expand"] is False or out["expand"] is None:
+            del out["expand"]
+    if kind == "node":
+        out.pop("expand", None)
+    else:
+        out.pop("lookup", None)
+    return out
+
+
+def merge_capabilities(
+    declared: Optional[Dict[str, Any]],
+    explicit: Optional[Dict[str, Any]],
+    kind: str,
+) -> Optional[Dict[str, Any]]:
+    """Combine function-declared capabilities with an explicit
+    ``WITH CAPABILITIES`` map; explicit top-level keys override (or
+    narrow) declared ones, e.g. ``{predicates: false}`` switches
+    push-down off.  ``None`` when neither is given."""
+    if declared is None and explicit is None:
+        return None
+    merged = {**_camel_keys(declared or {}), **_camel_keys(explicit or {})}
+    result: Dict[str, Any] = normalize_capabilities(merged, kind)
+    return result
 
 
 class SourceSignal:
@@ -236,6 +283,8 @@ def _validate_base(caps: Any, name: str) -> None:
         integral = _is_int(mbs) or (isinstance(mbs, float) and math.isfinite(mbs) and mbs.is_integer())
         if not integral or mbs < 1:
             raise SourceCapabilityError(f"Source {name}: maxBatchSize must be a positive integer", name)
+    if "writes" in caps and not isinstance(caps["writes"], bool):
+        raise SourceCapabilityError(f"Source {name}: writes must be true or false", name)
     if "predicates" in caps and caps["predicates"] is not None:
         p = caps["predicates"]
         if not isinstance(p, dict) or not isinstance(p.get("operators"), list):

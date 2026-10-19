@@ -46,6 +46,9 @@ export class RelationshipScope {
 /** Claim result for relationships that need no uniqueness tracking. */
 const UNTRACKED = "";
 
+/** Uniqueness keys of relationship rows (rows are reused across traversal steps). */
+const keyCache: WeakMap<object, string> = new WeakMap();
+
 class Relationship extends ASTNode {
     protected _identifier: string | null = null;
     protected _types: string[] = [];
@@ -82,12 +85,19 @@ class Relationship extends ASTNode {
     }
     /** Identity of a bound row for uniqueness checks. */
     public uniquenessKey(record: RelationshipRecord): string {
+        const cached =
+            record !== null && typeof record === "object" ? keyCache.get(record) : undefined;
+        if (cached !== undefined) return cached;
         const type = record?._type ?? this.type ?? "";
+        let key: string;
         if (record?.id !== undefined && record.id !== null) {
-            return `${type}\u0000#${canonicalKey(record.id)}`;
+            key = `${type}\u0000#${canonicalKey(record.id)}`;
+        } else {
+            const { _type, ...row } = record ?? {};
+            key = `${type}\u0000${canonicalKey(row)}`;
         }
-        const { _type, ...row } = record ?? {};
-        return `${type}\u0000${canonicalKey(row)}`;
+        if (record !== null && typeof record === "object") keyCache.set(record, key);
+        return key;
     }
     /**
      * @internal Claim `record` for the current binding.  Returns the key

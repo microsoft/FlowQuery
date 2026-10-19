@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional
 
 from ...graph.database import Database
 from ...graph.node import Node
-from ...graph.source_provider import SOURCE_CONTRACT_VERSION
+from ...graph.source_provider import SOURCE_CONTRACT_VERSION, merge_capabilities
 from ..ast_node import ASTNode
 from ..data_structures.associative_array import AssociativeArray
+from .definition_backend import declared_capabilities, definition_backend
 from .operation import Operation
 
 
@@ -51,11 +52,24 @@ class CreateNode(Operation):
             return None
         return {"version": SOURCE_CONTRACT_VERSION, **self._capabilities.value()}
 
+    async def effective_capabilities(self) -> Optional[Dict[str, Any]]:
+        """Effective capabilities: those declared by the body's backend
+        function (``LOAD ... FROM fn($request)``), overridden by an explicit
+        ``WITH CAPABILITIES`` clause.  ``None`` keeps legacy eager loading."""
+        declared = await declared_capabilities(
+            definition_backend(self._statement),
+            {
+                "operation": "capabilities",
+                "label": self._node.label if self._node is not None else None,
+            },
+        )
+        return merge_capabilities(declared, self.capabilities, "node")
+
     async def run(self) -> None:
         if self._node is None:
             raise ValueError("Node is null")
         db = Database.get_instance()
-        capabilities = self.capabilities
+        capabilities = await self.effective_capabilities()
         db.add_node(
             self._node,
             self._statement,

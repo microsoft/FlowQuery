@@ -160,11 +160,10 @@ export interface RunnerOptions {
      */
     provenance?: boolean;
     /**
-     * Tuning for backend-aware virtual sources registered with
-     * `registerNodeSource` / `registerRelationshipSource` or opted in with
-     * `setNodeSourceCapabilities` / `setRelationshipSourceCapabilities`
-     * (page size, batch size, cache capacity, start-point reordering and
-     * an external cancellation `signal`).  Ignored by legacy definitions.
+     * Tuning for backend-aware virtual sources (definitions declared with
+     * `WITH CAPABILITIES` or by their backend function): page size, batch
+     * size, cache capacity, start-point reordering and an external
+     * cancellation `signal`.  Ignored by eager definitions.
      */
     sources?: SourceOptions;
     /**
@@ -230,6 +229,7 @@ class Runner {
     private _sourceContext: SourceContext | null = null;
     private _cancelRequested: boolean = false;
     private _writeResult: WriteResult | null = null;
+    private _committedResults: Record<string, any>[] | null = null;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.
@@ -319,6 +319,8 @@ class Runner {
                 | undefined;
             const last = this._statements[this._statements.length - 1]?.last;
             let failed = false;
+            this._writeResult = null;
+            this._committedResults = null;
             try {
                 if (this._isTopLevel) {
                     this._sourceContext = new SourceContext(
@@ -419,7 +421,9 @@ class Runner {
         if (writes.changes.length === 0 || writes.backend === null) return;
         ctx.throwIfCancelled();
         this._writeResult = await commitWrites(ctx, writes);
-        replaceRefs(this.results, this._writeResult.ids, writes.refs);
+        // Aggregating projections rebuild their rows on every read, so keep
+        // the rows whose temporary refs were replaced.
+        this._committedResults = replaceRefs(this.results, this._writeResult.ids, writes.refs);
     }
 
     /**
@@ -653,6 +657,7 @@ class Runner {
      * @returns The results from the last operation (typically a RETURN statement)
      */
     public get results(): any {
+        if (this._committedResults !== null) return this._committedResults;
         return this._statements[this._statements.length - 1].last.results;
     }
 

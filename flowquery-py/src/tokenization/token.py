@@ -568,6 +568,13 @@ class Token:
         return self._type == TokenType.KEYWORD and self._value == Keyword.REMOVE.value
 
     @staticmethod
+    def DETACH() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.DETACH.value)
+
+    def is_detach(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.DETACH.value
+
+    @staticmethod
     def CASE() -> Token:
         return Token(TokenType.KEYWORD, Keyword.CASE.value)
 

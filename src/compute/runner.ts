@@ -10,9 +10,12 @@ import SourceContext, {
     emptySourceStats,
 } from "../graph/source_context";
 import { INNER_SOURCE_CONTEXT } from "../graph/virtual_statement";
+import { WriteResult, replaceRefs } from "../graph/write_set";
 import ASTNode from "../parsing/ast_node";
 import BindingReference from "../parsing/expressions/binding_reference";
 import ParameterReference from "../parsing/expressions/parameter_reference";
+import SubqueryExpression from "../parsing/expressions/subquery_expression";
+import AsyncFunction from "../parsing/functions/async_function";
 import AggregatedReturn from "../parsing/operations/aggregated_return";
 import AggregatedWith from "../parsing/operations/aggregated_with";
 import CreateNode from "../parsing/operations/create_node";
@@ -24,6 +27,7 @@ import Match from "../parsing/operations/match";
 import Operation from "../parsing/operations/operation";
 import Return from "../parsing/operations/return";
 import Union from "../parsing/operations/union";
+import { WriteOperation, commitWrites, prepareWrites } from "../parsing/operations/write";
 import Parser from "../parsing/parser";
 import StatementInfoCrawler, {
     ColumnLineage,
@@ -164,9 +168,10 @@ export interface RunnerOptions {
      */
     sources?: SourceOptions;
     /**
-     * Additional named parameters.  A `$name` reference resolves to
-     * `parameters[name]` when present, otherwise to `args[name]`.
-     * Statement-backed sources receive their request as `$request`.
+     * Named query parameters.  In a top-level query `$name` resolves to
+     * `parameters[name]` (a missing value is an error when the query
+     * runs).  Inside virtual definitions `$args` and `$request` keep their
+     * meaning and other names fall back to these parameters.
      */
     parameters?: Record<string, any>;
 }
@@ -224,6 +229,7 @@ class Runner {
     private _provenance: RowProvenance[] | null = null;
     private _sourceContext: SourceContext | null = null;
     private _cancelRequested: boolean = false;
+    private _writeResult: WriteResult | null = null;
 
     /**
      * Creates a new Runner instance and parses the FlowQuery statement.
@@ -319,6 +325,7 @@ class Runner {
                         this._options.sources ?? {},
                         this._options.provenance === true
                     );
+                    this._sourceContext.parameters = this._options.parameters ?? {};
                     resolver.dataCache = new DataCache(
                         this._options.provenance === true,
                         this._sourceContext
@@ -352,10 +359,18 @@ class Runner {
                     for (const name of bindingNames) {
                         await bindings.materialize(name);
                     }
+                    const writes = WriteOperation.collect(stmt.first);
+                    if (writes.length > 0) {
+                        if (!this._isTopLevel || this._sourceContext === null) {
+                            throw new Error("Write clauses are only allowed in top-level queries");
+                        }
+                        prepareWrites(writes, this._sourceContext);
+                    }
                     await stmt.first.initialize();
                     await stmt.first.run();
                     await stmt.first.finish();
                 }
+                await this.commitWrites();
             } catch (e) {
                 failed = true;
                 reject(e);
@@ -392,6 +407,31 @@ class Runner {
     }
 
     /**
+     * Send the change set collected by write clauses to the backend in
+     * one call, then replace temporary refs in the results by final ids.
+     * Only runs when every statement succeeded and the query was not
+     * cancelled.
+     */
+    private async commitWrites(): Promise<void> {
+        const ctx = this._sourceContext;
+        if (!this._isTopLevel || ctx === null || ctx.writes === null) return;
+        const writes = ctx.writes;
+        if (writes.changes.length === 0 || writes.backend === null) return;
+        ctx.throwIfCancelled();
+        this._writeResult = await commitWrites(ctx, writes);
+        replaceRefs(this.results, this._writeResult.ids, writes.refs);
+    }
+
+    /**
+     * Outcome of the last run's write clauses: the change set sent to the
+     * backend, the final ids of temporary refs and the backend's stats.
+     * `null` when the query wrote nothing.
+     */
+    public get writeResult(): WriteResult | null {
+        return this._writeResult;
+    }
+
+    /**
      * Provider interaction counters of the last top-level run: calls,
      * pages, rows, cache hits/misses, batches, materializations,
      * fallbacks, cancellations, peak buffered rows and start-point plans.
@@ -402,6 +442,10 @@ class Runner {
 
     private static assignSourceContext(node: ASTNode, ctx: SourceContext | null): void {
         if (node instanceof Match) {
+            node.sourceContext = ctx;
+        } else if (node instanceof AsyncFunction) {
+            node.sourceContext = ctx;
+        } else if (node instanceof WriteOperation) {
             node.sourceContext = ctx;
         }
         for (const child of node.getChildren()) {
@@ -523,27 +567,70 @@ class Runner {
     }
 
     /**
-     * Recursively walks the AST to bind ParameterReference nodes
-     * to the args provided to this Runner.
-     * - $args resolves to the entire args map (for use with $args.key lookups)
-     * - $name resolves to args["name"] (shorthand for individual properties)
+     * Recursively walks the AST to bind ParameterReference nodes.
+     *
+     * Inside virtual definitions `$args` resolves to the pass-down args
+     * map, `$request` to the source request and `$name` to `args[name]`,
+     * falling back to the enclosing query's parameters.  Elsewhere `$name`
+     * resolves from `RunnerOptions.parameters` (inherited by nested
+     * sub-query runners); a missing value is an error.
      */
     private bindParameters(node: ASTNode): void {
         if (node instanceof ParameterReference) {
-            const args = this._args ?? {};
-            const parameters = this._options.parameters;
-            const key = node.name.startsWith("$") ? node.name.substring(1) : node.name;
-            if (parameters !== undefined && key in parameters) {
-                node.parameterValue = parameters[key];
-            } else if (key === "args") {
-                node.parameterValue = args;
-            } else {
-                node.parameterValue = key in args ? args[key] : null;
-            }
+            node.parameterValue = this.resolveParameter(node);
         }
         for (const child of node.getChildren()) {
             this.bindParameters(child);
         }
+        for (const child of Runner.offTreeChildren(node)) {
+            this.bindParameters(child);
+        }
+    }
+
+    /**
+     * AST nodes evaluated with the statement but held outside the child
+     * list: MATCH patterns, pattern elements, their property constraints
+     * and sub-query bodies.
+     */
+    private static offTreeChildren(node: ASTNode): ASTNode[] {
+        if (node instanceof Match) return node.patterns;
+        if (node instanceof Pattern) return node.chain;
+        if (node instanceof Node || node instanceof Relationship) {
+            return Array.from(node.properties.values());
+        }
+        if (node instanceof SubqueryExpression) return [node.subquery];
+        if (node instanceof WriteOperation) return node.evaluated;
+        return [];
+    }
+
+    private resolveParameter(ref: ParameterReference): any {
+        const key = ref.name.startsWith("$") ? ref.name.substring(1) : ref.name;
+        const parameters = this._options.parameters;
+        if (parameters !== undefined && key in parameters) {
+            return parameters[key];
+        }
+        const queryParameters = this._isTopLevel ? undefined : this._sourceContext?.parameters;
+        if (ref.inVirtualDefinition) {
+            const args = this._args ?? {};
+            if (key === "args") return args;
+            if (key in args) return args[key];
+            if (queryParameters !== undefined && key in queryParameters) {
+                return queryParameters[key];
+            }
+            return null;
+        }
+        if (queryParameters !== undefined && key in queryParameters) {
+            return queryParameters[key];
+        }
+        if (this._args !== null && key in this._args) {
+            return this._args[key];
+        }
+        if (key === "args" || key === "request") {
+            throw new Error(
+                `Parameter $${key} is only available inside virtual node or relationship definitions`
+            );
+        }
+        throw new Error(`Missing value for parameter $${key}`);
     }
 
     /**

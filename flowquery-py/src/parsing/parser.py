@@ -382,7 +382,7 @@ class Parser(BaseParser):
             raise ValueError("Expected expression")
         if not ObjectUtils.is_instance_of_any(
             expression.first_child(),
-            [JSONArray, Function, Reference, Lookup, RangeLookup]
+            [JSONArray, Function, Reference, Lookup, RangeLookup, ParameterReference]
         ):
             raise ValueError("Expected array, function, reference, or lookup.")
         self._expect_and_skip_whitespace_and_comments()
@@ -1628,12 +1628,7 @@ class Parser(BaseParser):
         if self.token.is_identifier_or_keyword() and (self.peek() is None or not self.peek().is_left_parenthesis()):
             identifier = self.token.value or ""
             if identifier.startswith("$"):
-                if not self._state.in_virtual_definition:
-                    raise ValueError(
-                        f"Parameter references (${identifier[1:]}) are only allowed "
-                        "inside virtual node or relationship definitions"
-                    )
-                param_ref = ParameterReference(identifier)
+                param_ref = ParameterReference(identifier, self._state.in_virtual_definition)
                 self.set_next_token()
                 lookup = self._parse_lookup(param_ref)
                 expression.add_node(lookup)

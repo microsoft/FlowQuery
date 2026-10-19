@@ -48,6 +48,8 @@ export {
 export {
     SOURCE_CONTRACT_VERSION,
     PREDICATE_OPERATORS,
+    STRING_ORDERINGS,
+    normalizeCapabilities,
     SourceError,
     SourceCapabilityError,
     SourceResponseError,
@@ -55,12 +57,11 @@ export {
     QueryCancelledError,
     cursorPages,
     matchesPredicate,
-    inMemoryNodeSource,
-    inMemoryRelationshipSource,
 } from "./graph/source_provider";
 export type {
     SourceRow,
-    InMemorySourceOptions,
+    StringOrdering,
+    DeclaredSourceCapabilities,
     PredicateOperator,
     SourcePredicate,
     PredicateCapabilities,
@@ -78,3 +79,7 @@ export type {
     RelationshipSourceProvider,
 } from "./graph/source_provider";
 export type { SourceOptions, SourceStats, SourcePlan } from "./graph/source_context";
+export type { FunctionContext } from "./parsing/functions/async_function";
+// Declarative writes (change sets sent to a definition's backend function)
+export { WRITE_CONTRACT_VERSION } from "./graph/write_set";
+export type { WriteChange, WriteRequest, WriteResult } from "./graph/write_set";

@@ -7,11 +7,13 @@ from ..graph.bindings import Bindings
 from ..graph.data_cache import DataCache
 from ..graph.data_resolver import DataResolver
 from ..graph.node import Node as GraphNode
+from ..graph.pattern import Pattern
 from ..graph.relationship import Relationship as GraphRelationship
 from ..graph.source_context import SourceContext, SourceOptions, empty_source_stats
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.binding_reference import BindingReference
 from ..parsing.expressions.parameter_reference import ParameterReference
+from ..parsing.expressions.subquery_expression import SubqueryExpression
 from ..parsing.operations.aggregated_with import AggregatedWith
 from ..parsing.operations.create_node import CreateNode
 from ..parsing.operations.create_relationship import CreateRelationship
@@ -70,9 +72,10 @@ class RunnerOptions:
     #: cache capacity, start-point reordering and an external cancellation
     #: ``signal``).  Ignored by legacy definitions.
     sources: Optional[SourceOptions] = None
-    #: Additional named parameters.  A ``$name`` reference resolves to
-    #: ``parameters[name]`` when present, otherwise to ``args[name]``.
-    #: Statement-backed sources receive their request as ``$request``.
+    #: Named query parameters.  In a top-level query ``$name`` resolves to
+    #: ``parameters[name]`` (a missing value is an error when the query
+    #: runs).  Inside virtual definitions ``$args`` and ``$request`` keep
+    #: their meaning and other names fall back to these parameters.
     parameters: Optional[Dict[str, Any]] = None
     #: Internal: receives every row emitted by the final RETURN.
     row_sink: Optional[Callable[[Dict[str, Any]], Any]] = field(default=None, repr=False)
@@ -332,6 +335,7 @@ class Runner:
                 self._options.sources or SourceOptions(),
                 self._options.provenance is True,
             )
+            self._source_context.parameters = dict(self._options.parameters or {})
             resolver.data_cache = DataCache(
                 provenance=self._options.provenance,
                 source_context=self._source_context,
@@ -465,23 +469,63 @@ class Runner:
             self._collect_binding_names(child, names)
 
     def _bind_parameters(self, node: ASTNode) -> None:
-        """Recursively walks the AST to bind ParameterReference nodes
-        to the args provided to this Runner.
-        - $args resolves to the entire args map (for use with $args.key lookups)
-        - $name resolves to args["name"] (shorthand for individual properties)
+        """Recursively walks the AST to bind ParameterReference nodes.
+
+        Inside virtual definitions ``$args`` resolves to the pass-down args
+        map, ``$request`` to the source request and ``$name`` to
+        ``args[name]``, falling back to the enclosing query's parameters.
+        Elsewhere ``$name`` resolves from ``RunnerOptions.parameters``
+        (inherited by nested sub-query runners); a missing value is an
+        error.
         """
         if isinstance(node, ParameterReference):
-            args = self._args or {}
-            parameters = self._options.parameters
-            key = node.name[1:] if node.name.startswith("$") else node.name
-            if parameters is not None and key in parameters:
-                node.parameter_value = parameters[key]
-            elif key == "args":
-                node.parameter_value = args
-            else:
-                node.parameter_value = args.get(key)
+            node.parameter_value = self._resolve_parameter(node)
         for child in node.get_children():
             self._bind_parameters(child)
+        for child in Runner._off_tree_children(node):
+            self._bind_parameters(child)
+
+    @staticmethod
+    def _off_tree_children(node: ASTNode) -> List[ASTNode]:
+        """AST nodes evaluated with the statement but held outside the
+        child list: MATCH patterns, pattern elements, their property
+        constraints and sub-query bodies."""
+        if isinstance(node, Match):
+            return list(node.patterns)
+        if isinstance(node, Pattern):
+            return list(node.chain)
+        if isinstance(node, (GraphNode, GraphRelationship)):
+            return [v for v in node.properties.values() if isinstance(v, ASTNode)]
+        if isinstance(node, SubqueryExpression):
+            return [node.subquery]
+        return []
+
+    def _resolve_parameter(self, ref: ParameterReference) -> Any:
+        key = ref.name[1:] if ref.name.startswith("$") else ref.name
+        parameters = self._options.parameters
+        if parameters is not None and key in parameters:
+            return parameters[key]
+        query_parameters: Optional[Dict[str, Any]] = None
+        if not self._is_top_level and self._source_context is not None:
+            query_parameters = self._source_context.parameters
+        if ref.in_virtual_definition:
+            args = self._args or {}
+            if key == "args":
+                return args
+            if key in args:
+                return args[key]
+            if query_parameters is not None and key in query_parameters:
+                return query_parameters[key]
+            return None
+        if query_parameters is not None and key in query_parameters:
+            return query_parameters[key]
+        if self._args is not None and key in self._args:
+            return self._args[key]
+        if key in ("args", "request"):
+            raise ValueError(
+                f"Parameter ${key} is only available inside virtual node or relationship definitions"
+            )
+        raise ValueError(f"Missing value for parameter ${key}")
 
     @property
     def results(self) -> List[Dict[str, Any]]:

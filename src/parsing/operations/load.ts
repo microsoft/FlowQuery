@@ -4,6 +4,7 @@ import {
     RowProvenance,
     RowSegment,
 } from "../../compute/provenance";
+import { QueryCancelledError } from "../../graph/source_provider";
 import { getVirtualSource } from "../../graph/virtual_sources";
 import CSV from "../components/csv";
 import From from "../components/from";
@@ -139,8 +140,11 @@ class Load extends Operation {
      */
     private async loadFromFunction(): Promise<void> {
         const asyncFunc = this.asyncFunction!;
+        await asyncFunc.prepareContext();
+        const ctx = asyncFunc.sourceContext;
         const args = asyncFunc.getArguments();
         for await (const item of asyncFunc.generate(...args)) {
+            ctx?.throwIfCancelled();
             this._value = item;
             await this.next?.run();
         }
@@ -209,6 +213,7 @@ class Load extends Operation {
         try {
             await this.load();
         } catch (e) {
+            if (e instanceof QueryCancelledError) throw e;
             const source = this.isAsyncFunction ? this.asyncFunction?.name : this.from;
             throw new Error(`Failed to load data from ${source}. Error: ${e}`);
         }

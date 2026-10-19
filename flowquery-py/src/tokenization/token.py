@@ -138,7 +138,7 @@ class Token:
     @staticmethod
     def BACKTICK_STRING(value: str, quote_char: str = '"') -> Token:
         unquoted = StringUtils.unquote(value)
-        unescaped = StringUtils.remove_escaped_quotes(unquoted, quote_char)
+        unescaped = StringUtils.remove_escaped_backticks(unquoted, quote_char)
         return Token(TokenType.BACKTICK_STRING, unescaped)
 
     @staticmethod

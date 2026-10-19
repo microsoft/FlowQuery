@@ -41,8 +41,6 @@ from .graph.source_provider import (
     SourceSignal,
     SourceUnsupportedError,
     cursor_pages,
-    in_memory_node_source,
-    in_memory_relationship_source,
     matches_predicate,
 )
 from .io.command_line import CommandLine
@@ -118,7 +116,5 @@ __all__ = [
     "RelationshipSource",
     "cursor_pages",
     "matches_predicate",
-    "in_memory_node_source",
-    "in_memory_relationship_source",
 ]
 

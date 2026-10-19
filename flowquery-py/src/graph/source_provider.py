@@ -33,7 +33,6 @@ from typing import (
     Callable,
     Dict,
     Iterable,
-    Iterator,
     List,
     Optional,
     Protocol,
@@ -44,6 +43,10 @@ from typing import (
 SOURCE_CONTRACT_VERSION = 1
 
 PREDICATE_OPERATORS: List[str] = ["eq", "gt", "gte", "lt", "lte", "in"]
+
+#: Accepted ``predicates.stringOrdering`` values.  Python compares ``str``
+#: by code point, so ``"binary"`` and ``"codepoint"`` are equivalent here.
+STRING_ORDERINGS: List[str] = ["binary", "codepoint"]
 
 SourceRow = Dict[str, Any]
 SourcePredicate = Dict[str, Any]
@@ -248,9 +251,10 @@ def _validate_base(caps: Any, name: str) -> None:
             raise SourceCapabilityError(
                 f"Source {name}: predicates.properties must be an array of column names", name
             )
-        if p.get("stringOrdering") is not None and p.get("stringOrdering") != "binary":
+        if p.get("stringOrdering") is not None and p.get("stringOrdering") not in STRING_ORDERINGS:
             raise SourceCapabilityError(
-                f'Source {name}: predicates.stringOrdering must be "binary" when set', name
+                f'Source {name}: predicates.stringOrdering must be "binary" or "codepoint" when set',
+                name,
             )
 
 
@@ -445,95 +449,3 @@ class RelationshipSource(ABC):
     @abstractmethod
     def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
         """Returns all rows (optionally pre-filtered by ``request.predicate``)."""
-
-
-def _pages_of(rows: List[SourceRow], page_size: Any) -> Iterator[List[SourceRow]]:
-    size = page_size if _is_int(page_size) and page_size > 0 else (len(rows) or 1)
-    for i in range(0, len(rows), size):
-        yield rows[i : i + size]
-
-
-def _filter_rows(
-    rows: List[SourceRow],
-    predicate: Optional[SourcePredicate],
-    field_name: Optional[str],
-    ids: Optional[List[Any]],
-) -> List[SourceRow]:
-    from .source_context import canonical_key
-
-    wanted = None if ids is None else {canonical_key(i) for i in ids}
-    return [
-        row
-        for row in rows
-        if (wanted is None or (field_name is not None and field_name in row
-                               and canonical_key(row[field_name]) in wanted))
-        and matches_predicate(predicate, row)
-    ]
-
-
-def _in_memory_capabilities(cacheable: bool, max_batch_size: Optional[int]) -> Dict[str, Any]:
-    caps: Dict[str, Any] = {
-        "version": SOURCE_CONTRACT_VERSION,
-        "cacheable": cacheable,
-        "streaming": True,
-        "predicates": {"operators": list(PREDICATE_OPERATORS), "stringOrdering": "binary"},
-    }
-    if max_batch_size is not None:
-        caps["maxBatchSize"] = max_batch_size
-    return caps
-
-
-class _InMemoryNodeSource(NodeSource):
-    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
-        self.rows = rows
-        self.capabilities = {**_in_memory_capabilities(cacheable, max_batch_size), "lookup": True}
-
-    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
-                         request.get("pageSize"))
-
-    def lookup(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        rows = _filter_rows(self.rows, request.get("predicate"), "id", request.get("ids") or [])
-        return _pages_of(rows, request.get("pageSize"))
-
-
-class _InMemoryRelationshipSource(RelationshipSource):
-    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
-        self.rows = rows
-        self.capabilities = {
-            **_in_memory_capabilities(cacheable, max_batch_size),
-            "expand": {"left": True, "right": True},
-        }
-
-    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
-                         request.get("pageSize"))
-
-    def expand(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        field_name = "left_id" if request.get("side") == "left" else "right_id"
-        rows = _filter_rows(self.rows, request.get("predicate"), field_name, request.get("ids") or [])
-        return _pages_of(rows, request.get("pageSize"))
-
-
-def in_memory_node_source(
-    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
-) -> NodeSource:
-    """A ready-made node source over a list of rows (each with an ``id``).
-
-    Supports lookup, every predicate operator and paging; handy for tests,
-    examples and small reference data.  The list is read on every request,
-    so later mutations are visible.
-
-    Example::
-
-        FlowQuery.register_node_source("Person", in_memory_node_source([{"id": 1, "name": "Ada"}]))
-    """
-    return _InMemoryNodeSource(rows, cacheable, max_batch_size)
-
-
-def in_memory_relationship_source(
-    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
-) -> RelationshipSource:
-    """A ready-made relationship source over a list of rows (each with
-    ``left_id`` and ``right_id``), supporting expansion from both sides."""
-    return _InMemoryRelationshipSource(rows, cacheable, max_batch_size)

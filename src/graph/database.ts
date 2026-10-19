@@ -9,6 +9,7 @@ import {
     RelationshipSourceCapabilities,
     RelationshipSourceProvider,
     SourceCapabilityError,
+    normalizeCapabilities,
     validateNodeProvider,
     validateRelationshipProvider,
 } from "./source_provider";
@@ -210,7 +211,10 @@ class Database {
             physical.provider = null;
             return;
         }
-        const provider = new StatementSourceProvider(physical.virtual, capabilities as any);
+        const provider = new StatementSourceProvider(
+            physical.virtual,
+            normalizeCapabilities(capabilities as any, "node") as any
+        );
         validateNodeProvider(provider, name);
         physical.provider = provider;
     }
@@ -235,7 +239,10 @@ class Database {
             physical.provider = null;
             return;
         }
-        const provider = new StatementSourceProvider(physical.virtual, capabilities as any);
+        const provider = new StatementSourceProvider(
+            physical.virtual,
+            normalizeCapabilities(capabilities as any, "relationship") as any
+        );
         validateRelationshipProvider(provider, name);
         physical.provider = provider;
     }

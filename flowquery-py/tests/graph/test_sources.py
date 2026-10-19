@@ -22,11 +22,10 @@ from flowquery.graph.source_provider import (
     SourceResponseError,
     SourceUnsupportedError,
     cursor_pages,
-    in_memory_node_source,
-    in_memory_relationship_source,
     matches_predicate,
     normalize_capabilities,
 )
+from flowquery.graph.testing import in_memory_node_source, in_memory_relationship_source
 
 db = Database.get_instance()
 V = 1

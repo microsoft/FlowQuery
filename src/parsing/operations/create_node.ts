@@ -1,8 +1,9 @@
 import Database from "../../graph/database";
 import Node from "../../graph/node";
-import { SOURCE_CONTRACT_VERSION } from "../../graph/source_provider";
+import { SOURCE_CONTRACT_VERSION, mergeCapabilities } from "../../graph/source_provider";
 import ASTNode from "../ast_node";
 import AssociativeArray from "../data_structures/associative_array";
+import { declaredCapabilities, definitionBackend } from "./definition_backend";
 import Operation from "./operation";
 
 class CreateNode extends Operation {
@@ -42,6 +43,18 @@ class CreateNode extends Operation {
         if (this._capabilities === null) return null;
         return { version: SOURCE_CONTRACT_VERSION, ...this._capabilities.value() };
     }
+    /**
+     * Effective capabilities: those declared by the body's backend
+     * function (`LOAD ... FROM fn($request)`), overridden by an explicit
+     * `WITH CAPABILITIES` clause.  `null` keeps legacy eager loading.
+     */
+    public async effectiveCapabilities(): Promise<Record<string, any> | null> {
+        const declared = await declaredCapabilities(definitionBackend(this._statement), {
+            operation: "capabilities",
+            label: this._node?.label ?? null,
+        });
+        return mergeCapabilities(declared, this.capabilities, "node");
+    }
     public run(): Promise<void> {
         return new Promise(async (resolve, reject) => {
             try {
@@ -49,7 +62,7 @@ class CreateNode extends Operation {
                     throw new Error("Node is null");
                 }
                 const db: Database = Database.getInstance();
-                const capabilities = this.capabilities;
+                const capabilities = await this.effectiveCapabilities();
                 db.addNode(this._node, this._statement!, this._isStatic, this._refreshEveryMs);
                 if (capabilities !== null) {
                     try {

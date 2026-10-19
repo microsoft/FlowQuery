@@ -88,6 +88,9 @@ class StringWalker:
     def escaped(self, char: str) -> bool:
         return self.current_char == '\\' and self.next_char == char
 
+    def escaped_by_doubling(self, char: str) -> bool:
+        return self.current_char == char and self.next_char == char
+
     def escaped_brace(self) -> bool:
         return ((self.current_char == '{' and self.next_char == '{') or
                 (self.current_char == '}' and self.next_char == '}'))

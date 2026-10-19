@@ -31,6 +31,11 @@ abstract class SubqueryExpression extends ASTNode {
         return true;
     }
 
+    /** The nested query's AST. */
+    public get subquery(): ASTNode {
+        return this._subqueryAST;
+    }
+
     public async evaluate(): Promise<void> {
         // Imported lazily to break the module cycle with Runner (which
         // imports the parser, which imports this file's subclasses).

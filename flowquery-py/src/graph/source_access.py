@@ -91,7 +91,7 @@ def to_predicate(caps: Optional[Dict[str, Any]], term: PushTerm) -> Optional[Dic
     value = term.get("value")
     if _is_number(value) and math.isfinite(value):
         return {"op": op, "property": term["property"], "value": value}
-    if isinstance(value, str) and caps.get("stringOrdering") == "binary":
+    if isinstance(value, str) and caps.get("stringOrdering") in ("binary", "codepoint"):
         return {"op": op, "property": term["property"], "value": value}
     return None
 

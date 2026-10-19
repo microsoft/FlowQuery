@@ -1,8 +1,9 @@
 import Database from "../../graph/database";
 import Relationship from "../../graph/relationship";
-import { SOURCE_CONTRACT_VERSION } from "../../graph/source_provider";
+import { SOURCE_CONTRACT_VERSION, mergeCapabilities } from "../../graph/source_provider";
 import ASTNode from "../ast_node";
 import AssociativeArray from "../data_structures/associative_array";
+import { declaredCapabilities, definitionBackend } from "./definition_backend";
 import Operation from "./operation";
 
 class CreateRelationship extends Operation {
@@ -42,6 +43,19 @@ class CreateRelationship extends Operation {
         if (this._capabilities === null) return null;
         return { version: SOURCE_CONTRACT_VERSION, ...this._capabilities.value() };
     }
+    /**
+     * Effective capabilities: those declared by the body's backend
+     * function, overridden by an explicit `WITH CAPABILITIES` clause.
+     */
+    public async effectiveCapabilities(): Promise<Record<string, any> | null> {
+        const declared = await declaredCapabilities(definitionBackend(this._statement), {
+            operation: "capabilities",
+            type: this._relationship?.type ?? null,
+            sourceLabel: this._relationship?.source?.label ?? null,
+            targetLabel: this._relationship?.target?.label ?? null,
+        });
+        return mergeCapabilities(declared, this.capabilities, "relationship");
+    }
     public run(): Promise<void> {
         return new Promise(async (resolve, reject) => {
             try {
@@ -49,7 +63,7 @@ class CreateRelationship extends Operation {
                     throw new Error("Relationship is null");
                 }
                 const db = Database.getInstance();
-                const capabilities = this.capabilities;
+                const capabilities = await this.effectiveCapabilities();
                 db.addRelationship(
                     this._relationship,
                     this._statement!,

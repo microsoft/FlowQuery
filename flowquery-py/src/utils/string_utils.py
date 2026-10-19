@@ -57,6 +57,19 @@ class StringUtils:
         return s
 
     @staticmethod
+    def remove_escaped_backticks(s: str, quote_char: str = '`') -> str:
+        """Unescapes a backtick-quoted identifier body: both the openCypher
+        doubled-backtick form and the backslash form become one backtick."""
+        out: list[str] = []
+        i = 0
+        while i < len(s):
+            if i < len(s) - 1 and s[i] in ('\\', quote_char) and s[i + 1] == quote_char:
+                i += 1
+            out.append(s[i])
+            i += 1
+        return ''.join(out)
+
+    @staticmethod
     def remove_escaped_quotes(s: str, quote_char: str) -> str:
         """Removes escape sequences before quotes in a string.
 

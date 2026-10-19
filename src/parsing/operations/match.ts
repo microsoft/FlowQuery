@@ -1,6 +1,7 @@
 import Node from "../../graph/node";
 import Pattern from "../../graph/pattern";
 import Patterns from "../../graph/patterns";
+import { RelationshipScope } from "../../graph/relationship";
 import { PushedPredicate, isStaticExpression } from "../../graph/source_access";
 import type SourceContext from "../../graph/source_context";
 import ASTNode from "../ast_node";
@@ -29,6 +30,12 @@ class Match extends Operation {
         super();
         this._patterns = new Patterns(patterns);
         this._optional = optional;
+        // openCypher: a relationship is bound at most once per MATCH clause,
+        // across all of its comma-separated patterns.
+        const scope = new RelationshipScope();
+        for (const pattern of patterns) {
+            pattern.relationshipScope = scope;
+        }
     }
     public get patterns(): Pattern[] {
         return this._patterns ? this._patterns.patterns : [];

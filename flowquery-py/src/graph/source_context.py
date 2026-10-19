@@ -178,6 +178,8 @@ class SourceContext:
         self.options = resolve_options(options)
         self.stats: Dict[str, Any] = empty_source_stats()
         self.provenance = provenance
+        #: Top-level query parameters, visible to nested runs.
+        self.parameters: Dict[str, Any] = {}
         self.signal = SourceSignal()
         self._cache = RowCache(self.options.cache_capacity)
         self._inflight: Dict[str, "asyncio.Future[Any]"] = {}

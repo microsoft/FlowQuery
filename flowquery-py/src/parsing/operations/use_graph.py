@@ -1,11 +1,12 @@
-"""``USE GRAPH`` / ``DROP GRAPH``: bind or clear the registry's default graph."""
+"""``USE GRAPH`` / ``DROP GRAPH``: bind or clear the registry's graphs."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ...graph.database import Database
 from ...graph.default_graph import DefaultGraph
+from ...graph.graph_records import DEFAULT_GRAPH
 from ..functions.async_function import AsyncFunction
 from .definition_backend import DefinitionBackend, declared_capabilities, references_request
 from .operation import Operation
@@ -15,11 +16,17 @@ if TYPE_CHECKING:
 
 
 class GraphBinding(Operation):
-    """Base of the statements that change the registry's default graph."""
+    """Base of the statements that change the registry's graph bindings."""
 
-    def __init__(self) -> None:
+    def __init__(self, name: str = DEFAULT_GRAPH) -> None:
         super().__init__()
+        self._name = name
         self._context: Optional["SourceContext"] = None
+
+    @property
+    def name(self) -> str:
+        """Name of the graph (``"default"`` for the default graph)."""
+        return self._name
 
     @property
     def source_context(self) -> Optional["SourceContext"]:
@@ -33,10 +40,13 @@ class GraphBinding(Operation):
     def bind(self, graph: Optional[DefaultGraph]) -> None:
         """Publish ``graph`` to the registry (queries started from now on) and
         to the running query (its later statements).  Queries already running
-        keep the binding they pinned when they started."""
-        Database.get_instance().default_graph = graph
+        keep the bindings they pinned when they started."""
+        Database.get_instance().bind_graph(self._name, graph)
         if self._context is not None:
-            self._context.graph = graph
+            if graph is None:
+                self._context.graphs.pop(self._name, None)
+            else:
+                self._context.graphs[self._name] = graph
             # Routes resolved against the previous binding are stale.
             if self._context.writes is not None:
                 self._context.writes.routes.clear()
@@ -47,13 +57,15 @@ class GraphBinding(Operation):
 
 
 class UseGraph(GraphBinding):
-    """``USE GRAPH fn($request, ...)``: bind ``fn`` as the default graph,
-    replacing any previous binding.  Labels and relationship types without
-    a ``CREATE VIRTUAL`` definition are then read and written through
-    ``fn``.  The function's capabilities are inferred once, here."""
+    """``USE GRAPH [name =] fn($request, ...)``: bind ``fn`` as the default
+    graph, or as the graph ``name``, replacing any previous binding of that
+    name.  Labels and relationship types without a ``CREATE VIRTUAL``
+    definition are then read and written through the default graph; labels
+    qualified with a graph name (``(:hr.Person)``) through that graph.  The
+    function's capabilities are inferred once, here."""
 
-    def __init__(self, function: AsyncFunction) -> None:
-        super().__init__()
+    def __init__(self, function: AsyncFunction, name: str = DEFAULT_GRAPH) -> None:
+        super().__init__(name)
         self._function = function
         self.add_child(function)
 
@@ -71,21 +83,25 @@ class UseGraph(GraphBinding):
                 "USE GRAPH must pass $request to the backend function, "
                 f"e.g. USE GRAPH {func.name}($request)"
             )
+        request: Dict[str, Any] = {"operation": "capabilities", "graph": True}
+        if self.name != DEFAULT_GRAPH:
+            request["graphName"] = self.name
         declared = await declared_capabilities(
-            DefinitionBackend(func, type(func), func.name, request_index),
-            {"operation": "capabilities", "graph": True},
+            DefinitionBackend(func, type(func), func.name, request_index), request
         )
         args = [
             None if i == request_index else child.value()
             for i, child in enumerate(func.get_children())
         ]
-        self.bind(DefaultGraph(func.name, type(func), request_index, args, declared))
+        self.bind(
+            DefaultGraph(func.name, type(func), request_index, args, declared, self.name)
+        )
         if self.next:
             await self.next.run()
 
 
 class DropGraph(GraphBinding):
-    """``DROP GRAPH``: clear the default graph binding (no-op when none is bound)."""
+    """``DROP GRAPH [name]``: clear a graph binding (no-op when it is not bound)."""
 
     async def run(self) -> None:
         self.bind(None)

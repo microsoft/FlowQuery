@@ -27,12 +27,19 @@ Change entries (node targets carry ``label``, relationship targets ``type``):
 A relationship ``target`` is the row's ``id`` column when the definition
 returns one, otherwise ``{left_id, right_id}``.
 
-**Default graph.**  Writes to labels and types without a definition go
-to the default graph (``USE GRAPH fn($request)``); its requests carry
-``graph: true``.  Targets are graph-wide entity ids, ``createNode.labels``
-may hold zero or several labels, ``mergeNode`` adds ``labels`` (all of
-them; ``label`` is the first), and relationship changes carry the stored
-``type`` of the relationship.
+**Graphs.**  Writes to labels and types without a definition go to the
+default graph (``USE GRAPH fn($request)``), writes to graph-qualified
+labels (``hr.Person``) to the named graph (``USE GRAPH hr = fn($request)``);
+their requests carry ``graph: true``.  Targets are graph-wide entity ids,
+``createNode.labels`` may hold zero or several labels, ``mergeNode`` adds
+``labels`` (all of them; ``label`` is the first), and relationship changes
+carry the stored ``type`` of the relationship.  Changes to a named graph
+carry ``graphName``; graphs bound to the same function with the same
+arguments share one atomic change set.  ``createRelationship`` and
+``mergeRelationship`` carry ``startGraph`` / ``endGraph`` when an endpoint
+lives in another namespace than the relationship: another graph's
+name, or ``"virtual"`` for a definition node (then with ``startLabel`` /
+``endLabel``).
 
 **Transactions.**  Backends declaring ``transactions: true`` (with
 ``writes: true``) run each query in one transaction, opened by the
@@ -48,7 +55,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from .graph_records import DEFAULT_GRAPH
 
 WRITE_CONTRACT_VERSION = 1
 
@@ -77,8 +86,10 @@ class WriteBackend:
     request_index: int
     #: The other arguments, evaluated from the definition's call.
     args: List[Any] = field(default_factory=list)
-    #: The backend is the default graph (requests carry ``graph: True``).
+    #: The backend serves graphs (requests carry ``graph: True``).
     graph: bool = False
+    #: Name of the graph the backend was first routed for (descriptions only).
+    graph_name: Optional[str] = None
 
 
 @dataclass
@@ -87,14 +98,36 @@ class WriteRoute:
 
     backend: WriteBackend
     transactions: bool
+    #: The graph written to; None for definitions.
+    graph_name: Optional[str] = None
+    #: Relationship definitions: namespaces of the left and right endpoints.
+    endpoints: Optional[Tuple[str, str]] = None
 
 
-def _describe_backend(backend: WriteBackend) -> str:
-    name = f"default graph {backend.name}" if backend.graph else backend.name
+def same_backend(a: WriteBackend, b: WriteBackend) -> bool:
+    """Two routes go through the same backend: the same function, called with
+    the same arguments, for graphs or for definitions.  Graphs bound to the
+    same backend share one change set, so writes across them are atomic."""
+    return (
+        a.function_class is b.function_class
+        and a.graph == b.graph
+        and _canonical_key(a.args) == _canonical_key(b.args)
+    )
+
+
+def describe_backend(backend: WriteBackend) -> str:
     args = [a for i, a in enumerate(backend.args) if i != backend.request_index]
-    if len(args) == 0:
-        return name
-    return f"{name}({', '.join(json.dumps(a) for a in args)})"
+    fn = (
+        f"{backend.name}({', '.join(json.dumps(a) for a in args)})"
+        if len(args) > 0
+        else backend.name
+    )
+    if not backend.graph:
+        return fn
+    if backend.graph_name is not None and backend.graph_name != DEFAULT_GRAPH:
+        return f"graph {backend.graph_name} ({fn})"
+    return f"default graph {fn}"
+
 
 
 class WriteSet:
@@ -134,14 +167,10 @@ class WriteSet:
         current = self.backend
         if current is None:
             self.backend = route.backend
-        elif (
-            current.function_class is not route.backend.function_class
-            or current.graph != route.backend.graph
-            or _canonical_key(current.args) != _canonical_key(route.backend.args)
-        ):
+        elif not same_backend(current, route.backend):
             raise ValueError(
                 "A query can only write through one backend function "
-                f"({_describe_backend(current)} and {_describe_backend(route.backend)})"
+                f"({describe_backend(current)} and {describe_backend(route.backend)})"
             )
         self.transactional = self.transactional and route.transactions
 

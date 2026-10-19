@@ -469,10 +469,24 @@ describe("7. definitions take precedence", () => {
         ).rejects.toThrow(
             /only write through one backend function \(default graph mockbackend and mockbackend\)/
         );
-        await expect(run("MATCH (c:Curated), (f:Free) CREATE (c)-[:OWNS]->(f)")).rejects.toThrow(
-            /an endpoint is not a default-graph node/
-        );
         expect(mock.changeSets).toEqual([]);
+        // A default-graph relationship may point at a definition node; the
+        // change records the endpoint's namespace.
+        await run("MATCH (c:Curated), (f:Free) CREATE (c)-[:OWNS]->(f)");
+        expect(mock.changeSets).toEqual([
+            [
+                {
+                    op: "createRelationship",
+                    ref: "$1",
+                    type: "OWNS",
+                    start: 1,
+                    end: 1000,
+                    properties: {},
+                    startGraph: "virtual",
+                    startLabel: "Curated",
+                },
+            ],
+        ]);
     });
 });
 

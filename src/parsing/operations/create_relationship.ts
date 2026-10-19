@@ -1,4 +1,5 @@
 import Database from "../../graph/database";
+import { qualifiedLabel } from "../../graph/namespaces";
 import Relationship from "../../graph/relationship";
 import { SOURCE_CONTRACT_VERSION, mergeCapabilities } from "../../graph/source_provider";
 import ASTNode from "../ast_node";
@@ -74,8 +75,8 @@ class CreateRelationship extends Operation {
                     try {
                         db.setRelationshipSourceCapabilities(
                             this._relationship.type!,
-                            this._relationship.source?.label ?? null,
-                            this._relationship.target?.label ?? null,
+                            qualifiedLabel(this._relationship.source),
+                            qualifiedLabel(this._relationship.target),
                             capabilities as any
                         );
                     } catch (error) {

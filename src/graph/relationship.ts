@@ -1,6 +1,12 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
-import { commonOrigin, isGraphRecord, originMatches } from "./graph_records";
+import {
+    commonNamespace,
+    endpointMatches,
+    endpointNamespace,
+    isGraphRecord,
+    namespaceOf,
+} from "./graph_records";
 import Hops from "./hops";
 import Node from "./node";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
@@ -15,7 +21,8 @@ import { canonicalKey } from "./source_context";
  * within one MATCH clause, including comma-separated patterns and
  * variable-length hops, each relationship is bound at most once.
  * Relationships are identified by type plus their `id` column when the
- * definition returns one, otherwise by type plus the whole row.
+ * definition returns one (plus the graph for graph relationships, whose
+ * ids are scoped to their graph), otherwise by type plus the whole row.
  */
 export class RelationshipScope {
     private _members: Relationship[] = [];
@@ -53,6 +60,8 @@ const keyCache: WeakMap<object, string> = new WeakMap();
 class Relationship extends ASTNode {
     protected _identifier: string | null = null;
     protected _types: string[] = [];
+    /** Graph named by a qualified type, `[:hr.KNOWS]`; `null` when unqualified. */
+    protected _graph: string | null = null;
     protected _properties: Map<string, Expression> = new Map();
     protected _hops: Hops = new Hops();
 
@@ -92,7 +101,9 @@ class Relationship extends ASTNode {
         const type = record?._type ?? this.type ?? "";
         let key: string;
         if (record?.id !== undefined && record.id !== null) {
-            key = `${type}\u0000#${canonicalKey(record.id)}`;
+            // Ids are scoped to their namespace: graphs on other backends reuse them.
+            const ns = isGraphRecord(record) ? `${namespaceOf(record)}\u0000` : "";
+            key = `${ns}${type}\u0000#${canonicalKey(record.id)}`;
         } else {
             const { _type, ...row } = record ?? {};
             key = `${type}\u0000${canonicalKey(row)}`;
@@ -132,6 +143,12 @@ class Relationship extends ASTNode {
     }
     public get types(): string[] {
         return this._types;
+    }
+    public get graph(): string | null {
+        return this._graph;
+    }
+    public set graph(value: string | null) {
+        this._graph = value;
     }
     public get properties(): Map<string, Expression> {
         return this._properties;
@@ -227,6 +244,10 @@ class Relationship extends ASTNode {
     public get anchorSide(): "left" | "right" {
         return this._direction === "left" ? "right" : "left";
     }
+    /** Stored endpoint of the next node in traversal order. */
+    public get nextSide(): "left" | "right" {
+        return this._direction === "left" ? "left" : "right";
+    }
     /** Stored endpoint holding the id of the next node in traversal order. */
     public get nextField(): "left_id" | "right_id" {
         return this._direction === "left" ? "left_id" : "right_id";
@@ -268,7 +289,7 @@ class Relationship extends ASTNode {
      * is the graph provenance of that node: relationships of the other
      * graph never join it (see {@link NodeAccess}).
      */
-    public async *find(left_id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
+    public async *find(left_id: string, hop: number = 0, origin?: string): AsyncGenerator<void> {
         if (this._access !== null) {
             yield* this._deferredFind(left_id, hop, origin);
             return;
@@ -293,8 +314,8 @@ class Relationship extends ASTNode {
             }
             while (this._data!.find(left_id, hop, this._direction)) {
                 const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
-                if (!originMatches(data, origin)) continue;
-                const next = isGraphRecord(data);
+                if (!endpointMatches(data, this.anchorSide, origin)) continue;
+                const next = endpointNamespace(data, this.nextSide);
                 const id = data[this._left_id_or_right_id()];
                 if (hop + 1 >= this.hops!.min) {
                     this.setValue(this, left_id);
@@ -336,7 +357,7 @@ class Relationship extends ASTNode {
     private async *_deferredFind(
         left_id: string,
         hop: number,
-        origin: boolean | undefined
+        origin: string | undefined
     ): AsyncGenerator<void> {
         const original = this._source;
         if (hop > 0) {
@@ -369,7 +390,7 @@ class Relationship extends ASTNode {
                         page.map((row) => row[this.nextField]),
                         targetTerms.terms,
                         targetTerms.args,
-                        commonOrigin(page)
+                        commonNamespace(page, (row) => endpointNamespace(row, this.nextSide))
                     );
                 }
                 for (const row of page) {
@@ -387,7 +408,7 @@ class Relationship extends ASTNode {
     ): AsyncGenerator<void> {
         this._frames.set(hop, record);
         const id = record[this.nextField];
-        const next = isGraphRecord(record);
+        const next = endpointNamespace(record, this.nextSide);
         if (hop + 1 >= this.hops!.min) {
             if (!this.matchesRecord(record)) {
                 return;

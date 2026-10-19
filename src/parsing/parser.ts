@@ -1,3 +1,4 @@
+import { DEFAULT_GRAPH, VIRTUAL_NAMESPACE } from "../graph/graph_records";
 import Hops from "../graph/hops";
 import Node from "../graph/node";
 import NodeReference from "../graph/node_reference";
@@ -373,7 +374,17 @@ class Parser extends BaseParser {
         );
     }
 
-    /** `USE GRAPH fn($request, ...)`: bind the default graph backend. */
+    /** A graph name: an identifier other than the reserved `virtual`. */
+    private static validateGraphName(name: string): string {
+        if (name.toLowerCase() === VIRTUAL_NAMESPACE) {
+            throw new Error(
+                `'${VIRTUAL_NAMESPACE}' is reserved for CREATE VIRTUAL definitions and cannot name a graph`
+            );
+        }
+        return name;
+    }
+
+    /** `USE GRAPH [name =] fn($request, ...)`: bind the default graph, or a named graph. */
     private parseUseGraph(): UseGraph | null {
         if (!this.token.isIdentifier() || !this.isWord("USE")) {
             return null;
@@ -388,13 +399,27 @@ class Parser extends BaseParser {
         this.assertWritesAllowed("USE GRAPH");
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        let name: string = DEFAULT_GRAPH;
+        if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
+            const candidate = this.token.value || "";
+            const beforeName = this.tokenIndex;
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+            if (this.token.isEquals()) {
+                name = Parser.validateGraphName(candidate);
+                this.setNextToken();
+                this.skipWhitespaceAndComments();
+            } else {
+                this.tokenIndex = beforeName;
+            }
+        }
         const fn = this.parseAsyncFunction();
         if (fn === null) {
             throw new Error(
-                "Expected a registered async function after USE GRAPH, e.g. USE GRAPH backend($request)"
+                "Expected a registered async function after USE GRAPH, e.g. USE GRAPH backend($request) or USE GRAPH name = backend($request)"
             );
         }
-        return new UseGraph(fn);
+        return new UseGraph(fn, name);
     }
 
     private parseWith(): With | null {
@@ -677,6 +702,11 @@ class Parser extends BaseParser {
         if (node.allLabels) {
             throw new Error("CREATE VIRTUAL requires a single label per node");
         }
+        if (node.graph !== null && relationship === null) {
+            throw new Error(
+                `CREATE VIRTUAL defines a virtual node; (:${node.graph}.${node.label}) belongs to graph ${node.graph}`
+            );
+        }
         this.expectAndSkipWhitespaceAndComments();
         // Optional `WITH CAPABILITIES { ... }` opts the definition into the
         // backend-aware source contract (see setNodeSourceCapabilities).
@@ -816,6 +846,14 @@ class Parser extends BaseParser {
         if (!isDelete && this.isWord("GRAPH")) {
             this.assertWritesAllowed("DROP GRAPH");
             this.setNextToken();
+            const beforeName = this.tokenIndex;
+            this.skipWhitespaceAndComments();
+            if (this.token.isIdentifier() && !this.isWord("USE")) {
+                const name = Parser.validateGraphName(this.token.value || "");
+                this.setNextToken();
+                return new DropGraph(name);
+            }
+            this.tokenIndex = beforeName;
             return new DropGraph();
         }
         if (this.token.isBinding()) {
@@ -1807,10 +1845,13 @@ class Parser extends BaseParser {
         if (this.token.isColon() && !this.peek()?.isIdentifierOrKeyword()) {
             throw new Error("Expected node label identifier");
         }
+        let graph: string | null = null;
         if (this.token.isColon() && this.peek()?.isIdentifierOrKeyword()) {
             this.setNextToken();
             label = this.token.value || "";
             this.setNextToken();
+            const qualified = this.parseGraphQualifier(label);
+            if (qualified !== null) [graph, label] = qualified;
         }
         // Additional labels: ORed (n:Person|Animal) or all required (n:Person:Employee)
         const labels: string[] = label !== null ? [label] : [];
@@ -1835,6 +1876,11 @@ class Parser extends BaseParser {
             }
             labels.push(this.token.value || "");
             this.setNextToken();
+            if (this.token.isDot()) {
+                throw new Error(
+                    "Only the first label of a node can be qualified with a graph name, e.g. (n:hr.Person:Employee)"
+                );
+            }
         }
         if (anyLabels && allLabels) {
             throw new Error("Cannot combine ':' and '|' between node labels");
@@ -1846,6 +1892,7 @@ class Parser extends BaseParser {
             node.labels = labels;
         }
         node.allLabels = allLabels;
+        node.graph = graph;
         if (identifier !== null && this._state.variables.has(identifier)) {
             let reference = this._state.variables.get(identifier);
             if (
@@ -2013,6 +2060,7 @@ class Parser extends BaseParser {
         this.setNextToken();
         let variable: string | null = null;
         const types: string[] = [];
+        let relationshipGraph: string | null = null;
         // In a relationship-definition position, any identifier or keyword is
         // unambiguously the relationship variable name — including reserved keywords
         // like END/NULL/CASE that are otherwise blocked by isIdentifierOrKeyword().
@@ -2025,8 +2073,11 @@ class Parser extends BaseParser {
             if (!this.token.isIdentifierOrKeyword()) {
                 throw new Error("Expected relationship type identifier");
             }
-            types.push(this.token.value || "");
+            let type = this.token.value || "";
             this.setNextToken();
+            const qualified = this.parseGraphQualifier(type);
+            if (qualified !== null) [relationshipGraph, type] = qualified;
+            types.push(type);
             while (this.token.isPipe()) {
                 this.setNextToken();
                 if (this.token.isColon()) {
@@ -2037,6 +2088,11 @@ class Parser extends BaseParser {
                 }
                 types.push(this.token.value || "");
                 this.setNextToken();
+                if (this.token.isDot()) {
+                    throw new Error(
+                        "Only the first relationship type can be qualified with a graph name, e.g. [:hr.KNOWS|LIKES]"
+                    );
+                }
             }
         }
         const hops: Hops | null = this.parseRelationshipHops();
@@ -2076,7 +2132,22 @@ class Parser extends BaseParser {
             relationship.hops = hops;
         }
         relationship.types = types;
+        relationship.graph = relationshipGraph;
         return relationship;
+    }
+
+    /**
+     * `graph.Name` after a label or type: returns `[graph, Name]` and
+     * consumes the qualified name, or `null` when `name` is unqualified.
+     */
+    private parseGraphQualifier(name: string): [string, string] | null {
+        if (!this.token.isDot() || !this.peek()?.isIdentifierOrKeyword()) {
+            return null;
+        }
+        this.setNextToken();
+        const qualified = this.token.value || "";
+        this.setNextToken();
+        return [Parser.validateGraphName(name), qualified];
     }
 
     private parseRelationshipHops(): Hops | null {

@@ -1,7 +1,7 @@
-"""Internal records of entities read from, or written to, the default
-graph (``USE GRAPH fn($request)``).
+"""Internal records of entities read from, or written to, a graph bound
+with ``USE GRAPH [name =] fn($request)``.
 
-A default-graph backend returns rows that keep metadata and user
+A graph backend returns rows that keep metadata and user
 properties apart:
 
 - nodes: ``{id, labels: [...], properties: {...}}``
@@ -17,46 +17,102 @@ internal keys that are never returned to callers.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Mapping, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Mapping, Optional, TypeVar
 
-#: Marks a record that belongs to the default graph (provenance).
+#: The graph bound with an unnamed ``USE GRAPH`` (also ``USE GRAPH default = ...``).
+DEFAULT_GRAPH = "default"
+#: Namespace of ``CREATE VIRTUAL`` definition entities.  Reserved: no graph
+#: can be bound under this name.
+VIRTUAL_NAMESPACE = "virtual"
+
+#: Name of the graph a record belongs to (absent for definition records).
 GRAPH_KEY = "_graph"
-#: All stored labels of a default-graph node.
+#: All stored labels of a graph node.
 LABELS_KEY = "_labels"
-#: Exact user properties of a default-graph entity.
+#: Exact user properties of a graph entity.
 PROPERTIES_KEY = "_properties"
+#: Namespace of a relationship's left endpoint, when it differs from the relationship's.
+LEFT_NAMESPACE_KEY = "_leftGraph"
+#: Namespace of a relationship's right endpoint, when it differs from the relationship's.
+RIGHT_NAMESPACE_KEY = "_rightGraph"
 
 _graph_records_seen = False
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 
 def graph_records_in_use() -> bool:
-    """True once any default-graph record was built (enables result cleanup)."""
+    """True once any graph record was built (enables result cleanup)."""
     return _graph_records_seen
 
 
 def is_graph_record(value: Any) -> bool:
-    return isinstance(value, dict) and value.get(GRAPH_KEY) is True
+    return isinstance(value, dict) and isinstance(value.get(GRAPH_KEY), str)
 
 
-def common_origin(records: List[Dict[str, Any]]) -> Optional[bool]:
-    """Common provenance of a list of records: True, False, or None when mixed."""
+def namespace_of(record: Any) -> str:
+    """Namespace of an entity: the name of the graph it was read from or
+    written to, or :data:`VIRTUAL_NAMESPACE` for definition entities.
+    Ids are only meaningful within their namespace."""
+    if is_graph_record(record):
+        graph: str = record[GRAPH_KEY]
+        return graph
+    return VIRTUAL_NAMESPACE
+
+
+def endpoint_namespace(record: Any, side: str) -> str:
+    """Namespace of the node at the ``side`` endpoint of a relationship record."""
+    key = LEFT_NAMESPACE_KEY if side == "left" else RIGHT_NAMESPACE_KEY
+    ns = record.get(key) if isinstance(record, dict) else None
+    return ns if isinstance(ns, str) else namespace_of(record)
+
+
+def common_namespace(records: List[R], of: Callable[[R], str]) -> Optional[str]:
+    """Common value of ``of`` over ``records``, or None when empty or mixed."""
     if len(records) == 0:
         return None
-    first = is_graph_record(records[0])
+    first = of(records[0])
     for record in records:
-        if is_graph_record(record) != first:
+        if of(record) != first:
             return None
     return first
 
 
-def origin_matches(record: Any, origin: Optional[bool]) -> bool:
-    """True when ``record`` may join a traversal step constrained to ``origin``."""
-    return origin is None or is_graph_record(record) == origin
+def common_origin(records: List[Dict[str, Any]]) -> Optional[str]:
+    """Common namespace of node records."""
+    return common_namespace(records, namespace_of)
 
 
-def graph_node_record(id_: Any, labels: List[str], properties: Dict[str, Any]) -> Dict[str, Any]:
+def origin_matches(record: Any, origin: Optional[str]) -> bool:
+    """True when node ``record`` may join a traversal step constrained to namespace ``origin``."""
+    return origin is None or namespace_of(record) == origin
+
+
+def endpoint_matches(record: Any, side: str, origin: Optional[str]) -> bool:
+    """True when the ``side`` endpoint of relationship ``record`` is in namespace ``origin``."""
+    return origin is None or endpoint_namespace(record, side) == origin
+
+
+def with_endpoint_namespaces(row: Dict[str, Any], left: str, right: str) -> Dict[str, Any]:
+    """Tag a definition relationship row with the namespaces of its endpoints
+    when they are graphs (definition endpoints default to definitions)."""
+    if left == VIRTUAL_NAMESPACE and right == VIRTUAL_NAMESPACE:
+        return row
+    out = dict(row)
+    if left != VIRTUAL_NAMESPACE:
+        out[LEFT_NAMESPACE_KEY] = left
+    if right != VIRTUAL_NAMESPACE:
+        out[RIGHT_NAMESPACE_KEY] = right
+    return out
+
+
+def graph_node_record(
+    id_: Any,
+    labels: List[str],
+    properties: Dict[str, Any],
+    graph: str = DEFAULT_GRAPH,
+) -> Dict[str, Any]:
     global _graph_records_seen
     _graph_records_seen = True
     return {
@@ -64,7 +120,7 @@ def graph_node_record(id_: Any, labels: List[str], properties: Dict[str, Any]) -
         "id": id_,
         LABELS_KEY: list(labels),
         PROPERTIES_KEY: dict(properties),
-        GRAPH_KEY: True,
+        GRAPH_KEY: graph,
     }
 
 
@@ -74,18 +130,26 @@ def graph_relationship_record(
     left_id: Any,
     right_id: Any,
     properties: Dict[str, Any],
+    graph: str = DEFAULT_GRAPH,
+    left_graph: Optional[str] = None,
+    right_graph: Optional[str] = None,
 ) -> Dict[str, Any]:
     global _graph_records_seen
     _graph_records_seen = True
-    return {
+    record: Dict[str, Any] = {
         **properties,
         "id": id_,
         "left_id": left_id,
         "right_id": right_id,
         "_type": type_,
         PROPERTIES_KEY: dict(properties),
-        GRAPH_KEY: True,
+        GRAPH_KEY: graph,
     }
+    if left_graph is not None and left_graph != graph:
+        record[LEFT_NAMESPACE_KEY] = left_graph
+    if right_graph is not None and right_graph != graph:
+        record[RIGHT_NAMESPACE_KEY] = right_graph
+    return record
 
 
 def labels_of(value: Mapping[str, Any]) -> List[str]:
@@ -107,14 +171,14 @@ def _contains_graph_record(value: Any) -> bool:
     if isinstance(value, list):
         return any(_contains_graph_record(item) for item in value)
     if isinstance(value, dict):
-        if value.get(GRAPH_KEY) is True:
+        if is_graph_record(value):
             return True
         return any(_contains_graph_record(item) for item in value.values())
     return False
 
 
 def without_graph_keys(value: T) -> T:
-    """A result value without the internal keys of default-graph records:
+    """A result value without the internal keys of graph records:
     ``value`` itself when it holds none, otherwise a cleaned deep copy."""
     if not _graph_records_seen or not _contains_graph_record(value):
         return value
@@ -123,7 +187,7 @@ def without_graph_keys(value: T) -> T:
 
 
 def strip_graph_keys(value: Any) -> Any:
-    """Remove the internal keys of default-graph records, in place,
+    """Remove the internal keys of graph records, in place,
     throughout a result value.  Other values are left untouched."""
     if not _graph_records_seen:
         return value
@@ -132,10 +196,12 @@ def strip_graph_keys(value: Any) -> Any:
             strip_graph_keys(item)
         return value
     if isinstance(value, dict):
-        if value.get(GRAPH_KEY) is True:
+        if is_graph_record(value):
             value.pop(GRAPH_KEY, None)
             value.pop(LABELS_KEY, None)
             value.pop(PROPERTIES_KEY, None)
+            value.pop(LEFT_NAMESPACE_KEY, None)
+            value.pop(RIGHT_NAMESPACE_KEY, None)
             value.pop("_label", None)
             value.pop("_type", None)
         for key in list(value.keys()):

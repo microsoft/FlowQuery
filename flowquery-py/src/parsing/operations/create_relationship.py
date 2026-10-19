@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 from ...graph.database import Database
+from ...graph.namespaces import qualified_label
 from ...graph.relationship import Relationship
 from ...graph.source_provider import SOURCE_CONTRACT_VERSION, merge_capabilities
 from ..ast_node import ASTNode
@@ -83,8 +84,8 @@ class CreateRelationship(Operation):
             try:
                 db.set_relationship_source_capabilities(
                     rel.type or "",
-                    rel.source.label if rel.source is not None else None,
-                    rel.target.label if rel.target is not None else None,
+                    qualified_label(rel.source),
+                    qualified_label(rel.target),
                     capabilities,
                 )
             except Exception:

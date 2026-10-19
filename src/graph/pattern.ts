@@ -1,6 +1,12 @@
 import ASTNode from "../parsing/ast_node";
 import DataResolver from "./data_resolver";
-import { commonOrigin, isGraphRecord, originMatches } from "./graph_records";
+import {
+    commonNamespace,
+    commonOrigin,
+    endpointNamespace,
+    namespaceOf,
+    originMatches,
+} from "./graph_records";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import NodeReference from "./node_reference";
@@ -273,7 +279,7 @@ class Pattern extends ASTNode {
         i: number,
         id: any,
         relRows: RelationshipRecord[],
-        origin?: boolean
+        origin?: string
     ): AsyncGenerator<void> {
         const node = plan.nodes[i];
         const access = plan.nodeAccess[i];
@@ -309,6 +315,8 @@ class Pattern extends ASTNode {
             const side: "left" | "right" =
                 rel !== null && rel.nextField === "left_id" ? "left" : "right";
             const nextField = side === "left" ? "right_id" : "left_id";
+            const nextSide: "left" | "right" = side === "left" ? "right" : "left";
+            const nextNamespace = (r: Record<string, any>) => endpointNamespace(r, nextSide);
             const relTerms = rel !== null ? rel.sourceTerms() : null;
             if (rel !== null && rows.length > 1) {
                 const buffered = await plan.relAccess[i - 1].prefetch(
@@ -325,7 +333,7 @@ class Pattern extends ASTNode {
                         buffered.map((r) => r[nextField]),
                         prevTerms.terms,
                         prevTerms.args,
-                        commonOrigin(buffered)
+                        commonNamespace(buffered, nextNamespace)
                     );
                 }
             }
@@ -340,7 +348,7 @@ class Pattern extends ASTNode {
                     side,
                     relTerms!.terms,
                     relTerms!.args,
-                    isGraphRecord(row)
+                    namespaceOf(row)
                 )) {
                     const prev = plan.nodeAccess[i - 1];
                     if (prev !== null && prev.deferred && relPage.length > 1) {
@@ -349,7 +357,7 @@ class Pattern extends ASTNode {
                             relPage.map((r) => r[nextField]),
                             prevTerms.terms,
                             prevTerms.args,
-                            commonOrigin(relPage)
+                            commonNamespace(relPage, nextNamespace)
                         );
                     }
                     for (const relRow of relPage as RelationshipRecord[]) {
@@ -363,7 +371,7 @@ class Pattern extends ASTNode {
                                 i - 1,
                                 relRow[nextField],
                                 relRows,
-                                isGraphRecord(relRow)
+                                nextNamespace(relRow)
                             );
                         } finally {
                             rel.release(claimed);

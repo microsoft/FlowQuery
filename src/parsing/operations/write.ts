@@ -1,19 +1,26 @@
 import Database from "../../graph/database";
 import type DefaultGraph from "../../graph/default_graph";
 import {
+    DEFAULT_GRAPH,
+    GRAPH_KEY,
     LABELS_KEY,
     PROPERTIES_KEY,
+    VIRTUAL_NAMESPACE,
     graphNodeRecord,
     graphRelationshipRecord,
     isGraphRecord,
     labelsOf,
+    namespaceOf,
     userProperties,
+    withEndpointNamespaces,
 } from "../../graph/graph_records";
+import { boundGraph, definitionEndpointNamespace } from "../../graph/namespaces";
 import Node from "../../graph/node";
 import NodeReference from "../../graph/node_reference";
 import Pattern from "../../graph/pattern";
 import PatternExpression from "../../graph/pattern_expression";
 import Relationship from "../../graph/relationship";
+import { RelationshipSourceAccess } from "../../graph/source_access";
 import type SourceContext from "../../graph/source_context";
 import { QueryCancelledError, SourceError } from "../../graph/source_provider";
 import {
@@ -23,6 +30,8 @@ import {
     WriteResult,
     WriteRoute,
     WriteSet,
+    describeBackend,
+    sameBackend,
 } from "../../graph/write_set";
 import ASTNode from "../ast_node";
 import Expression from "../expressions/expression";
@@ -45,12 +54,16 @@ export type WriteTarget =
           label: string | null;
           labels?: string[];
           clause?: "create" | "merge";
+          /** Graph of a qualified label (`hr.Person`). */
+          graph?: string | null;
       }
     | {
           kind: "relationship";
           type: string | null;
           sourceLabel: string | null;
           targetLabel: string | null;
+          /** Graph of a qualified type (`hr.KNOWS`). */
+          graph?: string | null;
       };
 
 /** One item of `SET`, `REMOVE` or `ON CREATE` / `ON MATCH SET`. */
@@ -82,22 +95,90 @@ export function labelOf(node: Node | null): string | null {
     return null;
 }
 
+/** Graph qualifier of a node pattern element (following references). */
+function graphOf(node: Node | null): string | null {
+    if (node === null) return null;
+    if (node.graph !== null) return node.graph;
+    if (node instanceof NodeReference && node.reference instanceof Node) {
+        return graphOf(node.reference);
+    }
+    return null;
+}
+
+/** `hr.Person` for a graph-qualified node pattern element, else its label. */
+function qualifiedLabelOf(node: Node | null): string | null {
+    const label = labelOf(node);
+    const graph = graphOf(node);
+    return label !== null && graph !== null ? `${graph}.${label}` : label;
+}
+
 function nodeTargetOf(node: Node): WriteTarget {
-    return { kind: "node", label: labelOf(node) };
+    const graph = graphOf(node);
+    return graph !== null
+        ? { kind: "node", label: labelOf(node), graph }
+        : { kind: "node", label: labelOf(node) };
 }
 
 function newNodeTargetOf(node: Node, clause: "create" | "merge"): WriteTarget {
-    return { kind: "node", label: node.label, labels: [...node.labels], clause };
+    const target: WriteTarget = {
+        kind: "node",
+        label: node.label,
+        labels: [...node.labels],
+        clause,
+    };
+    if (node.graph !== null) target.graph = node.graph;
+    return target;
 }
 
 function relationshipTargetOf(rel: Relationship): WriteTarget {
     const [start, end] = endpoints(rel);
-    return {
+    const target: WriteTarget = {
         kind: "relationship",
         type: rel.type,
-        sourceLabel: labelOf(start),
-        targetLabel: labelOf(end),
+        sourceLabel: qualifiedLabelOf(start),
+        targetLabel: qualifiedLabelOf(end),
     };
+    if (rel.graph !== null) target.graph = rel.graph;
+    return target;
+}
+
+/** `graphName` of a change to an entity of a named graph. */
+function graphTag(graphName: string | undefined): Record<string, any> {
+    return graphName !== undefined && graphName !== DEFAULT_GRAPH ? { graphName } : {};
+}
+
+/** `graphName` of a change to an existing entity (none for definitions and the default graph). */
+function tagOf(record: Record<string, any> | null | undefined): Record<string, any> {
+    return isGraphRecord(record) ? graphTag(record![GRAPH_KEY]) : {};
+}
+
+/**
+ * Endpoint namespaces of a new relationship stored in `owner`'s
+ * namespace: `startGraph` / `endGraph` (and the label of a definition
+ * endpoint) when an endpoint lives elsewhere.
+ */
+function endpointTags(
+    owner: string,
+    start: Record<string, any>,
+    end: Record<string, any>
+): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const [key, value] of [
+        ["start", start],
+        ["end", end],
+    ] as const) {
+        const ns = namespaceOf(value);
+        if (ns === owner) continue;
+        out[`${key}Graph`] = ns;
+        if (ns === VIRTUAL_NAMESPACE && value._label !== undefined) {
+            out[`${key}Label`] = value._label;
+        }
+    }
+    return out;
+}
+
+function describeNamespace(ns: string): string {
+    return ns === VIRTUAL_NAMESPACE ? "a definition node" : `a node of graph ${ns}`;
 }
 
 /** Stored (left, right) endpoints of a pattern relationship. */
@@ -175,7 +256,12 @@ function replaceNodeValue(node: Node, properties: Record<string, any>): void {
     const value = nodeValue(node);
     if (value === null) return;
     if (isGraphRecord(value)) {
-        const next = graphNodeRecord(value.id, labelsOf(value), withoutNulls(properties));
+        const next = graphNodeRecord(
+            value.id,
+            labelsOf(value),
+            withoutNulls(properties),
+            value[GRAPH_KEY]
+        );
         if (value._label !== undefined) next._label = value._label;
         node.setValue(next as any);
         return;
@@ -243,9 +329,9 @@ export abstract class WriteOperation extends Operation {
         this._context.writes ??= new WriteSet();
         return this._context.writes;
     }
-    /** The default graph pinned by the query. */
-    protected get graph(): DefaultGraph | null {
-        return this._context?.graph ?? null;
+    /** The graphs pinned by the query. */
+    protected get graphs(): ReadonlyMap<string, DefaultGraph> {
+        return this._context?.graphs ?? new Map();
     }
     private routeBy(writes: WriteSet, key: string, resolve: () => WriteRoute): WriteRoute {
         let route = writes.routes.get(key);
@@ -259,24 +345,25 @@ export abstract class WriteOperation extends Operation {
     /** Route a new node or relationship (by its static labels or type). */
     protected routeTarget(writes: WriteSet, target: WriteTarget): WriteRoute {
         return this.routeBy(writes, `target:${JSON.stringify(target)}`, () => {
-            const route = resolveTarget(target, this.graph);
+            const route = resolveTarget(target, this.graphs);
             if (route === null) throw new Error(`Cannot write to ${describe(target)}`);
             return route;
         });
     }
     /**
-     * Route a change to a bound node by where it came from: default-graph
-     * nodes go to the default graph, other nodes to their definition.
+     * Route a change to a bound node by where it came from: graph nodes go
+     * to their graph, other nodes to their definition.
      */
     protected routeNode(writes: WriteSet, node: Node, value: Record<string, any>): WriteRoute {
         if (isGraphRecord(value)) {
-            return this.routeBy(writes, "graph", () =>
-                defaultRoute(this.graph, `(:${labelsOf(value).join(":")})`)
+            const name: string = value[GRAPH_KEY];
+            return this.routeBy(writes, `graph:${name}`, () =>
+                graphRoute(this.graphs, name, `(:${labelsOf(value).join(":")})`)
             );
         }
         const label = value._label ?? labelOf(node);
         return this.routeBy(writes, `node:${label}`, () =>
-            resolveWriteBackend({ kind: "node", label })
+            resolveWriteBackend({ kind: "node", label }, this.graphs)
         );
     }
     /** Relationship counterpart of {@link routeNode}. */
@@ -286,8 +373,9 @@ export abstract class WriteOperation extends Operation {
         record: Record<string, any> | null
     ): WriteRoute {
         if (isGraphRecord(record)) {
-            return this.routeBy(writes, "graph", () =>
-                defaultRoute(this.graph, `[:${record!._type ?? ""}]`)
+            const name: string = record![GRAPH_KEY];
+            return this.routeBy(writes, `graph:${name}`, () =>
+                graphRoute(this.graphs, name, `[:${record!._type ?? ""}]`)
             );
         }
         const [start, end] = endpoints(rel);
@@ -300,12 +388,15 @@ export abstract class WriteOperation extends Operation {
         return this.routeBy(
             writes,
             `rel:${target.type}:${target.sourceLabel}:${target.targetLabel}`,
-            () => resolveWriteBackend(target)
+            () => resolveWriteBackend(target, this.graphs)
         );
     }
+    /** @internal Asynchronous checks before a row is applied. */
+    protected async check(_writes: WriteSet): Promise<void> {}
     public async run(): Promise<void> {
         this._context?.throwIfCancelled();
         const writes = this.writes;
+        await this.check(writes);
         this.apply(writes);
         if (writes.transactional && writes.perRow) {
             await flushWrites(this._context!, writes);
@@ -341,6 +432,7 @@ export abstract class WriteOperation extends Operation {
                         target,
                         type,
                         properties,
+                        ...tagOf(record),
                     });
                     replaceRelationshipValue(element, properties);
                     continue;
@@ -355,7 +447,7 @@ export abstract class WriteOperation extends Operation {
                 } else {
                     throw new Error("Relationships have no labels");
                 }
-                writes.add({ op: "setProperties", target, type, properties });
+                writes.add({ op: "setProperties", target, type, properties, ...tagOf(record) });
                 updateRelationshipValue(element, properties);
                 continue;
             }
@@ -366,7 +458,13 @@ export abstract class WriteOperation extends Operation {
             switch (item.kind) {
                 case "replace": {
                     const properties = { ...(item.expression.value() ?? {}) };
-                    writes.add({ op: "replaceProperties", target: value.id, label, properties });
+                    writes.add({
+                        op: "replaceProperties",
+                        target: value.id,
+                        label,
+                        properties,
+                        ...tagOf(value),
+                    });
                     replaceNodeValue(element, properties);
                     break;
                 }
@@ -379,13 +477,19 @@ export abstract class WriteOperation extends Operation {
                             : item.kind === "merge"
                               ? { ...(item.expression.value() ?? {}) }
                               : { [item.property]: null };
-                    writes.add({ op: "setProperties", target: value.id, label, properties });
+                    writes.add({
+                        op: "setProperties",
+                        target: value.id,
+                        label,
+                        properties,
+                        ...tagOf(value),
+                    });
                     updateNodeValue(element, properties);
                     break;
                 }
                 case "addLabels":
                 case "removeLabels":
-                    if (item.kind === "addLabels" && isGraphRecord(value)) {
+                    if (item.kind === "addLabels" && namespaceOf(value) === DEFAULT_GRAPH) {
                         const defined = item.labels.filter((l) =>
                             Database.getInstance().nodes.has(l)
                         );
@@ -400,6 +504,7 @@ export abstract class WriteOperation extends Operation {
                         target: value.id,
                         label,
                         labels: [...item.labels],
+                        ...tagOf(value),
                     });
                     updateNodeLabels(element, item.labels, item.kind === "addLabels");
                     break;
@@ -443,10 +548,11 @@ export class CreateWrite extends WriteOperation {
                         ref,
                         labels: [...element.labels],
                         properties,
+                        ...graphTag(route.graphName),
                     });
                     element.setValue(
-                        (route.backend.graph === true
-                            ? graphNodeRecord(ref, element.labels, properties)
+                        (route.graphName !== undefined
+                            ? graphNodeRecord(ref, element.labels, properties, route.graphName)
                             : { id: ref, ...properties }) as any
                     );
                     bindNode(writes, element, ref);
@@ -471,6 +577,8 @@ export class CreateWrite extends WriteOperation {
                         start: start.id,
                         end: end.id,
                         properties,
+                        ...graphTag(route.graphName),
+                        ...endpointTags(route.graphName ?? VIRTUAL_NAMESPACE, start, end),
                     });
                     bindRelationship(writes, element, ref, start, end, properties, route);
                 }
@@ -480,9 +588,10 @@ export class CreateWrite extends WriteOperation {
 }
 
 /**
- * A relationship and its endpoints belong to the same graph: a
- * default-graph relationship never connects definition nodes, and the
- * reverse, because ids are only meaningful within their own graph.
+ * A relationship stored in a graph may connect nodes of any namespace:
+ * its change records where each endpoint lives.  A relationship
+ * definition connects the namespaces its endpoint labels declare, since
+ * ids are only meaningful within their own namespace.
  */
 function checkEndpoints(
     verb: string,
@@ -491,13 +600,18 @@ function checkEndpoints(
     start: Record<string, any>,
     end: Record<string, any>
 ): void {
-    const graph = route.backend.graph === true;
-    if (isGraphRecord(start) !== graph || isGraphRecord(end) !== graph) {
-        throw new Error(
-            graph
-                ? `Cannot ${verb} [:${rel.type}] in the default graph: an endpoint is not a default-graph node`
-                : `Cannot ${verb} [:${rel.type}]: an endpoint is a default-graph node but [:${rel.type}] has a CREATE VIRTUAL definition`
-        );
+    if (route.graphName !== undefined) return;
+    const [left, right] = route.endpoints ?? [VIRTUAL_NAMESPACE, VIRTUAL_NAMESPACE];
+    for (const [expected, value] of [
+        [left, start],
+        [right, end],
+    ] as const) {
+        const actual = namespaceOf(value);
+        if (actual !== expected) {
+            throw new Error(
+                `Cannot ${verb} [:${rel.type}]: its CREATE VIRTUAL definition connects ${describeNamespace(left)} to ${describeNamespace(right)}, but an endpoint is ${describeNamespace(actual)}`
+            );
+        }
     }
 }
 
@@ -519,9 +633,22 @@ function bindRelationship(
     route: WriteRoute
 ): void {
     rel.createdRecord =
-        route.backend.graph === true
-            ? (graphRelationshipRecord(ref, rel.type!, start.id, end.id, properties) as any)
-            : { id: ref, left_id: start.id, right_id: end.id, ...properties };
+        route.graphName !== undefined
+            ? (graphRelationshipRecord(
+                  ref,
+                  rel.type!,
+                  start.id,
+                  end.id,
+                  properties,
+                  route.graphName,
+                  namespaceOf(start),
+                  namespaceOf(end)
+              ) as any)
+            : (withEndpointNamespaces(
+                  { id: ref, left_id: start.id, right_id: end.id, ...properties },
+                  namespaceOf(start),
+                  namespaceOf(end)
+              ) as any);
     rel.overrideValue({
         ...properties,
         id: ref,
@@ -592,7 +719,7 @@ export class MergeWrite extends WriteOperation {
             const node = this._pattern.chain[0] as Node;
             const route = this.routeTarget(writes, newNodeTargetOf(node, "merge"));
             const key = evaluate(node.properties);
-            if (route.backend.graph === true) {
+            if (route.graphName !== undefined) {
                 writes.add({
                     op: "mergeNode",
                     ref,
@@ -601,8 +728,9 @@ export class MergeWrite extends WriteOperation {
                     key,
                     onCreate,
                     onMatch,
+                    ...graphTag(route.graphName),
                 });
-                node.setValue(graphNodeRecord(ref, node.labels, key) as any);
+                node.setValue(graphNodeRecord(ref, node.labels, key, route.graphName) as any);
             } else {
                 writes.add({ op: "mergeNode", ref, label: labelOf(node), key, onCreate, onMatch });
                 node.setValue({ id: ref, ...key } as any);
@@ -628,6 +756,8 @@ export class MergeWrite extends WriteOperation {
             key,
             onCreate,
             onMatch,
+            ...graphTag(route.graphName),
+            ...endpointTags(route.graphName ?? VIRTUAL_NAMESPACE, start, end),
         });
         bindRelationship(writes, rel, ref, start, end, key, route);
     }
@@ -675,6 +805,25 @@ export class DeleteWrite extends WriteOperation {
             e instanceof Relationship ? relationshipTargetOf(e) : nodeTargetOf(e)
         );
     }
+    /**
+     * A node may be referenced by relationships that another backend
+     * stores (a graph's relationship to a definition node, or to a node of
+     * a graph on another backend).  That backend cannot be changed by this
+     * query, so deleting the node would leave them dangling: reject it.
+     * Relationships stored by the node's own backend are checked by the
+     * backend itself, atomically.
+     */
+    protected async check(writes: WriteSet): Promise<void> {
+        const ctx = this.sourceContext;
+        if (ctx === null) return;
+        for (const element of this._elements) {
+            if (element instanceof Relationship) continue;
+            const value = nodeValue(element);
+            if (value === null || writes.refs.has(value.id)) continue;
+            const route = this.routeNode(writes, element, value);
+            await checkForeignReferences(ctx, route, value);
+        }
+    }
     protected apply(writes: WriteSet): void {
         for (const element of this._elements) {
             if (element instanceof Relationship) {
@@ -683,20 +832,21 @@ export class DeleteWrite extends WriteOperation {
                 const record = element.createdRecord ?? element.currentRecord(0);
                 this.routeRelationship(writes, element, record);
                 const scope = isGraphRecord(record)
-                    ? "graph"
+                    ? `graph:${record![GRAPH_KEY]}`
                     : `type:${element.type ?? record?._type}`;
                 if (!writes.markDeleted(`relationship:${scope}`, target)) continue;
                 writes.add({
                     op: "deleteRelationship",
                     target,
                     type: element.type ?? record?._type ?? null,
+                    ...tagOf(record),
                 });
             } else {
                 const value = nodeValue(element);
                 if (value === null) continue;
                 this.routeNode(writes, element, value);
                 const scope = isGraphRecord(value)
-                    ? "graph"
+                    ? `graph:${value[GRAPH_KEY]}`
                     : `label:${value._label ?? labelOf(element)}`;
                 if (!writes.markDeleted(`node:${scope}`, value.id)) continue;
                 writes.add({
@@ -704,42 +854,137 @@ export class DeleteWrite extends WriteOperation {
                     target: value.id,
                     label: labelOf(element),
                     detach: this._detach,
+                    ...tagOf(value),
                 });
             }
         }
     }
 }
 
-function describe(target: WriteTarget): string {
-    if (target.kind === "node") {
-        const labels = target.labels ?? (target.label !== null ? [target.label] : []);
-        return `(:${labels.join(":")})`;
+/**
+ * Reject the deletion of node `value` when relationships stored by
+ * another backend than `route`'s still reference it.
+ */
+async function checkForeignReferences(
+    ctx: SourceContext,
+    route: WriteRoute,
+    value: Record<string, any>
+): Promise<void> {
+    const ns = namespaceOf(value);
+    const sources: ConstructorParameters<typeof RelationshipSourceAccess>[1] = [];
+    const names: string[] = [];
+    for (const graph of ctx.graphs.values()) {
+        if (sameBackend(graph.writeBackend, route.backend)) continue;
+        sources.push({
+            type: null,
+            sourceLabel: null,
+            targetLabel: null,
+            provider: graph.relationshipProvider,
+            graph: graph.graphName,
+        });
+        names.push(graph.description);
     }
-    return `(:${target.sourceLabel ?? ""})-[:${target.type ?? ""}]->(:${target.targetLabel ?? ""})`;
+    if (ns !== VIRTUAL_NAMESPACE) {
+        for (const [type, byEndpoints] of Database.getInstance().relationships) {
+            for (const physical of byEndpoints.values()) {
+                if (physical.provider === null) continue;
+                const left = definitionEndpointNamespace(physical.source, ctx.graphs);
+                const right = definitionEndpointNamespace(physical.target, ctx.graphs);
+                if (left !== ns && right !== ns) continue;
+                sources.push({
+                    type,
+                    sourceLabel: physical.source?.label ?? null,
+                    targetLabel: physical.target?.label ?? null,
+                    provider: physical.provider,
+                    leftNamespace: left,
+                    rightNamespace: right,
+                });
+                names.push(`the definition of [:${type}]`);
+            }
+        }
+    }
+    if (sources.length === 0) return;
+    for (let i = 0; i < sources.length; i++) {
+        const access = new RelationshipSourceAccess(ctx, [sources[i]]);
+        for (const side of ["left", "right"] as const) {
+            for await (const page of access.expand(value.id, side, [], null, ns)) {
+                if (page.length > 0) {
+                    throw new Error(
+                        `Cannot delete node ${JSON.stringify(value.id)}: relationships stored in ${names[i]} still reference it; delete them first in a separate query`
+                    );
+                }
+            }
+        }
+    }
 }
 
-/** Route of a write through the default graph; it must declare `writes: true`. */
-function defaultRoute(graph: DefaultGraph | null, name: string): WriteRoute {
-    if (graph === null) {
+function describe(target: WriteTarget): string {
+    const prefix = target.graph != null ? `${target.graph}.` : "";
+    if (target.kind === "node") {
+        const labels = target.labels ?? (target.label !== null ? [target.label] : []);
+        return `(:${prefix}${labels.join(":")})`;
+    }
+    return `(:${target.sourceLabel ?? ""})-[:${prefix}${target.type ?? ""}]->(:${target.targetLabel ?? ""})`;
+}
+
+/** Route of a write through the graph `graphName`; it must declare `writes: true`. */
+function graphRoute(
+    graphs: ReadonlyMap<string, DefaultGraph>,
+    graphName: string,
+    name: string
+): WriteRoute {
+    if (graphName === DEFAULT_GRAPH && !graphs.has(DEFAULT_GRAPH)) {
         throw new Error(`Cannot write to ${name}: it has no CREATE VIRTUAL definition`);
     }
+    const graph = boundGraph(graphs, graphName);
     if (!graph.writable) {
         throw new Error(
-            `Cannot write to ${name}: the default graph backend ${graph.name} does not declare the writes capability`
+            graph.isDefault
+                ? `Cannot write to ${name}: the default graph backend ${graph.name} does not declare the writes capability`
+                : `Cannot write to ${name}: the backend ${graph.name} of graph ${graphName} does not declare the writes capability`
         );
     }
-    return { backend: graph.writeBackend, transactions: graph.transactional };
+    return {
+        backend: graph.writeBackend,
+        transactions: graph.transactional,
+        graphName: graph.graphName,
+    };
 }
 
 /**
- * Resolve where a write target goes before the query runs.  Labels and
- * types with a `CREATE VIRTUAL` definition go to that definition;
- * others go to the default graph when one is bound.  Returns `null` when
- * the route depends on the entity a row binds (unlabelled nodes and
- * untyped relationships with a default graph bound).
+ * Resolve where a write target goes before the query runs.  Graph-
+ * qualified labels and types go to their graph; other labels and types
+ * with a `CREATE VIRTUAL` definition go to that definition, the rest to
+ * the default graph when one is bound.  Returns `null` when the route
+ * depends on the entity a row binds (unlabelled nodes and untyped
+ * relationships while graphs are bound).
  */
-export function resolveTarget(target: WriteTarget, graph: DefaultGraph | null): WriteRoute | null {
+export function resolveTarget(
+    target: WriteTarget,
+    graphs: ReadonlyMap<string, DefaultGraph>
+): WriteRoute | null {
     const db = Database.getInstance();
+    const graph = graphs.get(DEFAULT_GRAPH) ?? null;
+    const qualifier = target.graph ?? null;
+    if (qualifier !== null) {
+        if (target.kind === "node" && qualifier === DEFAULT_GRAPH) {
+            const labels = target.labels ?? (target.label !== null ? [target.label] : []);
+            const defined = labels.find((label) => db.nodes.has(label));
+            if (target.clause !== undefined && defined !== undefined) {
+                throw new Error(
+                    `Cannot write to ${describe(target)}: (:${defined}) has a CREATE VIRTUAL definition, which takes precedence over the default graph`
+                );
+            }
+        }
+        if (target.kind === "relationship" && qualifier === DEFAULT_GRAPH && target.type !== null) {
+            if (db.relationships.has(target.type)) {
+                throw new Error(
+                    `Cannot write to ${describe(target)}: [:${target.type}] has a CREATE VIRTUAL definition, which takes precedence over the default graph`
+                );
+            }
+        }
+        return graphRoute(graphs, qualifier, describe(target));
+    }
     if (target.kind === "node") {
         if (target.clause !== undefined) {
             const labels = target.labels ?? (target.label !== null ? [target.label] : []);
@@ -753,20 +998,26 @@ export function resolveTarget(target: WriteTarget, graph: DefaultGraph | null): 
                               : "MERGE of a node requires a new variable with exactly one label"
                     );
                 }
-                return resolveWriteBackend({ kind: "node", label: labels[0] });
+                return resolveWriteBackend({ kind: "node", label: labels[0] }, graphs);
             }
             if (target.clause === "merge" && labels.length === 0) {
                 throw new Error("MERGE of a node requires at least one label");
             }
-            return defaultRoute(graph, describe(target));
+            return graphRoute(graphs, DEFAULT_GRAPH, describe(target));
         }
-        if (target.label === null) return graph === null ? resolveWriteBackend(target) : null;
-        if (graph === null || db.nodes.has(target.label)) return resolveWriteBackend(target);
-        return defaultRoute(graph, describe(target));
+        if (target.label === null) {
+            return graphs.size === 0 ? resolveWriteBackend(target, graphs) : null;
+        }
+        if (graph === null || db.nodes.has(target.label)) {
+            return resolveWriteBackend(target, graphs);
+        }
+        return graphRoute(graphs, DEFAULT_GRAPH, describe(target));
     }
-    if (target.type === null) return graph === null ? resolveWriteBackend(target) : null;
-    if (graph === null || db.relationships.has(target.type)) return resolveWriteBackend(target);
-    return defaultRoute(graph, describe(target));
+    if (target.type === null) return graphs.size === 0 ? resolveWriteBackend(target, graphs) : null;
+    if (graph === null || db.relationships.has(target.type)) {
+        return resolveWriteBackend(target, graphs);
+    }
+    return graphRoute(graphs, DEFAULT_GRAPH, describe(target));
 }
 
 /**
@@ -775,7 +1026,10 @@ export function resolveTarget(target: WriteTarget, graph: DefaultGraph | null): 
  * effective capabilities declare `writes: true` and whose body loads
  * from `fn($request)`.
  */
-export function resolveWriteBackend(target: WriteTarget): WriteRoute {
+export function resolveWriteBackend(
+    target: WriteTarget,
+    graphs: ReadonlyMap<string, DefaultGraph> = new Map()
+): WriteRoute {
     const db = Database.getInstance();
     const name = describe(target);
     let physical: any = undefined;
@@ -825,6 +1079,13 @@ export function resolveWriteBackend(target: WriteTarget): WriteRoute {
             args,
         },
         transactions: physical.provider.capabilities?.transactions === true,
+        endpoints:
+            target.kind === "relationship"
+                ? [
+                      definitionEndpointNamespace(physical.source ?? null, graphs),
+                      definitionEndpointNamespace(physical.target ?? null, graphs),
+                  ]
+                : undefined,
     };
 }
 
@@ -867,7 +1128,7 @@ export function prepareWrites(first: Operation, ctx: SourceContext): void {
     const writes = (ctx.writes ??= new WriteSet());
     for (const op of operations) {
         for (const target of op.targets) {
-            const route = resolveTarget(target, ctx.graph);
+            const route = resolveTarget(target, ctx.graphs);
             if (route !== null) writes.route(route);
         }
     }

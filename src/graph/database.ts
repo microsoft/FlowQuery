@@ -1,5 +1,7 @@
 import ASTNode from "../parsing/ast_node";
 import type DefaultGraph from "./default_graph";
+import { DEFAULT_GRAPH } from "./graph_records";
+import { qualifiedLabel } from "./namespaces";
 import Node from "./node";
 import PhysicalNode from "./physical_node";
 import PhysicalRelationship from "./physical_relationship";
@@ -20,7 +22,7 @@ class Database {
     private static instance: Database;
     private static _nodes: Map<string, PhysicalNode> = new Map();
     private static _relationships: Map<string, Map<string, PhysicalRelationship>> = new Map();
-    private static _defaultGraph: DefaultGraph | null = null;
+    private static _graphs: Map<string, DefaultGraph> = new Map();
 
     public static getInstance(): Database {
         if (!Database.instance) {
@@ -29,15 +31,21 @@ class Database {
         return Database.instance;
     }
     /**
-     * The default graph bound with `USE GRAPH fn($request)`, or `null`.
-     * Like virtual definitions it belongs to the process-wide registry;
-     * each query pins the binding that was current when it started.
+     * Graphs bound with `USE GRAPH [name =] fn($request)`, by name.  Like
+     * virtual definitions they belong to the process-wide registry; each
+     * query pins the bindings that were current when it started.
      */
-    public get defaultGraph(): DefaultGraph | null {
-        return Database._defaultGraph;
+    public get graphs(): ReadonlyMap<string, DefaultGraph> {
+        return Database._graphs;
     }
-    public set defaultGraph(graph: DefaultGraph | null) {
-        Database._defaultGraph = graph;
+    /** Bind `graph` under `name`, or clear the binding with `null`. */
+    public bindGraph(name: string, graph: DefaultGraph | null): void {
+        if (graph === null) Database._graphs.delete(name);
+        else Database._graphs.set(name, graph);
+    }
+    /** The default graph bound with `USE GRAPH fn($request)`, or `null`. */
+    public get defaultGraph(): DefaultGraph | null {
+        return Database._graphs.get(DEFAULT_GRAPH) ?? null;
     }
     /** Read-only access to registered nodes. */
     public get nodes(): Map<string, PhysicalNode> {
@@ -101,14 +109,14 @@ class Database {
             throw new Error("Relationship type is null");
         }
         const key = Database.endpointKey(
-            relationship.source?.label ?? null,
-            relationship.target?.label ?? null
+            qualifiedLabel(relationship.source),
+            qualifiedLabel(relationship.target)
         );
         const typeMap = Database._relationships.get(relationship.type);
         const existing = typeMap?.get(key);
         if (existing !== undefined && (existing.isStatic || isStatic)) {
             throw new Error(
-                `Virtual relationship [:${relationship.type}] between (:${relationship.source?.label ?? ""}) and (:${relationship.target?.label ?? ""}) already exists; DROP VIRTUAL ...-[:${relationship.type}]-... first`
+                `Virtual relationship [:${relationship.type}] between (:${qualifiedLabel(relationship.source) ?? ""}) and (:${qualifiedLabel(relationship.target) ?? ""}) already exists; DROP VIRTUAL ...-[:${relationship.type}]-... first`
             );
         }
         const physical = new PhysicalRelationship(null, relationship.type);
@@ -131,8 +139,8 @@ class Database {
         const typeMap = Database._relationships.get(relationship.type);
         if (!typeMap) return;
         const key = Database.endpointKey(
-            relationship.source?.label ?? null,
-            relationship.target?.label ?? null
+            qualifiedLabel(relationship.source),
+            qualifiedLabel(relationship.target)
         );
         typeMap.delete(key);
         if (typeMap.size === 0) {
@@ -145,13 +153,13 @@ class Database {
         }
         const typeMap = Database._relationships.get(relationship.type);
         const key = Database.endpointKey(
-            relationship.source?.label ?? null,
-            relationship.target?.label ?? null
+            qualifiedLabel(relationship.source),
+            qualifiedLabel(relationship.target)
         );
         const physical = typeMap?.get(key);
         if (physical === undefined) {
             throw new Error(
-                `Virtual relationship [:${relationship.type}] between (:${relationship.source?.label ?? ""}) and (:${relationship.target?.label ?? ""}) does not exist`
+                `Virtual relationship [:${relationship.type}] between (:${qualifiedLabel(relationship.source) ?? ""}) and (:${qualifiedLabel(relationship.target) ?? ""}) does not exist`
             );
         }
         physical.invalidateCache();
@@ -262,8 +270,8 @@ class Database {
     public getRelationship(relationship: Relationship): PhysicalRelationship | null {
         const typeMap = Database._relationships.get(relationship.type!);
         if (!typeMap) return null;
-        const src = relationship.source?.label ?? null;
-        const tgt = relationship.target?.label ?? null;
+        const src = qualifiedLabel(relationship.source);
+        const tgt = qualifiedLabel(relationship.target);
         // Exact match when labels are specified
         if (src !== null || tgt !== null) {
             return typeMap.get(Database.endpointKey(src, tgt)) ?? null;

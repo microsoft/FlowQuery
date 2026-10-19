@@ -30,12 +30,19 @@
  * A relationship `target` is the row's `id` column when the definition
  * returns one, otherwise `{left_id, right_id}`.
  *
- * **Default graph.**  Writes to labels and types without a definition go
- * to the default graph (`USE GRAPH fn($request)`); its requests carry
- * `graph: true`.  Targets are graph-wide entity ids, `createNode.labels`
- * may hold zero or several labels, `mergeNode` adds `labels` (all of
- * them; `label` is the first), and relationship changes carry the stored
- * `type` of the relationship.
+ * **Graphs.**  Writes to labels and types without a definition go to the
+ * default graph (`USE GRAPH fn($request)`), writes to graph-qualified
+ * labels (`hr.Person`) to the named graph (`USE GRAPH hr = fn($request)`);
+ * their requests carry `graph: true`.  Targets are graph-wide entity ids,
+ * `createNode.labels` may hold zero or several labels, `mergeNode` adds
+ * `labels` (all of them; `label` is the first), and relationship changes
+ * carry the stored `type` of the relationship.  Changes to a named graph
+ * carry `graphName`; graphs bound to the same function with the same
+ * arguments share one atomic change set.  `createRelationship` and
+ * `mergeRelationship` carry `startGraph` / `endGraph` when an endpoint
+ * lives in another namespace than the relationship: another graph's
+ * name, or `"virtual"` for a definition node (then with `startLabel` /
+ * `endLabel`).
  *
  * **Transactions.**  Backends declaring `transactions: true` (with
  * `writes: true`) run each query in one transaction, opened by the
@@ -46,6 +53,7 @@
  * `{version: 1, operation: "commit"}`, or `{operation: "rollback"}` when
  * it fails or is cancelled.
  */
+import { DEFAULT_GRAPH } from "./graph_records";
 import { canonicalKey } from "./source_context";
 
 export const WRITE_CONTRACT_VERSION = 1;
@@ -81,20 +89,45 @@ export interface WriteBackend {
     requestIndex: number;
     /** The other arguments, evaluated from the definition's call. */
     args: any[];
-    /** The backend is the default graph (requests carry `graph: true`). */
+    /** The backend serves graphs (requests carry `graph: true`). */
     graph?: boolean;
+    /** Name of the graph the backend was first routed for (descriptions only). */
+    graphName?: string;
 }
 
 /** Where a write goes: the backend function and whether it is transactional. */
 export interface WriteRoute {
     backend: WriteBackend;
     transactions: boolean;
+    /** The graph written to; absent for definitions. */
+    graphName?: string;
+    /** Relationship definitions: namespaces of the left and right endpoints. */
+    endpoints?: [string, string];
 }
 
-function describeBackend(backend: WriteBackend): string {
-    const name = backend.graph === true ? `default graph ${backend.name}` : backend.name;
+/**
+ * Two routes go through the same backend: the same function, called with
+ * the same arguments, for graphs or for definitions.  Graphs bound to the
+ * same backend share one change set, so writes across them are atomic.
+ */
+export function sameBackend(a: WriteBackend, b: WriteBackend): boolean {
+    return (
+        a.functionClass === b.functionClass &&
+        (a.graph === true) === (b.graph === true) &&
+        canonicalKey(a.args) === canonicalKey(b.args)
+    );
+}
+
+export function describeBackend(backend: WriteBackend): string {
     const args = backend.args.filter((_, i) => i !== backend.requestIndex);
-    return args.length > 0 ? `${name}(${args.map((a) => JSON.stringify(a)).join(", ")})` : name;
+    const fn =
+        args.length > 0
+            ? `${backend.name}(${args.map((a) => JSON.stringify(a)).join(", ")})`
+            : backend.name;
+    if (backend.graph !== true) return fn;
+    return backend.graphName !== undefined && backend.graphName !== DEFAULT_GRAPH
+        ? `graph ${backend.graphName} (${fn})`
+        : `default graph ${fn}`;
 }
 
 /** Query-scoped collector of write changes. */
@@ -131,11 +164,7 @@ export class WriteSet {
         const current = this.backend;
         if (current === null) {
             this.backend = route.backend;
-        } else if (
-            current.functionClass !== route.backend.functionClass ||
-            (current.graph === true) !== (route.backend.graph === true) ||
-            canonicalKey(current.args) !== canonicalKey(route.backend.args)
-        ) {
+        } else if (!sameBackend(current, route.backend)) {
             throw new Error(
                 `A query can only write through one backend function (${describeBackend(current)} and ${describeBackend(route.backend)})`
             );

@@ -18,7 +18,7 @@ class RelationshipData extends Data {
     public properties(): Record<string, any> | null {
         const current = this.current();
         if (current) {
-            const { left_id, right_id, _type, ...props } = current;
+            const { left_id, right_id, _type, _leftGraph, _rightGraph, ...props } = current;
             return props;
         }
         return null;

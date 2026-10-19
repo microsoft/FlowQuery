@@ -76,8 +76,8 @@ test("MERGE of nodes and relationships is idempotent", async () => {
         "MATCH (t:Team) OPTIONAL MATCH (p)-[m:MEMBER_OF]->(t) RETURN t.n AS n, count(m) AS members"
     );
     expect(counts.results).toEqual([{ n: 2, members: 1 }]);
-    expect(MemoryGraph.store().nodeCount).toBe(2);
-    expect(MemoryGraph.store().relationshipCount).toBe(1);
+    expect(MemoryGraph.store().nodeCount()).toBe(2);
+    expect(MemoryGraph.store().relationshipCount()).toBe(1);
 });
 
 test("reads its own writes within a query", async () => {
@@ -95,8 +95,8 @@ test("a failing query leaves the store unchanged", async () => {
         { k: 2 },
     ]);
     await run("MATCH (n) DETACH DELETE n");
-    expect(MemoryGraph.store().nodeCount).toBe(0);
-    expect(MemoryGraph.store().relationshipCount).toBe(0);
+    expect(MemoryGraph.store().nodeCount()).toBe(0);
+    expect(MemoryGraph.store().relationshipCount()).toBe(0);
 });
 
 test("unlabelled and multi-label nodes, label and property updates", async () => {
@@ -133,8 +133,8 @@ test("named stores are separate", async () => {
     expect((await run("MATCH (n:Item) RETURN n.name AS name")).results).toEqual([
         { name: "scratch" },
     ]);
-    expect(MemoryGraph.store("default").nodeCount).toBe(1);
-    expect(MemoryGraph.store("scratch").nodeCount).toBe(1);
+    expect(MemoryGraph.store("default").nodeCount()).toBe(1);
+    expect(MemoryGraph.store("scratch").nodeCount()).toBe(1);
 });
 
 test("a commit after a concurrent commit to the same store fails", async () => {
@@ -159,10 +159,10 @@ test("writes stay with the binding they were routed to", async () => {
     ).rejects.toThrow(
         `A query can only write through one backend function (default graph memorygraph and default graph memorygraph("d"))`
     );
-    expect(MemoryGraph.store("default").nodeCount).toBe(0);
-    expect(MemoryGraph.store("d").nodeCount).toBe(0);
+    expect(MemoryGraph.store("default").nodeCount()).toBe(0);
+    expect(MemoryGraph.store("d").nodeCount()).toBe(0);
     await run("USE GRAPH memorygraph($request, 'e'); CREATE (m:Bar)");
-    expect(MemoryGraph.store("e").nodeCount).toBe(1);
+    expect(MemoryGraph.store("e").nodeCount()).toBe(1);
 });
 
 test("is only usable as the default graph", async () => {

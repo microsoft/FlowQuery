@@ -1,8 +1,8 @@
 /**
- * Internal records of entities read from, or written to, the default
- * graph (`USE GRAPH fn($request)`).
+ * Internal records of entities read from, or written to, a graph bound
+ * with `USE GRAPH [name =] fn($request)`.
  *
- * A default-graph backend returns rows that keep metadata and user
+ * A graph backend returns rows that keep metadata and user
  * properties apart:
  *
  * - nodes: `{ id, labels: [...], properties: {...} }`
@@ -15,43 +15,102 @@
  * internal keys that are never returned to callers.
  */
 
-/** Marks a record that belongs to the default graph (provenance). */
+/** The graph bound with an unnamed `USE GRAPH` (also `USE GRAPH default = ...`). */
+export const DEFAULT_GRAPH = "default";
+/**
+ * Namespace of `CREATE VIRTUAL` definition entities.  Reserved: no graph
+ * can be bound under this name.
+ */
+export const VIRTUAL_NAMESPACE = "virtual";
+
+/** Name of the graph a record belongs to (absent for definition records). */
 export const GRAPH_KEY = "_graph";
-/** All stored labels of a default-graph node. */
+/** All stored labels of a graph node. */
 export const LABELS_KEY = "_labels";
-/** Exact user properties of a default-graph entity. */
+/** Exact user properties of a graph entity. */
 export const PROPERTIES_KEY = "_properties";
+/** Namespace of a relationship's left endpoint, when it differs from the relationship's. */
+export const LEFT_NAMESPACE_KEY = "_leftGraph";
+/** Namespace of a relationship's right endpoint, when it differs from the relationship's. */
+export const RIGHT_NAMESPACE_KEY = "_rightGraph";
 
 let graphRecordsSeen = false;
 
-/** True once any default-graph record was built (enables result cleanup). */
+/** True once any graph record was built (enables result cleanup). */
 export function graphRecordsInUse(): boolean {
     return graphRecordsSeen;
 }
 
 export function isGraphRecord(value: any): boolean {
-    return value !== null && typeof value === "object" && value[GRAPH_KEY] === true;
+    return value !== null && typeof value === "object" && typeof value[GRAPH_KEY] === "string";
 }
 
-/** Common provenance of a list of records: `true`, `false`, or `undefined` when mixed. */
-export function commonOrigin(records: Record<string, any>[]): boolean | undefined {
+/**
+ * Namespace of an entity: the name of the graph it was read from or
+ * written to, or {@link VIRTUAL_NAMESPACE} for definition entities.
+ * Ids are only meaningful within their namespace.
+ */
+export function namespaceOf(record: any): string {
+    return isGraphRecord(record) ? record[GRAPH_KEY] : VIRTUAL_NAMESPACE;
+}
+
+/** Namespace of the node at the `side` endpoint of a relationship record. */
+export function endpointNamespace(record: any, side: "left" | "right"): string {
+    const key = side === "left" ? LEFT_NAMESPACE_KEY : RIGHT_NAMESPACE_KEY;
+    const ns = record !== null && typeof record === "object" ? record[key] : undefined;
+    return typeof ns === "string" ? ns : namespaceOf(record);
+}
+
+/** Common value of `of` over `records`, or `undefined` when empty or mixed. */
+export function commonNamespace<T>(records: T[], of: (record: T) => string): string | undefined {
     if (records.length === 0) return undefined;
-    const first = isGraphRecord(records[0]);
+    const first = of(records[0]);
     for (const record of records) {
-        if (isGraphRecord(record) !== first) return undefined;
+        if (of(record) !== first) return undefined;
     }
     return first;
 }
 
-/** True when `record` may join a traversal step constrained to `origin`. */
-export function originMatches(record: any, origin: boolean | undefined): boolean {
-    return origin === undefined || isGraphRecord(record) === origin;
+/** Common namespace of node records. */
+export function commonOrigin(records: Record<string, any>[]): string | undefined {
+    return commonNamespace(records, namespaceOf);
+}
+
+/** True when node `record` may join a traversal step constrained to namespace `origin`. */
+export function originMatches(record: any, origin: string | undefined): boolean {
+    return origin === undefined || namespaceOf(record) === origin;
+}
+
+/** True when the `side` endpoint of relationship `record` is in namespace `origin`. */
+export function endpointMatches(
+    record: any,
+    side: "left" | "right",
+    origin: string | undefined
+): boolean {
+    return origin === undefined || endpointNamespace(record, side) === origin;
+}
+
+/**
+ * Tag a definition relationship row with the namespaces of its endpoints
+ * when they are graphs (definition endpoints default to definitions).
+ */
+export function withEndpointNamespaces(
+    row: Record<string, any>,
+    left: string,
+    right: string
+): Record<string, any> {
+    if (left === VIRTUAL_NAMESPACE && right === VIRTUAL_NAMESPACE) return row;
+    const out = { ...row };
+    if (left !== VIRTUAL_NAMESPACE) out[LEFT_NAMESPACE_KEY] = left;
+    if (right !== VIRTUAL_NAMESPACE) out[RIGHT_NAMESPACE_KEY] = right;
+    return out;
 }
 
 export function graphNodeRecord(
     id: any,
     labels: string[],
-    properties: Record<string, any>
+    properties: Record<string, any>,
+    graph: string = DEFAULT_GRAPH
 ): Record<string, any> {
     graphRecordsSeen = true;
     return {
@@ -59,7 +118,7 @@ export function graphNodeRecord(
         id,
         [LABELS_KEY]: [...labels],
         [PROPERTIES_KEY]: { ...properties },
-        [GRAPH_KEY]: true,
+        [GRAPH_KEY]: graph,
     };
 }
 
@@ -68,18 +127,24 @@ export function graphRelationshipRecord(
     type: string,
     leftId: any,
     rightId: any,
-    properties: Record<string, any>
+    properties: Record<string, any>,
+    graph: string = DEFAULT_GRAPH,
+    leftGraph: string = graph,
+    rightGraph: string = graph
 ): Record<string, any> {
     graphRecordsSeen = true;
-    return {
+    const record: Record<string, any> = {
         ...properties,
         id,
         left_id: leftId,
         right_id: rightId,
         _type: type,
         [PROPERTIES_KEY]: { ...properties },
-        [GRAPH_KEY]: true,
+        [GRAPH_KEY]: graph,
     };
+    if (leftGraph !== graph) record[LEFT_NAMESPACE_KEY] = leftGraph;
+    if (rightGraph !== graph) record[RIGHT_NAMESPACE_KEY] = rightGraph;
+    return record;
 }
 
 /** Stored labels of a node value (`_labels`, else its matched `_label`). */
@@ -98,14 +163,14 @@ export function userProperties(value: Record<string, any>): Record<string, any> 
 function containsGraphRecord(value: any): boolean {
     if (Array.isArray(value)) return value.some(containsGraphRecord);
     if (value !== null && typeof value === "object" && !(value instanceof Date)) {
-        if (value[GRAPH_KEY] === true) return true;
+        if (isGraphRecord(value)) return true;
         return Object.values(value).some(containsGraphRecord);
     }
     return false;
 }
 
 /**
- * A result value without the internal keys of default-graph records:
+ * A result value without the internal keys of graph records:
  * `value` itself when it holds none, otherwise a cleaned deep copy.
  */
 export function withoutGraphKeys<T>(value: T): T {
@@ -114,7 +179,7 @@ export function withoutGraphKeys<T>(value: T): T {
 }
 
 /**
- * Remove the internal keys of default-graph records, in place,
+ * Remove the internal keys of graph records, in place,
  * throughout a result value.  Other values are left untouched.
  */
 export function stripGraphKeys(value: any): any {
@@ -124,10 +189,12 @@ export function stripGraphKeys(value: any): any {
         return value;
     }
     if (value !== null && typeof value === "object" && !(value instanceof Date)) {
-        if (value[GRAPH_KEY] === true) {
+        if (isGraphRecord(value)) {
             delete value[GRAPH_KEY];
             delete value[LABELS_KEY];
             delete value[PROPERTIES_KEY];
+            delete value[LEFT_NAMESPACE_KEY];
+            delete value[RIGHT_NAMESPACE_KEY];
             delete value._label;
             delete value._type;
         }

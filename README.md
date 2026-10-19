@@ -689,7 +689,7 @@ UNWIND ["a", "b", "a", "c"] AS s RETURN count(DISTINCT s) AS cnt  // 3
 | `string_distance(a, b)`        | Normalized Levenshtein distance (0–1)  | `string_distance("kitten","sitting")`  |
 | `keys(obj)`                    | Keys of a map                          | `keys({a:1,b:2})` → `["a","b"]`        |
 | `properties(node_or_map)`      | Properties of a node or map            | `properties(n)`                        |
-| `type(val)`                    | Type name string                       | `type(123)` → `"number"`               |
+| `type(val)`                    | Type name; a relationship's type       | `type(123)` → `"number"`               |
 | `coalesce(val, ...)`           | First non-null argument                | `coalesce(null, 42)` → `42`            |
 | `head(list)`                   | First element                          | `head([1,2,3])` → `1`                  |
 | `tail(list)`                   | All but first element                  | `tail([1,2,3])` → `[2,3]`              |
@@ -782,6 +782,8 @@ MATCH (n {name: 'Alice'}) RETURN n                     // all nodes with name='A
 ```cypher
 MATCH (n:Person|Animal) RETURN n, labels(n) AS lbls
 ```
+
+**Several required labels:** `(n:Person:Employee)` matches nodes that carry every label. Nodes with several labels exist in the [default graph](#default-graph-use-graph), so this form is only available there.
 
 **Leftward direction:** `<-[:TYPE]-` reverses traversal direction.
 
@@ -1149,9 +1151,106 @@ FlowQuery processes rows one at a time, so a later clause sees the writes of the
 
 Other limits:
 
-- Writes go through **one backend function** per query.
-- Writes to labels without a definition, to eager definitions or to definitions without `writes: true` are rejected before the query runs. Write clauses are not allowed inside definitions.
+- Writes go through **one backend function** per query. The default graph and a definition count as different backends even when they use the same function.
+- Writes to labels without a definition (unless a [default graph](#default-graph-use-graph) is bound), to eager definitions or to definitions without `writes: true` are rejected before the query runs. Write clauses are not allowed inside definitions.
+- Deleting the same node or relationship several times in one query (for example once per row) sends a single delete.
 - `ON CREATE SET` / `ON MATCH SET` take `x.prop = v` and `x += {...}` items; schema changes (indexes, constraints) are not supported.
+
+#### Default Graph (`USE GRAPH`)
+
+Definitions expose curated views, one label or relationship type at a time. To read and write an **arbitrary** graph, with labels, types and properties nobody declared in advance, bind one backend function as the default graph:
+
+```cypher
+USE GRAPH backend($request)
+```
+
+From then on, every label and relationship type **without** a `CREATE VIRTUAL` definition is read and written through `backend`, even when the store is empty:
+
+```cypher
+CREATE (p:Person {name: 'Ada'})
+CREATE (x:Project {name: 'Beacon'})
+CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x)
+RETURN p.id AS person, x.id AS project
+```
+
+```cypher
+MATCH (p:Person)-[w:WORKS_ON]->(x:Project)
+RETURN p.name AS person, x.name AS project, w.role AS role
+```
+
+```cypher
+MERGE (p:Person {name: 'Ada'})
+ON MATCH SET p.title = 'Lead'
+RETURN p.id AS id
+```
+
+No definitions, property projections or schema refreshes are needed between these queries.
+
+**Built-in in-memory store.** To try this out, or for tests and small tools, bind the built-in `memorygraph` function; it needs no other setup:
+
+```cypher
+USE GRAPH memorygraph($request)
+```
+
+It is a schema-free store kept in the process memory (not persisted) with graph-wide integer ids starting at `1`, and it supports every operation of the default graph: lookups, expansions, predicate push-down, writes and transactions. Each query reads one consistent snapshot and writes to a private copy, so it reads its own writes and its changes become visible to other queries when it commits; a commit fails, and nothing is applied, when another query committed to the same store in the meantime. `memorygraph($request, 'name')` uses a separate named store; `MATCH (n) DETACH DELETE n` empties the bound one. From code, `MemoryGraph.store(name)` returns a store's committed state and `MemoryGraph.clear(name?)` discards stores.
+
+**Your own backend.** The function is registered like any async function, and its capabilities (`lookup`, `expand`, `predicates`, `writes`, `transactions`, ...) are read once from its `static capabilities` when `USE GRAPH` runs; a `static capabilities(request)` method receives `{version: 1, operation: "capabilities", graph: true}`. Arguments other than `$request` are evaluated once, when the graph is bound.
+
+```typescript
+@FunctionDef({
+    description: "Graph store",
+    category: "async",
+    parameters: [],
+    output: { description: "rows", type: "object" },
+})
+class Backend extends AsyncFunction {
+    static capabilities = { lookup: true, expand: true, predicates: true, writes: true };
+    async *generate(request: any) {
+        if (request.operation === "write") {
+            yield store.apply(request.changes); // { ids, stats }, atomically
+        } else {
+            yield* store.read(request); // graph rows, see below
+        }
+    }
+}
+await new Runner("USE GRAPH backend($request)").run();
+```
+
+```python
+@FunctionDef({"description": "Graph store", "category": "async", "parameters": [], "output": {"description": "rows", "type": "object"}})
+class Backend(AsyncFunction):
+    capabilities = {"lookup": True, "expand": True, "predicates": True, "writes": True}
+
+    async def generate(self, request):
+        if request["operation"] == "write":
+            yield store.apply(request["changes"])  # {"ids", "stats"}, atomically
+        else:
+            for row in store.read(request):  # graph rows, see below
+                yield row
+
+await Runner("USE GRAPH backend($request)").run()
+```
+
+The [reference adapter](#backend-aware-virtual-sources) (`mockbackend`) implements this protocol over an in-memory store, starting empty.
+
+**Scope.** The binding belongs to FlowQuery's graph registry, the same process-wide registry as virtual definitions: separate `Runner` objects share it. `USE GRAPH` replaces the current binding and `DROP GRAPH` clears it. A change affects the statements that follow in the same query and queries started afterwards; a query that is already running keeps the binding, and the query context, it started with. Without a binding nothing changes: writes and reads of undeclared labels fail exactly as before.
+
+**Precedence.** A label or type with a definition is always served by that definition, so its read-only status, projections and filters still apply; entities carrying a defined label or type are never returned by the default graph, and a default-graph node cannot be given a defined label. Unlabelled patterns (`(n)`, `-[r]->`) read the definitions and the default graph. A missing label or type simply matches nothing. Node and relationship ids only join within their own graph: a relationship read from the default graph never connects to a definition's node with a coincidentally equal id, and a mutation goes to the backend its entity was read from.
+
+**Read requests** are the usual `scan` / `lookup` / `expand` requests with `graph: true`; `label` is `null` for unlabelled patterns (any node), `labels` lists every required label of `(n:A:B)`, and `type` is `null` for untyped relationship patterns. `sourceLabel` / `targetLabel` are endpoint hints that may be ignored. The function answers with **graph rows**, which keep metadata and user properties apart:
+
+```js
+{ id: 1, labels: ["Person", "Employee"], properties: { name: "Ada" } }                  // nodes
+{ id: 7, type: "WORKS_ON", left_id: 1, right_id: 2, properties: { role: "lead" } }     // relationships
+```
+
+Ids are graph-wide and relationships must have one. In a pushed-down predicate, `id` (and `left_id` / `right_id` for relationships) means the metadata; every other name is a user property. As with any source, a superset is fine: FlowQuery re-checks labels, types, ids and properties.
+
+**Entities in queries.** A default-graph node behaves like any other node: `n.name` reads a property, `n.id` is its id, `labels(n)` returns every stored label, `type(r)` the stored type, and a property nobody has set yet is `null`. Metadata wins over a user property of the same name in that view (`n.id` is the entity id; `r.type` is the relationship type), while `properties(n)` / `properties(r)` always return the exact stored user properties, including keys such as `id`, `labels`, `type`, `left_id` or `right_id`. Returned entities contain their properties and `id` only; internal bookkeeping keys are removed.
+
+**Writes** use the [change-set protocol](#writing-to-backends) with `graph: true` on every request (`write`, `commit`, `rollback`), so they need `writes: true`; a read-only backend stays readable and rejects writes with a clear error. Node targets are graph-wide ids (`label` is informational and may be `null`), relationship changes carry the stored `type`, `createNode.labels` may hold zero or several labels (`CREATE (n)`, `CREATE (n:A:B)`), and `mergeNode` adds `labels` with every label of the pattern (`label` is the first). `MERGE` of a node needs at least one label; a new relationship still needs exactly one type, and its endpoints must be default-graph nodes. Without `transactions: true` the whole change set is sent once, when the query succeeds, and the query does not read its own writes; with it, the [transactional lifecycle](#transactions-read-your-writes) applies unchanged. The binding never enables transactions on its own. All reads and writes of a query share one read context (`openReadContext` / `closeReadContext`), signal and cleanup, exactly as for definitions.
+
+To see the binding with its effective capabilities, `LOAD JSON FROM source_capabilities() AS s` includes an entry with `kind: 'graph'`.
 
 ### Reserved Keywords as Identifiers
 
@@ -1214,6 +1313,7 @@ RETURN f.name, f.description, f.category
 │  MATCH (n:Label {prop: $param})      -- query parameter     │
 │  MATCH (n) ...                       -- unlabeled (all)     │
 │  MATCH (n:L1|L2) ...                 -- ORed node labels    │
+│  MATCH (n:L1:L2) ...                 -- all labels (graph)  │
 │  MATCH (a)-[:TYPE]->(b)              -- rightward           │
 │  MATCH (a)<-[:TYPE]-(b)              -- leftward            │
 │  MATCH (a)-[:TYPE*0..3]->(b)         -- variable length     │
@@ -1221,8 +1321,9 @@ RETURN f.name, f.description, f.category
 │  MATCH p=(a)-[:TYPE]->(b)            -- pattern variable    │
 │  OPTIONAL MATCH (a)-[:TYPE]->(b)     -- null if no match    │
 ├─────────────────────────────────────────────────────────────┤
-│  WRITES (definitions with writes: true)                     │
+│  WRITES (definitions with writes: true, or default graph)   │
 ├─────────────────────────────────────────────────────────────┤
+│  USE GRAPH fn($request)  ·  DROP GRAPH  -- default graph    │
 │  CREATE (n:Label {...})  ·  CREATE (a)-[:TYPE {...}]->(b)   │
 │  MERGE (n:Label {key}) [ON CREATE SET ...] [ON MATCH SET ..]│
 │  SET n.prop = v, n += {...}, n:Label                        │

@@ -6,6 +6,7 @@ from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set, Union
 
 from ..parsing.ast_node import ASTNode
+from .graph_records import common_origin, is_graph_record, origin_matches
 from .hops import Hops
 from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
@@ -174,6 +175,9 @@ class Relationship(ASTNode):
             if record is None:
                 raise ValueError("No current relationship data available")
             if key not in record:
+                # Default-graph relationships have no fixed columns.
+                if is_graph_record(record):
+                    return False
                 raise ValueError("Relationship does not have property")
             if record[key] != expression.value():
                 return False
@@ -299,10 +303,14 @@ class Relationship(ASTNode):
     def _left_id_or_right_id(self) -> str:
         return "left_id" if self._direction == "left" else "right_id"
 
-    async def find(self, left_id: str, hop: int = 0) -> AsyncGenerator[None, None]:
-        """Find relationships starting from the given node ID."""
+    async def find(
+        self, left_id: str, hop: int = 0, origin: Optional[bool] = None
+    ) -> AsyncGenerator[None, None]:
+        """Traverse the relationships anchored at node `left_id`.  `origin`
+        is the graph provenance of that node: relationships of the other
+        graph never join it (see :class:NodeSourceAccess)."""
         if self._access is not None:
-            async with aclosing(self._deferred_find(left_id, hop)) as gen:
+            async with aclosing(self._deferred_find(left_id, hop, origin)) as gen:
                 async for _ in gen:
                     yield
             return
@@ -321,13 +329,16 @@ class Relationship(ASTNode):
                 if self._hops and self._hops.multi() and self._hops.min == 0 and self._target:
                     # For zero-hop, target finds the same node as source (left_id)
                     # No relationship match is pushed since no edge is traversed
-                    async for _ in self._target.find(left_id, hop):
+                    async for _ in self._target.find(left_id, hop, origin):
                         yield
 
             while self._data and self._data.find(left_id, hop, self._direction):
                 data = self._data.current(hop)
                 if data is None:
                     continue
+                if not origin_matches(data, origin):
+                    continue
+                next_origin = is_graph_record(data)
                 id = data[self._left_id_or_right_id()]
                 if hop + 1 >= self._hops.min:
                     self.set_value(self, left_id)
@@ -339,10 +350,10 @@ class Relationship(ASTNode):
                         continue
                     try:
                         if self._target:
-                            async for _ in self._target.find(id, hop):
+                            async for _ in self._target.find(id, hop, next_origin):
                                 yield
                         if hop + 1 < self._hops.max and not self._matches.is_circular(id):
-                            async for _ in self.find(id, hop + 1):
+                            async for _ in self.find(id, hop + 1, next_origin):
                                 yield
                     finally:
                         self.release(claimed)
@@ -353,7 +364,7 @@ class Relationship(ASTNode):
                     if claimed is None:
                         continue
                     try:
-                        async for _ in self.find(id, hop + 1):
+                        async for _ in self.find(id, hop + 1, next_origin):
                             yield
                     finally:
                         self.release(claimed)
@@ -361,7 +372,9 @@ class Relationship(ASTNode):
             # Restore original source node
             self._source = original
 
-    async def _deferred_find(self, left_id: Any, hop: int) -> AsyncGenerator[None, None]:
+    async def _deferred_find(
+        self, left_id: Any, hop: int, origin: Optional[bool]
+    ) -> AsyncGenerator[None, None]:
         original = self._source
         if hop > 0:
             self._source = self._target
@@ -373,7 +386,7 @@ class Relationship(ASTNode):
                 and self._hops.min == 0
                 and self._target is not None
             ):
-                async with aclosing(self._target.find(left_id, hop)) as zero:
+                async with aclosing(self._target.find(left_id, hop, origin)) as zero:
                     async for _ in zero:
                         yield
             all_terms, args = self.source_terms()
@@ -381,7 +394,9 @@ class Relationship(ASTNode):
             terms = all_terms if hop + 1 >= self._hops.min else []
             target = self._target
             access = self._access
-            async with aclosing(access.expand(left_id, self.anchor_side, terms, args)) as pages:
+            async with aclosing(
+                access.expand(left_id, self.anchor_side, terms, args, origin)
+            ) as pages:
                 async for page in pages:
                     target_access = target.access if target is not None else None
                     if (
@@ -392,7 +407,10 @@ class Relationship(ASTNode):
                     ):
                         t_terms, t_args = target.source_terms()
                         await target_access.prefetch(
-                            [row.get(self.next_field) for row in page], t_terms, t_args
+                            [row.get(self.next_field) for row in page],
+                            t_terms,
+                            t_args,
+                            common_origin(page),
                         )
                     for row in page:
                         async with aclosing(self._visit(row, left_id, hop)) as visit:
@@ -406,6 +424,7 @@ class Relationship(ASTNode):
     ) -> AsyncGenerator[None, None]:
         self._frames[hop] = record
         id_: Any = record.get(self.next_field)
+        next_origin = is_graph_record(record)
         if hop + 1 >= self._hops.min:
             if not self.matches_record(record):
                 return
@@ -415,11 +434,11 @@ class Relationship(ASTNode):
             self.push_match(record, left_id)
             try:
                 if self._target is not None:
-                    async with aclosing(self._target.find(id_, hop)) as found:
+                    async with aclosing(self._target.find(id_, hop, next_origin)) as found:
                         async for _ in found:
                             yield
                 if hop + 1 < self._hops.max and not self._matches.is_circular(id_):
-                    async with aclosing(self.find(id_, hop + 1)) as deeper:
+                    async with aclosing(self.find(id_, hop + 1, next_origin)) as deeper:
                         async for _ in deeper:
                             yield
             finally:
@@ -430,7 +449,7 @@ class Relationship(ASTNode):
             if claimed is None:
                 return
             try:
-                async with aclosing(self.find(id_, hop + 1)) as below:
+                async with aclosing(self.find(id_, hop + 1, next_origin)) as below:
                     async for _ in below:
                         yield
             finally:
@@ -440,6 +459,9 @@ class Relationship(ASTNode):
         """Re-check relationship property constraints against a provider row."""
         for key, expression in self._properties.items():
             if key not in record:
+                # Default-graph relationships have no fixed columns.
+                if is_graph_record(record):
+                    return False
                 raise ValueError("Relationship does not have property")
             if record[key] != expression.value():
                 return False

@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import type DefaultGraph from "./default_graph";
 import Node from "./node";
 import PhysicalNode from "./physical_node";
 import PhysicalRelationship from "./physical_relationship";
@@ -19,12 +20,24 @@ class Database {
     private static instance: Database;
     private static _nodes: Map<string, PhysicalNode> = new Map();
     private static _relationships: Map<string, Map<string, PhysicalRelationship>> = new Map();
+    private static _defaultGraph: DefaultGraph | null = null;
 
     public static getInstance(): Database {
         if (!Database.instance) {
             Database.instance = new Database();
         }
         return Database.instance;
+    }
+    /**
+     * The default graph bound with `USE GRAPH fn($request)`, or `null`.
+     * Like virtual definitions it belongs to the process-wide registry;
+     * each query pins the binding that was current when it started.
+     */
+    public get defaultGraph(): DefaultGraph | null {
+        return Database._defaultGraph;
+    }
+    public set defaultGraph(graph: DefaultGraph | null) {
+        Database._defaultGraph = graph;
     }
     /** Read-only access to registered nodes. */
     public get nodes(): Map<string, PhysicalNode> {

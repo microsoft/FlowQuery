@@ -10,6 +10,7 @@ from ...compute.provenance import (
     RowSegment,
     merge_provenance_segment,
 )
+from ...graph.graph_records import strip_graph_keys
 from ..ast_node import ASTNode
 from .limit import Limit
 from .order_by import OrderBy
@@ -125,6 +126,7 @@ class Return(Projection):
             # it from the projected value so it doesn't leak into results.
             if isinstance(value, dict) and "_label" in value:
                 value.pop("_label", None)
+            strip_graph_keys(value)
             record[alias] = value
         # Capture sort-key values while expression bindings are still live.
         if self._order_by is not None:

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ..graph.bindings import Bindings
 from ..graph.data_cache import DataCache
 from ..graph.data_resolver import DataResolver
+from ..graph.database import Database
 from ..graph.node import Node as GraphNode
 from ..graph.pattern import Pattern
 from ..graph.relationship import Relationship as GraphRelationship
@@ -19,6 +20,7 @@ from ..parsing.functions.async_function import AsyncFunction
 from ..parsing.operations.aggregated_with import AggregatedWith
 from ..parsing.operations.create_node import CreateNode
 from ..parsing.operations.create_relationship import CreateRelationship
+from ..parsing.operations.definition_backend import references_request
 from ..parsing.operations.delete_node import DeleteNode
 from ..parsing.operations.delete_relationship import DeleteRelationship
 from ..parsing.operations.load import Load
@@ -26,6 +28,7 @@ from ..parsing.operations.match import Match
 from ..parsing.operations.operation import Operation
 from ..parsing.operations.return_op import Return
 from ..parsing.operations.union import Union
+from ..parsing.operations.use_graph import DropGraph, UseGraph
 from ..parsing.operations.write import (
     WriteOperation,
     commit_writes,
@@ -322,7 +325,7 @@ class Runner:
 
     @staticmethod
     def _assign_source_context(node: ASTNode, ctx: Optional[SourceContext]) -> None:
-        if isinstance(node, (Match, AsyncFunction, WriteOperation)):
+        if isinstance(node, (Match, AsyncFunction, WriteOperation, UseGraph, DropGraph)):
             node.source_context = ctx
         for child in node.get_children():
             Runner._assign_source_context(child, ctx)
@@ -376,6 +379,8 @@ class Runner:
                 self._options.provenance is True,
             )
             self._source_context.parameters = dict(self._options.parameters or {})
+            # Pin the default graph for the whole query.
+            self._source_context.graph = Database.get_instance().default_graph
             resolver.data_cache = DataCache(
                 provenance=self._options.provenance,
                 source_context=self._source_context,
@@ -536,6 +541,12 @@ class Runner:
         (inherited by nested sub-query runners); a missing value is an
         error.
         """
+        if isinstance(node, UseGraph):
+            # `$request` is a placeholder filled per backend request.
+            for child in node.function.get_children():
+                if not references_request(child):
+                    self._bind_parameters(child)
+            return
         if isinstance(node, ParameterReference):
             node.parameter_value = self._resolve_parameter(node)
         for child in node.get_children():

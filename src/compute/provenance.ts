@@ -1,3 +1,4 @@
+import { userProperties } from "../graph/graph_records";
 import Node from "../graph/node";
 import NodeReference from "../graph/node_reference";
 import Relationship from "../graph/relationship";
@@ -285,9 +286,12 @@ export class ProvenanceSites {
 
 /**
  * Shallow-copy a node record's user-visible property values, stripping
- * `id` and the internal `_label` injected by `DataResolver`.
+ * `id` and the internal `_label` injected by `DataResolver` (default-graph
+ * nodes report their exact stored properties).
  */
 function extractNodeProperties(record: Record<string, any>): Record<string, any> {
+    const stored = userProperties(record);
+    if (stored !== undefined) return { ...stored };
     const out: Record<string, any> = {};
     for (const key of Object.keys(record)) {
         if (key === "id" || key === "_label") continue;

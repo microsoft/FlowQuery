@@ -1,4 +1,5 @@
 import { ProvenanceSource, RowProvenance } from "../../compute/provenance";
+import { withoutGraphKeys } from "../../graph/graph_records";
 import Expression from "../expressions/expression";
 import GroupBy from "./group_by";
 import Operation from "./operation";
@@ -26,7 +27,7 @@ class AggregatedReturn extends Return {
     }
     public get results(): Record<string, any>[] {
         const { results } = this._buildAggregateOutput();
-        return results;
+        return results.map(withoutGraphKeys);
     }
     public async finish(): Promise<void> {
         if (this._provenanceSink !== null) {

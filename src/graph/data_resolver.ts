@@ -1,5 +1,6 @@
 import DataCache from "./data_cache";
 import Database from "./database";
+import type DefaultGraph from "./default_graph";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import NodeReference from "./node_reference";
@@ -14,6 +15,7 @@ import {
     RelationshipSourceAccess,
 } from "./source_access";
 import type SourceContext from "./source_context";
+import { materializeScan } from "./statement_source";
 import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
 /**
@@ -55,6 +57,78 @@ class DataResolver {
     }
 
     /**
+     * Node definitions (and default-graph entries) an element reads from.
+     * Labels with a `CREATE VIRTUAL` definition are always served by it;
+     * other labels, and unlabelled patterns, fall back to the default
+     * graph pinned by the query, if any.
+     */
+    private static nodeCandidates(
+        element: Node,
+        db: Database,
+        graph: DefaultGraph | null
+    ): {
+        physical: [string, PhysicalNode][];
+        graph: { label: string | null; labels: string[] | null }[];
+    } {
+        const physical: [string, PhysicalNode][] = [];
+        const graphEntries: { label: string | null; labels: string[] | null }[] = [];
+        if (element.allLabels) {
+            if (graph === null || element.labels.some((label) => db.nodes.has(label))) {
+                throw new Error(
+                    `Node pattern (:${element.labels.join(":")}) requires every label: this is only supported for labels without a CREATE VIRTUAL definition, read through the default graph (USE GRAPH)`
+                );
+            }
+            graphEntries.push({ label: element.labels[0], labels: [...element.labels] });
+            return { physical, graph: graphEntries };
+        }
+        if (element.labels.length === 0) {
+            physical.push(...db.nodes.entries());
+            if (graph !== null) graphEntries.push({ label: null, labels: null });
+            return { physical, graph: graphEntries };
+        }
+        for (const label of element.labels) {
+            const p = db.nodes.get(label);
+            if (p !== undefined) physical.push([label, p]);
+            else if (graph !== null) graphEntries.push({ label, labels: null });
+        }
+        return { physical, graph: graphEntries };
+    }
+
+    /** Endpoint label hint of a pattern node (sent to the default graph). */
+    private static labelHint(node: Node | null): string | null {
+        const labels = DataResolver.resolveLabels(node);
+        if (labels.length === 1) return labels[0];
+        if (node !== null && node.allLabels) return labels[0];
+        if (
+            node instanceof NodeReference &&
+            node.reference instanceof Node &&
+            node.reference.allLabels
+        ) {
+            return labels[0];
+        }
+        return null;
+    }
+
+    /** Default-graph entries for a relationship pattern (types without definitions). */
+    private static relationshipGraphEntries(
+        relationship: Relationship,
+        db: Database,
+        graph: DefaultGraph | null
+    ): { type: string | null; sourceLabel: string | null; targetLabel: string | null }[] {
+        if (graph === null) return [];
+        const [left, right] =
+            relationship.direction === "left"
+                ? [relationship.target, relationship.source]
+                : [relationship.source, relationship.target];
+        const sourceLabel = DataResolver.labelHint(left);
+        const targetLabel = DataResolver.labelHint(right);
+        if (relationship.types.length === 0) return [{ type: null, sourceLabel, targetLabel }];
+        return relationship.types
+            .filter((type) => !db.relationships.has(type))
+            .map((type) => ({ type, sourceLabel, targetLabel }));
+    }
+
+    /**
      * Returns provider-backed access for an element when every physical
      * definition it can match is backed by a source provider; otherwise
      * `null`, and the element is loaded eagerly through {@link getData}.
@@ -64,41 +138,46 @@ class DataResolver {
         ctx: SourceContext
     ): NodeAccess | RelationshipAccess | null {
         const db = Database.getInstance();
+        const graph = ctx.graph;
         if (element instanceof Node) {
-            let candidates: [string, PhysicalNode][];
-            if (element.labels.length === 0) {
-                candidates = Array.from(db.nodes.entries());
-            } else {
-                candidates = [];
-                for (const label of element.labels) {
-                    const physical = db.nodes.get(label);
-                    if (physical !== undefined) candidates.push([label, physical]);
-                }
-            }
+            const candidates = DataResolver.nodeCandidates(element, db, graph);
             if (
-                candidates.length === 0 ||
-                !candidates.every(([, p]) => DataResolver.deferrable(p, ctx))
+                candidates.physical.length + candidates.graph.length === 0 ||
+                !candidates.physical.every(([, p]) => DataResolver.deferrable(p, ctx))
             ) {
                 return null;
             }
-            return new NodeSourceAccess(
-                ctx,
-                candidates.map(([label, p]) => ({ label, provider: p.provider! }))
-            );
+            return new NodeSourceAccess(ctx, [
+                ...candidates.physical.map(([label, p]) => ({ label, provider: p.provider! })),
+                ...candidates.graph.map((g) => ({
+                    label: g.label,
+                    labels: g.labels,
+                    provider: graph!.nodeProvider,
+                    graph: true,
+                })),
+            ]);
         }
         const entries = this.getRelationshipEntries(element, db);
-        if (entries.length === 0 || !entries.every(([, p]) => DataResolver.deferrable(p, ctx))) {
+        const graphEntries = DataResolver.relationshipGraphEntries(element, db, graph);
+        if (
+            entries.length + graphEntries.length === 0 ||
+            !entries.every(([, p]) => DataResolver.deferrable(p, ctx))
+        ) {
             return null;
         }
-        return new RelationshipSourceAccess(
-            ctx,
-            entries.map(([type, p]) => ({
+        return new RelationshipSourceAccess(ctx, [
+            ...entries.map(([type, p]) => ({
                 type,
                 sourceLabel: p.source?.label ?? null,
                 targetLabel: p.target?.label ?? null,
                 provider: p.provider!,
-            }))
-        );
+            })),
+            ...graphEntries.map((g) => ({
+                ...g,
+                provider: graph!.relationshipProvider,
+                graph: true,
+            })),
+        ]);
     }
 
     public async schema(): Promise<Record<string, any>[]> {
@@ -145,57 +224,57 @@ class DataResolver {
 
     public async getData(element: Node | Relationship): Promise<NodeData | RelationshipData> {
         const db = Database.getInstance();
+        const ctx = this._sourceContext;
+        const graph = ctx?.graph ?? null;
         if (element instanceof Node) {
             const args = DataResolver.extractArgs(element.properties);
-            if (element.labels.length === 0) {
-                // Unlabeled node: match all physical nodes in the database
-                const allRecords: NodeRecord[] = [];
-                for (const [label, physical] of db.nodes) {
-                    const data = await this._dataCache.get(`node:${label}`, physical, null);
-                    for (const record of data as NodeRecord[]) {
-                        const enriched = { ...record, _label: label };
-                        const src = getVirtualSource(record);
-                        if (src !== undefined) attachVirtualSource(enriched, src);
-                        allRecords.push(enriched);
-                    }
-                }
-                return new NodeData(allRecords);
-            }
-            if (element.labels.length > 1) {
-                // ORed labels: collect from all matching physical nodes
-                const allRecords: NodeRecord[] = [];
-                for (const lbl of element.labels) {
-                    const physical = db.nodes.get(lbl);
-                    if (physical) {
-                        const data = await this._dataCache.get(`node:${lbl}`, physical, args);
-                        for (const record of data as NodeRecord[]) {
-                            const enriched = { ...record, _label: lbl };
-                            const src = getVirtualSource(record);
-                            if (src !== undefined) attachVirtualSource(enriched, src);
-                            allRecords.push(enriched);
-                        }
-                    }
-                }
-                return new NodeData(allRecords);
-            }
-            const node = db.getNode(element);
-            if (node === null) {
+            const candidates = DataResolver.nodeCandidates(element, db, graph);
+            if (
+                element.labels.length === 1 &&
+                candidates.physical.length === 0 &&
+                candidates.graph.length === 0
+            ) {
                 throw new Error(`Physical node not found for label ${element.label}`);
             }
-            const data = await this._dataCache.get(`node:${element.label}`, node, args);
-            const label = element.label;
-            const records = (data as NodeRecord[]).map((record) => {
-                const enriched = { ...record, _label: label };
-                const src = getVirtualSource(record);
-                if (src !== undefined) attachVirtualSource(enriched, src);
-                return enriched;
-            });
-            return new NodeData(records);
+            // Unlabelled and ORed labels collect from every matching definition.
+            const allRecords: NodeRecord[] = [];
+            for (const [label, physical] of candidates.physical) {
+                const data = await this._dataCache.get(
+                    `node:${label}`,
+                    physical,
+                    element.labels.length === 0 ? null : args
+                );
+                for (const record of data as NodeRecord[]) {
+                    const enriched = { ...record, _label: label };
+                    const src = getVirtualSource(record);
+                    if (src !== undefined) attachVirtualSource(enriched, src);
+                    allRecords.push(enriched);
+                }
+            }
+            for (const entry of candidates.graph) {
+                const rows = await materializeScan(
+                    graph!.nodeProvider,
+                    "node",
+                    graph!.description,
+                    entry.labels !== null
+                        ? { label: entry.label, labels: entry.labels }
+                        : { label: entry.label },
+                    null,
+                    ctx
+                );
+                for (const row of rows) {
+                    allRecords.push(
+                        (entry.label !== null ? { ...row, _label: entry.label } : row) as NodeRecord
+                    );
+                }
+            }
+            return new NodeData(allRecords);
         } else if (element instanceof Relationship) {
             const args = DataResolver.extractArgs(element.properties);
             const entries = this.getRelationshipEntries(element, db);
-            if (entries.length === 0) {
-                if (element.types.length === 0) {
+            const graphEntries = DataResolver.relationshipGraphEntries(element, db, graph);
+            if (entries.length === 0 && graphEntries.length === 0) {
+                if (element.types.length === 0 || graph !== null) {
                     return new RelationshipData([]);
                 }
                 throw new Error(
@@ -216,6 +295,17 @@ class DataResolver {
                     if (src !== undefined) attachVirtualSource(enriched, src);
                     allRecords.push(enriched);
                 }
+            }
+            for (const entry of graphEntries) {
+                const rows = await materializeScan(
+                    graph!.relationshipProvider,
+                    "relationship",
+                    graph!.description,
+                    entry,
+                    null,
+                    ctx
+                );
+                allRecords.push(...(rows as RelationshipRecord[]));
             }
             return new RelationshipData(allRecords);
         } else {

@@ -32,6 +32,7 @@ class SourceCapabilities(AsyncFunction):
 
     Nodes: ``{kind: 'node', label, mode, capabilities}``
     Relationships: ``{kind: 'relationship', type, from_label, to_label, mode, capabilities}``
+    Default graph: ``{kind: 'graph', function, mode: 'graph', capabilities}``
 
     ``mode`` is ``'eager'`` (legacy definition, no capabilities),
     ``'statement'`` (``CREATE VIRTUAL`` opted into the source contract) or
@@ -65,3 +66,12 @@ class SourceCapabilities(AsyncFunction):
                     "mode": _mode_of(rel),
                     "capabilities": getattr(provider, "capabilities", None) if provider is not None else None,
                 }
+        ctx = self.source_context
+        graph = ctx.graph if ctx is not None else db.default_graph
+        if graph is not None:
+            yield {
+                "kind": "graph",
+                "function": graph.name,
+                "mode": "graph",
+                "capabilities": graph.capabilities,
+            }

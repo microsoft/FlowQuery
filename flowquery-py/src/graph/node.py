@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.expression import Expression
+from .graph_records import common_origin, is_graph_record, labels_of, origin_matches
 from .node_data import NodeData, NodeRecord
 from .source_access import PushedPredicate, SourceTerms, build_terms
 
@@ -26,6 +27,8 @@ class Node(ASTNode):
         self._identifier = identifier
         self._label = label
         self._labels: list[str] = [label] if label is not None else []
+        #: (n:A:B): a match must carry every label (default graph only).
+        self._all_labels = False
         self._properties: Dict[str, Expression] = {}
         self._value: Optional['NodeRecord'] = None
         self._incoming: Optional['Relationship'] = None
@@ -59,6 +62,16 @@ class Node(ASTNode):
     def labels(self, value: list[str]) -> None:
         self._labels = value
         self._label = value[0] if value else None
+
+    @property
+    def all_labels(self) -> bool:
+        """True for ``(n:A:B)`` (every label required), False for a single
+        label or ``(n:A|B)`` (any of the labels)."""
+        return self._all_labels and len(self._labels) > 1
+
+    @all_labels.setter
+    def all_labels(self, value: bool) -> None:
+        self._all_labels = value
 
     @property
     def properties(self) -> Dict[str, Expression]:
@@ -138,8 +151,17 @@ class Node(ASTNode):
     def source_terms(self) -> SourceTerms:
         return build_terms(self._properties, self._pushed_predicates)
 
+    def matches_labels(self, record: Dict[str, Any]) -> bool:
+        """Every label of ``(n:A:B)`` is carried by the row (always true otherwise)."""
+        if not self.all_labels:
+            return True
+        labels = labels_of(record)
+        return all(label in labels for label in self._labels)
+
     def matches_record(self, record: Dict[str, Any]) -> bool:
         """Residual check of the pattern's own property constraints against a row."""
+        if not self.matches_labels(record):
+            return False
         for key, expression in self._properties.items():
             if key not in record:
                 return False
@@ -159,17 +181,24 @@ class Node(ASTNode):
                 current = self._data.current()
                 if current is not None:
                     self.set_value(current)
-                    if not self._matches_properties():
+                    if not self._matches_properties() or not self.matches_labels(current):
                         continue
                     if self._outgoing and self._value:
-                        async for _ in self._outgoing.find(self._value['id']):
+                        async for _ in self._outgoing.find(
+                            self._value['id'], 0, is_graph_record(self._value)
+                        ):
                             yield
                     else:
                         yield
 
-    async def find(self, id_: Any, hop: int = 0) -> AsyncGenerator[None, None]:
+    async def find(
+        self, id_: Any, hop: int = 0, origin: Optional[bool] = None
+    ) -> AsyncGenerator[None, None]:
+        """Bind the node with id ``id_``, reached through a relationship.
+        ``origin`` keeps the step within the relationship's graph (see
+        :class:`NodeSourceAccess`)."""
         if self._access is not None:
-            async with aclosing(self._deferred_find(id_, hop)) as gen:
+            async with aclosing(self._deferred_find(id_, hop, origin)) as gen:
                 async for _ in gen:
                     yield
             return
@@ -178,6 +207,8 @@ class Node(ASTNode):
             while self._data.find(id_, hop):
                 current = self._data.current(hop)
                 if current is not None:
+                    if not origin_matches(current, origin):
+                        continue
                     self.set_value(current)
                     # Always record this node as the endNode of the incoming
                     # relationship match. For variable-length patterns, the same
@@ -189,10 +220,12 @@ class Node(ASTNode):
                     # the final node in a *m..n traversal.
                     if self._incoming:
                         self._incoming.set_end_node(self)
-                    if not self._matches_properties(hop):
+                    if not self._matches_properties(hop) or not self.matches_labels(current):
                         continue
                     if self._outgoing and self._value:
-                        async for _ in self._outgoing.find(self._value['id'], hop):
+                        async for _ in self._outgoing.find(
+                            self._value['id'], hop, is_graph_record(self._value)
+                        ):
                             yield
                     else:
                         yield
@@ -216,20 +249,24 @@ class Node(ASTNode):
             async for page in page_iter:
                 rows = [row for row in page if self.matches_record(row)]
                 if self._outgoing is not None and len(rows) > 1:
-                    await Node.prefetch_chain(self, [row.get("id") for row in rows])
+                    await Node.prefetch_chain(self, rows)
                 for row in rows:
                     self.set_value(row)
                     if self._outgoing:
                         row_id: Any = row.get("id")
-                        async with aclosing(self._outgoing.find(row_id)) as inner:
+                        async with aclosing(
+                            self._outgoing.find(row_id, 0, is_graph_record(row))
+                        ) as inner:
                             async for _ in inner:
                                 yield
                     else:
                         yield
 
-    async def _deferred_find(self, id_: Any, hop: int) -> AsyncGenerator[None, None]:
+    async def _deferred_find(
+        self, id_: Any, hop: int, origin: Optional[bool]
+    ) -> AsyncGenerator[None, None]:
         terms, args = self.source_terms()
-        rows = await self._access.lookup(id_, terms, args)
+        rows = await self._access.lookup(id_, terms, args, origin)
         for row in rows:
             self.set_value(row)
             if self._incoming:
@@ -237,19 +274,22 @@ class Node(ASTNode):
             if not self.matches_record(row):
                 continue
             if self._outgoing:
-                async with aclosing(self._outgoing.find(row.get("id"), hop)) as inner:
+                async with aclosing(
+                    self._outgoing.find(row.get("id"), hop, is_graph_record(row))
+                ) as inner:
                     async for _ in inner:
                         yield
             else:
                 yield
 
     @staticmethod
-    async def prefetch_chain(node: 'Node', ids: List[Any]) -> None:
+    async def prefetch_chain(node: 'Node', anchor_rows: List[Dict[str, Any]]) -> None:
         """Batch-prefetch the single-hop provider-backed chain that follows
-        ``node`` for a page of anchor ids, so traversal issues one request
+        ``node`` for a page of anchor rows, so traversal issues one request
         per batch instead of one per row."""
         current: Node = node
-        anchors = ids
+        anchors = [row.get("id") for row in anchor_rows]
+        origin = common_origin(anchor_rows)
         while current.outgoing is not None:
             rel = current.outgoing
             target = rel.target
@@ -261,13 +301,16 @@ class Node(ASTNode):
             ):
                 return
             rel_terms, rel_args = rel.source_terms()
-            rows = await rel.access.prefetch(anchors, rel.anchor_side, rel_terms, rel_args)
+            rows = await rel.access.prefetch(
+                anchors, rel.anchor_side, rel_terms, rel_args, origin
+            )
             if rows is None:
                 return
             next_ids = [row.get(rel.next_field) for row in rows]
             if target.access is None or not target.access.deferred:
                 return
             target_terms, target_args = target.source_terms()
-            await target.access.prefetch(next_ids, target_terms, target_args)
+            origin = common_origin(rows)
+            await target.access.prefetch(next_ids, target_terms, target_args, origin)
             anchors = next_ids
             current = target

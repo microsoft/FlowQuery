@@ -9,8 +9,14 @@
  * has its own table.  A node with several labels is one stored object
  * listed in several tables.  Relationships have ids and are exposed per
  * type as `{id, left_id, right_id, ...properties}` rows.
+ *
+ * Bound as the default graph (`USE GRAPH mockbackend($request)`), it
+ * receives requests with `graph: true` and serves the same store as a
+ * schema-free graph: any label or type, unlabelled and multi-label
+ * nodes, graph-wide ids, and rows `{id, labels, properties}` /
+ * `{id, type, left_id, right_id, properties}`.
  */
-import { SourceRow } from "../../src/graph/source_provider";
+import { SourceRow, matchesPredicate } from "../../src/graph/source_provider";
 import { inMemoryNodeSource, inMemoryRelationshipSource } from "../../src/graph/testing";
 import AsyncFunction from "../../src/parsing/functions/async_function";
 import { FunctionDef } from "../../src/parsing/functions/function_metadata";
@@ -32,6 +38,8 @@ const key = (id: any) => JSON.stringify(id);
 
 class Store {
     public labels: Map<string, Map<string, StoredNode>> = new Map();
+    /** Every node, by id (graph mode; also holds unlabelled nodes). */
+    public nodes: Map<string, StoredNode> = new Map();
     public relationships: Map<string, StoredRelationship> = new Map();
     public nextId = 1000;
 
@@ -46,6 +54,7 @@ class Store {
     public place(node: StoredNode, label: string): void {
         node.labels.add(label);
         this.table(label).set(key(node.id), node);
+        this.nodes.set(key(node.id), node);
     }
     /** Find a node by id, within `label` when given. */
     public find(id: any, label?: string | null): StoredNode | undefined {
@@ -54,10 +63,11 @@ class Store {
             const node = table.get(key(id));
             if (node !== undefined) return node;
         }
-        return undefined;
+        return this.nodes.get(key(id));
     }
     public remove(node: StoredNode): void {
         for (const label of node.labels) this.labels.get(label)?.delete(key(node.id));
+        this.nodes.delete(key(node.id));
     }
     public clone(): Store {
         const copy = new Store();
@@ -72,6 +82,14 @@ class Store {
                 }
                 target.set(k, c);
             }
+        }
+        for (const [k, n] of this.nodes) {
+            let c = copies.get(n);
+            if (c === undefined) {
+                c = { id: n.id, labels: new Set(n.labels), properties: { ...n.properties } };
+                copies.set(n, c);
+            }
+            copy.nodes.set(k, c);
         }
         for (const [k, r] of this.relationships) {
             copy.relationships.set(k, { ...r, properties: { ...r.properties } });
@@ -157,7 +175,53 @@ export const mock = {
     node(id: any, label?: string): StoredNode | undefined {
         return this.store.find(id, label);
     },
+    /** Graph rows of every stored node (graph mode). */
+    graphNodes(store?: Store): SourceRow[] {
+        return [...(store ?? mock.store).nodes.values()].map((n) => ({
+            id: n.id,
+            labels: [...n.labels],
+            properties: { ...n.properties },
+        }));
+    },
+    /** Graph rows of every stored relationship (graph mode). */
+    graphRelationships(store?: Store): SourceRow[] {
+        return [...(store ?? mock.store).relationships.values()].map((r) => ({
+            id: r.id,
+            type: r.type,
+            left_id: r.start,
+            right_id: r.end,
+            properties: { ...r.properties },
+        }));
+    },
 };
+
+/** Serve a graph-mode read: `{id, labels, properties}` / `{id, type, left_id, right_id, properties}`. */
+function graphRead(request: any, store: Store): SourceRow[] {
+    const ids = request.ids !== undefined ? new Set(request.ids.map(key)) : null;
+    if (request.type !== undefined) {
+        const field = request.side === "right" ? "right_id" : "left_id";
+        return mock.graphRelationships(store).filter(
+            (r) =>
+                (request.type === null || r.type === request.type) &&
+                (ids === null || ids.has(key(r[field]))) &&
+                matchesPredicate(request.predicate ?? null, {
+                    ...r.properties,
+                    id: r.id,
+                    left_id: r.left_id,
+                    right_id: r.right_id,
+                })
+        );
+    }
+    const wanted: string[] = request.labels ?? (request.label != null ? [request.label] : []);
+    return mock
+        .graphNodes(store)
+        .filter(
+            (n) =>
+                wanted.every((label) => n.labels.includes(label)) &&
+                (ids === null || ids.has(key(n.id))) &&
+                matchesPredicate(request.predicate ?? null, { ...n.properties, id: n.id })
+        );
+}
 
 function resolve(value: any, ids: Record<string, any>): any {
     return typeof value === "string" && value in ids ? ids[value] : value;
@@ -195,7 +259,8 @@ function setProperties(target: Record<string, any>, properties: Record<string, a
 /** Apply a change set to a copy of `base`; the copy is only kept if every change succeeds. */
 function applyChanges(
     changes: any[],
-    base: Store
+    base: Store,
+    graph: boolean = false
 ): { store: Store; result: { ids: Record<string, any>; stats: Record<string, number> } } {
     const store = base.clone();
     const ids: Record<string, any> = {};
@@ -209,16 +274,20 @@ function applyChanges(
         labelsAdded: 0,
         labelsRemoved: 0,
     };
+    // Graph mode: ids are graph-wide; labels never select the target.
     const node = (target: any, label?: string | null): StoredNode => {
         const n =
             (typeof target === "string" ? created.get(target) : undefined) ??
-            store.find(resolve(target, ids), label);
+            (graph
+                ? store.nodes.get(key(resolve(target, ids)))
+                : store.find(resolve(target, ids), label));
         if (n === undefined) throw new Error(`Unknown node ${JSON.stringify(target)}`);
         return n;
     };
     const create = (ref: string, labels: string[], properties: Record<string, any>) => {
         const n: StoredNode = { id: store.nextId++, labels: new Set(), properties: {} };
         stats.propertiesSet += setProperties(n.properties, properties);
+        store.nodes.set(key(n.id), n);
         for (const label of labels) store.place(n, label);
         ids[ref] = n.id;
         created.set(ref, n);
@@ -304,7 +373,11 @@ function applyChanges(
                 break;
             }
             case "mergeNode": {
-                const existing = [...store.table(change.label).values()].find((n) =>
+                const labels: string[] = graph ? change.labels : [change.label];
+                const candidates = graph
+                    ? [...store.nodes.values()].filter((n) => labels.every((l) => n.labels.has(l)))
+                    : [...store.table(change.label).values()];
+                const existing = candidates.find((n) =>
                     Object.entries(change.key).every(([k, v]) => n.properties[k] === v)
                 );
                 if (existing !== undefined) {
@@ -312,7 +385,7 @@ function applyChanges(
                     ids[change.ref] = existing.id;
                     created.set(change.ref, existing);
                 } else {
-                    create(change.ref, [change.label], { ...change.key, ...change.onCreate });
+                    create(change.ref, labels, { ...change.key, ...change.onCreate });
                 }
                 break;
             }
@@ -404,7 +477,11 @@ export class MockBackend extends AsyncFunction {
         const store = tx?.store ?? mock.store;
         if (request?.operation === "write") {
             mock.changeSets.push(request.changes);
-            const { store: next, result } = applyChanges(request.changes, store);
+            const { store: next, result } = applyChanges(
+                request.changes,
+                store,
+                request.graph === true
+            );
             if (tx !== null) tx.store = next;
             else mock.store = next;
             yield result;
@@ -419,6 +496,13 @@ export class MockBackend extends AsyncFunction {
         if (request?.operation === "rollback") {
             mock.rollbacks++;
             yield {};
+            return;
+        }
+        if (request?.graph === true) {
+            for (const row of graphRead(request, store)) {
+                mock.yielded++;
+                yield row;
+            }
             return;
         }
         const req = request ?? { operation: "scan", predicate: null, pageSize: 1000 };

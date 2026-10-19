@@ -36,6 +36,7 @@ from .localtime import LocalTime
 from .log import Log
 from .log10 import Log10
 from .max_ import Max
+from .memorygraph import MemoryGraph
 from .min_ import Min
 from .nodes import Nodes
 from .pow import Pow
@@ -108,6 +109,7 @@ __all__ = [
     "Length",
     "Keys",
     "Max",
+    "MemoryGraph",
     "Min",
     "Nodes",
     "Log",

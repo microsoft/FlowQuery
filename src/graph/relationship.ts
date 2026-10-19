@@ -1,5 +1,6 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
+import { commonOrigin, isGraphRecord, originMatches } from "./graph_records";
 import Hops from "./hops";
 import Node from "./node";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
@@ -146,6 +147,8 @@ class Relationship extends ASTNode {
                 throw new Error("No current relationship data available");
             }
             if (!(key in record)) {
+                // Default-graph relationships have no fixed columns.
+                if (isGraphRecord(record)) return false;
                 throw new Error("Relationship does not have property");
             }
             if (record[key] !== expression.value()) {
@@ -260,9 +263,14 @@ class Relationship extends ASTNode {
     public _left_id_or_right_id(): string {
         return this._direction === "left" ? "left_id" : "right_id";
     }
-    public async *find(left_id: string, hop: number = 0): AsyncGenerator<void> {
+    /**
+     * Traverse the relationships anchored at node `left_id`.  `origin`
+     * is the graph provenance of that node: relationships of the other
+     * graph never join it (see {@link NodeAccess}).
+     */
+    public async *find(left_id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
         if (this._access !== null) {
-            yield* this._deferredFind(left_id, hop);
+            yield* this._deferredFind(left_id, hop, origin);
             return;
         }
         // Save original source node
@@ -280,11 +288,13 @@ class Relationship extends ASTNode {
                 if (this.hops?.multi() && this.hops.min === 0 && this._target) {
                     // For zero-hop, target finds the same node as source (left_id)
                     // No relationship match is pushed since no edge is traversed
-                    yield* this._target.find(left_id, hop);
+                    yield* this._target.find(left_id, hop, origin);
                 }
             }
             while (this._data!.find(left_id, hop, this._direction)) {
                 const data: RelationshipRecord = this._data?.current(hop) as RelationshipRecord;
+                if (!originMatches(data, origin)) continue;
+                const next = isGraphRecord(data);
                 const id = data[this._left_id_or_right_id()];
                 if (hop + 1 >= this.hops!.min) {
                     this.setValue(this, left_id);
@@ -297,9 +307,9 @@ class Relationship extends ASTNode {
                         continue;
                     }
                     try {
-                        yield* this._target!.find(id, hop);
+                        yield* this._target!.find(id, hop, next);
                         if (hop + 1 < this.hops!.max && !this._matches.isCircular(id)) {
-                            yield* this.find(id, hop + 1);
+                            yield* this.find(id, hop + 1, next);
                         }
                     } finally {
                         this.release(claimed);
@@ -312,7 +322,7 @@ class Relationship extends ASTNode {
                         continue;
                     }
                     try {
-                        yield* this.find(id, hop + 1);
+                        yield* this.find(id, hop + 1, next);
                     } finally {
                         this.release(claimed);
                     }
@@ -323,21 +333,31 @@ class Relationship extends ASTNode {
             this._source = original;
         }
     }
-    private async *_deferredFind(left_id: string, hop: number): AsyncGenerator<void> {
+    private async *_deferredFind(
+        left_id: string,
+        hop: number,
+        origin: boolean | undefined
+    ): AsyncGenerator<void> {
         const original = this._source;
         if (hop > 0) {
             this._source = this._target;
         }
         try {
             if (hop === 0 && this.hops?.multi() && this.hops.min === 0 && this._target) {
-                yield* this._target.find(left_id, hop);
+                yield* this._target.find(left_id, hop, origin);
             }
             const { terms: allTerms, args } = this.sourceTerms();
             // Hops below the minimum are traversed without a property check,
             // so their edges must not be filtered by the source either.
             const terms = hop + 1 >= this.hops!.min ? allTerms : [];
             const target = this._target;
-            for await (const page of this._access!.expand(left_id, this.anchorSide, terms, args)) {
+            for await (const page of this._access!.expand(
+                left_id,
+                this.anchorSide,
+                terms,
+                args,
+                origin
+            )) {
                 if (
                     target !== null &&
                     target.access !== null &&
@@ -348,7 +368,8 @@ class Relationship extends ASTNode {
                     await target.access.prefetch(
                         page.map((row) => row[this.nextField]),
                         targetTerms.terms,
-                        targetTerms.args
+                        targetTerms.args,
+                        commonOrigin(page)
                     );
                 }
                 for (const row of page) {
@@ -366,6 +387,7 @@ class Relationship extends ASTNode {
     ): AsyncGenerator<void> {
         this._frames.set(hop, record);
         const id = record[this.nextField];
+        const next = isGraphRecord(record);
         if (hop + 1 >= this.hops!.min) {
             if (!this.matchesRecord(record)) {
                 return;
@@ -376,9 +398,9 @@ class Relationship extends ASTNode {
             }
             this.pushMatch(record, left_id);
             try {
-                yield* this._target!.find(id, hop);
+                yield* this._target!.find(id, hop, next);
                 if (hop + 1 < this.hops!.max && !this._matches.isCircular(id)) {
-                    yield* this.find(id, hop + 1);
+                    yield* this.find(id, hop + 1, next);
                 }
             } finally {
                 this._matches.pop();
@@ -390,7 +412,7 @@ class Relationship extends ASTNode {
                 return;
             }
             try {
-                yield* this.find(id, hop + 1);
+                yield* this.find(id, hop + 1, next);
             } finally {
                 this.release(claimed);
             }
@@ -399,6 +421,7 @@ class Relationship extends ASTNode {
     public matchesRecord(record: RelationshipRecord): boolean {
         for (const [key, expression] of this._properties) {
             if (!(key in record)) {
+                if (isGraphRecord(record)) return false;
                 throw new Error("Relationship does not have property");
             }
             if (record[key] !== expression.value()) {

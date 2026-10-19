@@ -1,3 +1,4 @@
+import { labelsOf } from "../../graph/graph_records";
 import Function from "./function";
 import { FunctionDef } from "./function_metadata";
 
@@ -22,10 +23,7 @@ class Labels extends Function {
         if (typeof val !== "object" || Array.isArray(val)) {
             throw new Error("labels() expects a node");
         }
-        if ("_label" in val && val._label) {
-            return [val._label];
-        }
-        return [];
+        return labelsOf(val);
     }
 }
 

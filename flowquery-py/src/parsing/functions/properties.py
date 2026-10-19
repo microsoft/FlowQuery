@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...graph.graph_records import user_properties
 from .function import Function
 from .function_metadata import FunctionDef
 
@@ -37,6 +38,11 @@ class Properties(Function):
             return None
         if not isinstance(obj, dict):
             raise ValueError("properties() expects a node, relationship, or map")
+
+        # Default-graph entities keep their exact stored properties.
+        stored = user_properties(obj)
+        if stored is not None:
+            return dict(stored)
 
         # If it's a RelationshipMatchRecord (has type, startNode, endNode, properties)
         if all(k in obj for k in ("type", "startNode", "endNode", "properties")):

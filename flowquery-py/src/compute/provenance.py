@@ -35,6 +35,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Set
 
+from ..graph.graph_records import user_properties
 from ..graph.node import Node
 from ..graph.node_reference import NodeReference
 from ..graph.relationship import Relationship
@@ -157,8 +158,12 @@ class ProvenanceSource(ABC):
 def _extract_node_properties(record: Mapping[str, Any]) -> Dict[str, Any]:
     """Shallow copy a node record's user-visible property values,
     stripping ``id`` and the internal ``_label`` injected by
-    :class:`DataResolver`.
+    :class:`DataResolver` (default-graph nodes report their exact stored
+    properties).
     """
+    stored = user_properties(record)
+    if stored is not None:
+        return dict(stored)
     out: Dict[str, Any] = {}
     for key, val in record.items():
         if key == "id" or key == "_label":

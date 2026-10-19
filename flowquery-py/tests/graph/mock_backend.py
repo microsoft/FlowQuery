@@ -8,12 +8,19 @@ Like FlowQuery, the store scopes node ids to their label: each label has
 its own table.  A node with several labels is one stored object listed in
 several tables.  Relationships have ids and are exposed per type as
 ``{id, left_id, right_id, ...properties}`` rows.
+
+Bound as the default graph (``USE GRAPH mockbackend($request)``), it
+receives requests with ``graph: true`` and serves the same store as a
+schema-free graph: any label or type, unlabelled and multi-label nodes,
+graph-wide ids, and rows ``{id, labels, properties}`` /
+``{id, type, left_id, right_id, properties}``.
 """
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Tuple
 
+from flowquery.graph.source_provider import matches_predicate
 from flowquery.graph.testing import in_memory_node_source, in_memory_relationship_source
 from flowquery.parsing.functions.async_function import AsyncFunction
 from flowquery.parsing.functions.function_metadata import FunctionDef
@@ -26,7 +33,8 @@ def key(id_: Any) -> str:
 @dataclass(eq=False)
 class StoredNode:
     id: Any
-    labels: Set[str] = field(default_factory=set)
+    #: Insertion-ordered (like a JS Set).
+    labels: Dict[str, None] = field(default_factory=dict)
     properties: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -42,6 +50,8 @@ class StoredRelationship:
 class Store:
     def __init__(self) -> None:
         self.labels: Dict[str, Dict[str, StoredNode]] = {}
+        #: Every node, by id (graph mode; also holds unlabelled nodes).
+        self.nodes: Dict[str, StoredNode] = {}
         self.relationships: Dict[str, StoredRelationship] = {}
         self.next_id = 1000
 
@@ -49,8 +59,9 @@ class Store:
         return self.labels.setdefault(label, {})
 
     def place(self, node: StoredNode, label: str) -> None:
-        node.labels.add(label)
+        node.labels[label] = None
         self.table(label)[key(node.id)] = node
+        self.nodes[key(node.id)] = node
 
     def find(self, id_: Any, label: Optional[str] = None) -> Optional[StoredNode]:
         """Find a node by id, within ``label`` when given."""
@@ -60,11 +71,12 @@ class Store:
             node = table.get(key(id_))
             if node is not None:
                 return node
-        return None
+        return self.nodes.get(key(id_))
 
     def remove(self, node: StoredNode) -> None:
         for label in node.labels:
             self.labels.get(label, {}).pop(key(node.id), None)
+        self.nodes.pop(key(node.id), None)
 
     def clone(self) -> "Store":
         copy = Store()
@@ -74,9 +86,15 @@ class Store:
             for k, n in table.items():
                 c = copies.get(id(n))
                 if c is None:
-                    c = StoredNode(n.id, set(n.labels), dict(n.properties))
+                    c = StoredNode(n.id, dict(n.labels), dict(n.properties))
                     copies[id(n)] = c
                 target[k] = c
+        for k, n in self.nodes.items():
+            c = copies.get(id(n))
+            if c is None:
+                c = StoredNode(n.id, dict(n.labels), dict(n.properties))
+                copies[id(n)] = c
+            copy.nodes[k] = c
         for k, r in self.relationships.items():
             copy.relationships[k] = StoredRelationship(r.id, r.type, r.start, r.end, dict(r.properties))
         copy.next_id = self.next_id
@@ -121,7 +139,7 @@ class Mock:
         """Add rows (each with an ``id``) to the table of ``label``."""
         for row in rows:
             properties = {k: v for k, v in row.items() if k != "id"}
-            self.store.place(StoredNode(row["id"], set(), properties), label)
+            self.store.place(StoredNode(row["id"], {}, properties), label)
 
     def add_relationships(self, rel_type: str, rows: List[Dict[str, Any]]) -> None:
         """Add rows (``left_id``, ``right_id``, optional ``id``) of relationship ``rel_type``."""
@@ -152,8 +170,58 @@ class Mock:
     def node(self, id_: Any, label: Optional[str] = None) -> Optional[StoredNode]:
         return self.store.find(id_, label)
 
+    def graph_nodes(self, store: Optional[Store] = None) -> List[Dict[str, Any]]:
+        """Graph rows of every stored node (graph mode)."""
+        source = store if store is not None else self.store
+        return [
+            {"id": n.id, "labels": list(n.labels), "properties": dict(n.properties)}
+            for n in source.nodes.values()
+        ]
+
+    def graph_relationships(self, store: Optional[Store] = None) -> List[Dict[str, Any]]:
+        """Graph rows of every stored relationship (graph mode)."""
+        source = store if store is not None else self.store
+        return [
+            {
+                "id": r.id,
+                "type": r.type,
+                "left_id": r.start,
+                "right_id": r.end,
+                "properties": dict(r.properties),
+            }
+            for r in source.relationships.values()
+        ]
+
+
 
 mock = Mock()
+
+
+def _graph_read(request: Dict[str, Any], store: Store) -> List[Dict[str, Any]]:
+    """Serve a graph-mode read: ``{id, labels, properties}`` / ``{id, type, left_id, right_id, properties}``."""
+    ids = {key(i) for i in request["ids"]} if request.get("ids") is not None else None
+    if "type" in request:
+        field_name = "right_id" if request.get("side") == "right" else "left_id"
+        return [
+            r
+            for r in mock.graph_relationships(store)
+            if (request["type"] is None or r["type"] == request["type"])
+            and (ids is None or key(r[field_name]) in ids)
+            and matches_predicate(
+                request.get("predicate"),
+                {**r["properties"], "id": r["id"], "left_id": r["left_id"], "right_id": r["right_id"]},
+            )
+        ]
+    wanted = request.get("labels")
+    if wanted is None:
+        wanted = [request["label"]] if request.get("label") is not None else []
+    return [
+        n
+        for n in mock.graph_nodes(store)
+        if all(label in n["labels"] for label in wanted)
+        and (ids is None or key(n["id"]) in ids)
+        and matches_predicate(request.get("predicate"), {**n["properties"], "id": n["id"]})
+    ]
 
 
 def _resolve(value: Any, ids: Dict[str, Any]) -> Any:
@@ -192,7 +260,9 @@ def _matches_key(properties: Dict[str, Any], match: Optional[Dict[str, Any]]) ->
     return all(k in properties and properties[k] == v for k, v in (match or {}).items())
 
 
-def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Dict[str, Any]]:
+def apply_changes(
+    changes: List[Dict[str, Any]], base: Store, graph: bool = False
+) -> Tuple[Store, Dict[str, Any]]:
     """Apply a change set to a copy of ``base``; the copy is only kept if every change succeeds."""
     store = base.clone()
     ids: Dict[str, Any] = {}
@@ -207,10 +277,14 @@ def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Di
         "labelsRemoved": 0,
     }
 
+    # Graph mode: ids are graph-wide; labels never select the target.
     def node(target: Any, label: Optional[str] = None) -> StoredNode:
         n = created.get(target) if isinstance(target, str) else None
         if n is None:
-            n = store.find(_resolve(target, ids), label)
+            if graph:
+                n = store.nodes.get(key(_resolve(target, ids)))
+            else:
+                n = store.find(_resolve(target, ids), label)
         if n is None:
             raise ValueError(f"Unknown node {json.dumps(target)}")
         return n
@@ -219,6 +293,7 @@ def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Di
         n = StoredNode(store.next_id)
         store.next_id += 1
         stats["propertiesSet"] += _set_properties(n.properties, properties)
+        store.nodes[key(n.id)] = n
         for label in labels:
             store.place(n, label)
         ids[ref] = n.id
@@ -268,7 +343,7 @@ def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Di
             n = node(change["target"], change.get("label"))
             for label in change["labels"]:
                 if label in n.labels:
-                    n.labels.discard(label)
+                    n.labels.pop(label, None)
                     store.labels.get(label, {}).pop(key(n.id), None)
                     stats["labelsRemoved"] += 1
         elif op == "deleteRelationship":
@@ -290,8 +365,14 @@ def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Di
             store.remove(n)
             stats["nodesDeleted"] += 1
         elif op == "mergeNode":
+            merge_labels: List[str] = change["labels"] if graph else [change["label"]]
+            candidates = (
+                [n for n in store.nodes.values() if all(lbl in n.labels for lbl in merge_labels)]
+                if graph
+                else list(store.table(change["label"]).values())
+            )
             existing = next(
-                (n for n in store.table(change["label"]).values() if _matches_key(n.properties, change["key"])),
+                (n for n in candidates if _matches_key(n.properties, change["key"])),
                 None,
             )
             if existing is not None:
@@ -299,7 +380,7 @@ def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Di
                 ids[change["ref"]] = existing.id
                 created[change["ref"]] = existing
             else:
-                create(change["ref"], [change["label"]], {**change["key"], **change["onCreate"]})
+                create(change["ref"], merge_labels, {**change["key"], **change["onCreate"]})
         elif op == "mergeRelationship":
             start = node(change["start"]).id
             end = node(change["end"]).id
@@ -386,7 +467,9 @@ class MockBackend(AsyncFunction):
         operation = request.get("operation") if isinstance(request, dict) else None
         if operation == "write":
             mock.change_sets.append(request["changes"])
-            next_store, result = apply_changes(request["changes"], store)
+            next_store, result = apply_changes(
+                request["changes"], store, request.get("graph") is True
+            )
             if tx is not None:
                 tx["store"] = next_store
             else:
@@ -402,6 +485,11 @@ class MockBackend(AsyncFunction):
         if operation == "rollback":
             mock.rollbacks += 1
             yield {}
+            return
+        if isinstance(request, dict) and request.get("graph") is True:
+            for row in _graph_read(request, store):
+                mock.yielded += 1
+                yield row
             return
         req = request if request is not None else {"operation": "scan", "predicate": None, "pageSize": 1000}
         if request is not None:

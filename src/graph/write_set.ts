@@ -30,6 +30,13 @@
  * A relationship `target` is the row's `id` column when the definition
  * returns one, otherwise `{left_id, right_id}`.
  *
+ * **Default graph.**  Writes to labels and types without a definition go
+ * to the default graph (`USE GRAPH fn($request)`); its requests carry
+ * `graph: true`.  Targets are graph-wide entity ids, `createNode.labels`
+ * may hold zero or several labels, `mergeNode` adds `labels` (all of
+ * them; `label` is the first), and relationship changes carry the stored
+ * `type` of the relationship.
+ *
  * **Transactions.**  Backends declaring `transactions: true` (with
  * `writes: true`) run each query in one transaction, opened by the
  * function's `openReadContext()` and shared by reads and writes.  Change
@@ -39,6 +46,8 @@
  * `{version: 1, operation: "commit"}`, or `{operation: "rollback"}` when
  * it fails or is cancelled.
  */
+import { canonicalKey } from "./source_context";
+
 export const WRITE_CONTRACT_VERSION = 1;
 
 export type WriteChange = Record<string, any> & { op: string };
@@ -72,6 +81,20 @@ export interface WriteBackend {
     requestIndex: number;
     /** The other arguments, evaluated from the definition's call. */
     args: any[];
+    /** The backend is the default graph (requests carry `graph: true`). */
+    graph?: boolean;
+}
+
+/** Where a write goes: the backend function and whether it is transactional. */
+export interface WriteRoute {
+    backend: WriteBackend;
+    transactions: boolean;
+}
+
+function describeBackend(backend: WriteBackend): string {
+    const name = backend.graph === true ? `default graph ${backend.name}` : backend.name;
+    const args = backend.args.filter((_, i) => i !== backend.requestIndex);
+    return args.length > 0 ? `${name}(${args.map((a) => JSON.stringify(a)).join(", ")})` : name;
 }
 
 /** Query-scoped collector of write changes. */
@@ -91,10 +114,46 @@ export class WriteSet {
     public readonly ids: Record<string, any> = {};
     /** Backend counters, summed across sends. */
     public readonly stats: Record<string, number> = {};
+    /** @internal Routes resolved for this query, by target key. */
+    public readonly routes: Map<string, WriteRoute> = new Map();
     private _pending: WriteChange[] = [];
+    private _deleted: Set<string> = new Set();
     private _bindings: Map<string, (id: any) => void> = new Map();
     private _next: number = 1;
 
+    /**
+     * Pin the query to `route`'s backend.  A query writes through one
+     * backend function, so a second one is rejected; nothing has been
+     * applied at that point unless a transactional backend already
+     * received changes, which are then rolled back.
+     */
+    public route(route: WriteRoute): void {
+        const current = this.backend;
+        if (current === null) {
+            this.backend = route.backend;
+        } else if (
+            current.functionClass !== route.backend.functionClass ||
+            (current.graph === true) !== (route.backend.graph === true) ||
+            canonicalKey(current.args) !== canonicalKey(route.backend.args)
+        ) {
+            throw new Error(
+                `A query can only write through one backend function (${describeBackend(current)} and ${describeBackend(route.backend)})`
+            );
+        }
+        this.transactional &&= route.transactions;
+    }
+    /**
+     * Record that the query deletes `target` (`kind` scopes the id: a
+     * definition's label or type, or the default graph).  Returns false when it was
+     * already deleted earlier in the query, so repeated deletes (the same
+     * entity bound in several rows) are sent once.
+     */
+    public markDeleted(kind: string, target: any): boolean {
+        const key = `${kind}:${canonicalKey(target)}`;
+        if (this._deleted.has(key)) return false;
+        this._deleted.add(key);
+        return true;
+    }
     /** A fresh temporary ref for a new node or relationship. */
     public ref(): string {
         return `$${this._next++}`;

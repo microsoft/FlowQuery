@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from .data_cache import DataCache
 from .database import Database
@@ -14,7 +14,11 @@ from .relationship import Relationship
 from .relationship_data import RelationshipData
 from .source_access import NodeSourceAccess, RelationshipSourceAccess
 from .source_context import SourceContext
+from .statement_source import materialize_scan
 from .virtual_sources import attach_virtual_source, get_virtual_source
+
+if TYPE_CHECKING:
+    from .default_graph import DefaultGraph
 
 
 class DataResolver:
@@ -59,6 +63,75 @@ class DataResolver:
             ctx.provenance and physical.statement is not None
         )
 
+    @staticmethod
+    def _node_candidates(
+        element: Node, db: Database, graph: Optional['DefaultGraph']
+    ) -> Tuple[List[Tuple[str, Any]], List[Dict[str, Any]]]:
+        """Node definitions (and default-graph entries) an element reads from.
+        Labels with a ``CREATE VIRTUAL`` definition are always served by it;
+        other labels, and unlabelled patterns, fall back to the default
+        graph pinned by the query, if any."""
+        physical: List[Tuple[str, Any]] = []
+        graph_entries: List[Dict[str, Any]] = []
+        if element.all_labels:
+            if graph is None or any(label in db.nodes for label in element.labels):
+                raise ValueError(
+                    f"Node pattern (:{':'.join(element.labels)}) requires every label: "
+                    "this is only supported for labels without a CREATE VIRTUAL "
+                    "definition, read through the default graph (USE GRAPH)"
+                )
+            graph_entries.append({"label": element.labels[0], "labels": list(element.labels)})
+            return physical, graph_entries
+        if len(element.labels) == 0:
+            physical.extend(db.nodes.items())
+            if graph is not None:
+                graph_entries.append({"label": None, "labels": None})
+            return physical, graph_entries
+        for label in element.labels:
+            p = db.nodes.get(label)
+            if p is not None:
+                physical.append((label, p))
+            elif graph is not None:
+                graph_entries.append({"label": label, "labels": None})
+        return physical, graph_entries
+
+    @staticmethod
+    def _label_hint(node: Optional[Node]) -> Optional[str]:
+        """Endpoint label hint of a pattern node (sent to the default graph)."""
+        labels = DataResolver._resolve_labels(node)
+        if len(labels) == 1:
+            return labels[0]
+        if node is not None and node.all_labels:
+            return labels[0]
+        if (
+            isinstance(node, NodeReference)
+            and isinstance(node.reference, Node)
+            and node.reference.all_labels
+        ):
+            return labels[0]
+        return None
+
+    @staticmethod
+    def _relationship_graph_entries(
+        relationship: Relationship, db: Database, graph: Optional['DefaultGraph']
+    ) -> List[Dict[str, Any]]:
+        """Default-graph entries for a relationship pattern (types without definitions)."""
+        if graph is None:
+            return []
+        if relationship.direction == "left":
+            left, right = relationship.target, relationship.source
+        else:
+            left, right = relationship.source, relationship.target
+        source_label = DataResolver._label_hint(left)
+        target_label = DataResolver._label_hint(right)
+        if len(relationship.types) == 0:
+            return [{"type": None, "sourceLabel": source_label, "targetLabel": target_label}]
+        return [
+            {"type": t, "sourceLabel": source_label, "targetLabel": target_label}
+            for t in relationship.types
+            if t not in db.relationships
+        ]
+
     def get_access(
         self, element: Union[Node, Relationship], ctx: SourceContext
     ) -> Optional[Union[NodeSourceAccess, RelationshipSourceAccess]]:
@@ -66,23 +139,32 @@ class DataResolver:
         definition it can match is backed by a source provider; otherwise
         None, and the element is loaded eagerly through get_data."""
         db = Database.get_instance()
+        graph = ctx.graph
         if isinstance(element, Node):
-            candidates: List[Any]
-            if len(element.labels) == 0:
-                candidates = list(db.nodes.items())
-            else:
-                candidates = [
-                    (label, db.nodes[label]) for label in element.labels if label in db.nodes
-                ]
-            if len(candidates) == 0 or not all(
-                DataResolver._deferrable(p, ctx) for _, p in candidates
+            physical, graph_entries = DataResolver._node_candidates(element, db, graph)
+            if len(physical) + len(graph_entries) == 0 or not all(
+                DataResolver._deferrable(p, ctx) for _, p in physical
             ):
                 return None
+            assert graph is not None or len(graph_entries) == 0
             return NodeSourceAccess(
-                ctx, [{"label": label, "provider": p.provider} for label, p in candidates]
+                ctx,
+                [{"label": label, "provider": p.provider} for label, p in physical]
+                + [
+                    {
+                        "label": g["label"],
+                        "labels": g["labels"],
+                        "provider": graph.node_provider if graph is not None else None,
+                        "graph": True,
+                    }
+                    for g in graph_entries
+                ],
             )
         entries = self._get_relationship_entries(element, db)
-        if len(entries) == 0 or not all(DataResolver._deferrable(p, ctx) for _, p in entries):
+        rel_graph_entries = DataResolver._relationship_graph_entries(element, db, graph)
+        if len(entries) + len(rel_graph_entries) == 0 or not all(
+            DataResolver._deferrable(p, ctx) for _, p in entries
+        ):
             return None
         return RelationshipSourceAccess(
             ctx,
@@ -94,6 +176,14 @@ class DataResolver:
                     "provider": p.provider,
                 }
                 for t, p in entries
+            ]
+            + [
+                {
+                    **g,
+                    "provider": graph.relationship_provider if graph is not None else None,
+                    "graph": True,
+                }
+                for g in rel_graph_entries
             ],
         )
 
@@ -140,50 +230,46 @@ class DataResolver:
     ) -> Union['NodeData', 'RelationshipData']:
         """Gets data for a node or relationship."""
         db = Database.get_instance()
+        ctx = self._source_context
+        graph = ctx.graph if ctx is not None else None
         if isinstance(element, Node):
             args = DataResolver._extract_args(element.properties)
-            if len(element.labels) == 0:
-                all_records = []
-                for label, physical in db.nodes.items():
-                    data = await self._data_cache.get(f"node:{label}", physical, None)
-                    for record in data:
-                        enriched = {**record, "_label": label}
-                        src = get_virtual_source(record)
-                        if src is not None:
-                            attach_virtual_source(enriched, src)
-                        all_records.append(enriched)
-                return NodeData(all_records)
-            if len(element.labels) > 1:
-                all_records = []
-                for lbl in element.labels:
-                    phys_node = db.nodes.get(lbl)
-                    if phys_node:
-                        data = await self._data_cache.get(f"node:{lbl}", phys_node, args)
-                        for record in data:
-                            enriched = {**record, "_label": lbl}
-                            src = get_virtual_source(record)
-                            if src is not None:
-                                attach_virtual_source(enriched, src)
-                            all_records.append(enriched)
-                return NodeData(all_records)
-            node = db.get_node(element)
-            if node is None:
+            physical, graph_entries = DataResolver._node_candidates(element, db, graph)
+            if len(element.labels) == 1 and len(physical) == 0 and len(graph_entries) == 0:
                 raise ValueError(f"Physical node not found for label {element.label}")
-            data = await self._data_cache.get(f"node:{element.label}", node, args)
-            label = element.label or ""
-            records: List[Dict[str, Any]] = []
-            for record in data:
-                enriched = {**record, "_label": label}
-                src = get_virtual_source(record)
-                if src is not None:
-                    attach_virtual_source(enriched, src)
-                records.append(enriched)
-            return NodeData(records)
+            # Unlabelled and ORed labels collect from every matching definition.
+            all_records: List[Dict[str, Any]] = []
+            for label, phys_node in physical:
+                data = await self._data_cache.get(
+                    f"node:{label}", phys_node, None if len(element.labels) == 0 else args
+                )
+                for record in data:
+                    enriched = {**record, "_label": label}
+                    src = get_virtual_source(record)
+                    if src is not None:
+                        attach_virtual_source(enriched, src)
+                    all_records.append(enriched)
+            for entry in graph_entries:
+                assert graph is not None
+                base = (
+                    {"label": entry["label"], "labels": entry["labels"]}
+                    if entry["labels"] is not None
+                    else {"label": entry["label"]}
+                )
+                rows = await materialize_scan(
+                    graph.node_provider, "node", graph.description, base, None, ctx
+                )
+                for row in rows:
+                    all_records.append(
+                        {**row, "_label": entry["label"]} if entry["label"] is not None else row
+                    )
+            return NodeData(all_records)
         elif isinstance(element, Relationship):
             args = DataResolver._extract_args(element.properties)
             entries = self._get_relationship_entries(element, db)
-            if not entries:
-                if len(element.types) == 0:
+            rel_graph_entries = DataResolver._relationship_graph_entries(element, db, graph)
+            if not entries and not rel_graph_entries:
+                if len(element.types) == 0 or graph is not None:
                     return RelationshipData([])
                 suffix = "s" if len(element.types) > 1 else ""
                 types = ", ".join(element.types)
@@ -202,6 +288,18 @@ class DataResolver:
                     if rec_src is not None:
                         attach_virtual_source(enriched, rec_src)
                     all_records.append(enriched)
+            for rel_entry in rel_graph_entries:
+                assert graph is not None
+                all_records.extend(
+                    await materialize_scan(
+                        graph.relationship_provider,
+                        "relationship",
+                        graph.description,
+                        rel_entry,
+                        None,
+                        ctx,
+                    )
+                )
             return RelationshipData(all_records)
         else:
             raise ValueError("Element is neither Node nor Relationship")

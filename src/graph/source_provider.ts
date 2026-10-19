@@ -105,6 +105,14 @@ interface BaseSourceCapabilities {
      * `REMOVE` / `DELETE` may target this label or type.
      */
     writes?: boolean;
+    /**
+     * With `writes`: the backend runs each query in one transaction opened
+     * by the function's `openReadContext()`, its reads see the query's own
+     * writes, and it accepts `{operation: 'commit'}` / `{operation: 'rollback'}`.
+     * FlowQuery then sends changes as the query goes, so later clauses and
+     * statements read them.
+     */
+    transactions?: boolean;
 }
 
 export interface NodeSourceCapabilities extends BaseSourceCapabilities {
@@ -142,6 +150,7 @@ export interface DeclaredSourceCapabilities {
     cacheable?: boolean;
     maxBatchSize?: number;
     writes?: boolean;
+    transactions?: boolean;
 }
 
 /**
@@ -356,6 +365,12 @@ function validateBase(caps: any, name: string): void {
     }
     if (caps.writes !== undefined && typeof caps.writes !== "boolean") {
         throw new SourceCapabilityError(`Source ${name}: writes must be true or false`, name);
+    }
+    if (caps.transactions !== undefined && typeof caps.transactions !== "boolean") {
+        throw new SourceCapabilityError(`Source ${name}: transactions must be true or false`, name);
+    }
+    if (caps.transactions === true && caps.writes !== true) {
+        throw new SourceCapabilityError(`Source ${name}: transactions requires writes: true`, name);
     }
     if (caps.predicates !== undefined) {
         const p = caps.predicates;

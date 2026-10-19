@@ -321,7 +321,7 @@ CREATE VIRTUAL (:Person)-[:KNOWS]-(:Person) WITH CAPABILITIES {expand: true} AS 
 Capability keys (camelCase, as in TypeScript): `lookup`, `expand`
 (`true` = both sides), `predicates` (`true` = every operator, or
 `{operators, properties, stringOrdering}`), `streaming`, `cacheable`,
-`maxBatchSize` and `writes`. Node-only keys are ignored for
+`maxBatchSize`, `writes` and `transactions`. Node-only keys are ignored for
 relationships and the reverse. String range filters are pushed only to
 sources declaring `stringOrdering: "binary"` or `"codepoint"`; Python
 compares `str` by code point, so both mean the same here.
@@ -390,17 +390,10 @@ comparison would accept. Query-level tuning goes in
 `max_batch_size` (100), `cache_capacity` (10000), `max_prefetch_rows`
 (1024) and `reorder` (`True`).
 
-**Deprecated programmatic API.** `FlowQuery.register_node_source`,
-`register_relationship_source`, `set_node_source_capabilities` and
-`set_relationship_source_capabilities` still work but emit a
-`DeprecationWarning` once per process and will be removed in the next
-major release; define the labels with `CREATE VIRTUAL ... AS { LOAD JSON
-FROM fn($request) ... }` instead. `in_memory_node_source` and
-`in_memory_relationship_source` are no longer exported from `flowquery`.
-
 ## Writing to Backends
 
-`CREATE`, `MERGE`, `SET`, `REMOVE` and `[DETACH] DELETE` change data
+`CREATE`, `MERGE`, `SET` (`n.p = v`, `n += {...}`, `n = {...}`,
+`n:Label`), `REMOVE` and `[DETACH] DELETE` change data
 behind definitions whose capabilities include `writes: true`. FlowQuery
 collects the changes of one query into an ordered change set (new
 elements get temporary ids `"$1"`, `"$2"`, ...) and, when the query
@@ -415,9 +408,24 @@ print(fq.results)       # [{'id': 1001}]  (final id, not "$1")
 print(fq.write_result)  # change set sent, ids and backend stats
 ```
 
-`MATCH` sees the store as it was when the query started, a failing or
-cancelled query sends nothing, and writes to definitions without
-`writes: true` are rejected before the query runs. See the
+With `writes: true` alone, the change set is sent once at the end:
+`MATCH` sees the store as it was when the query started, and a failing or
+cancelled query sends nothing.
+
+**Transactions (read-your-writes).** Backends that also declare
+`transactions: True` run each query in one transaction, opened by the
+function's `open_read_context()` and shared by reads and writes.
+FlowQuery sends changes before any read that follows a write and at the
+end of every statement, so later clauses and statements see the query's
+own writes (new elements get their final ids right away). The query ends
+with `{"operation": "commit"}`, or `{"operation": "rollback"}` when it
+fails or is cancelled. Rows are processed one at a time: a later clause
+sees the writes of the current and earlier rows; aggregate first
+(`WITH collect(...)`) or use a separate statement to see every row's
+writes.
+
+Writes to definitions without `writes: true` are rejected before the
+query runs. See the
 [language reference](https://github.com/microsoft/FlowQuery#writing-to-backends)
 for the full syntax and change-set format.
 

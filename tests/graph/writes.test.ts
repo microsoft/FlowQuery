@@ -1,6 +1,27 @@
 import Runner from "../../src/compute/runner";
 import { QueryCancelledError } from "../../src/graph/source_provider";
+import AsyncFunction from "../../src/parsing/functions/async_function";
+import { FunctionDef } from "../../src/parsing/functions/function_metadata";
 import { mock } from "./mock_backend";
+
+@FunctionDef({
+    description: "Blocks until the query signal aborts (tests only)",
+    category: "async",
+    parameters: [],
+    output: { description: "rows", type: "object" },
+})
+class WtBlock extends AsyncFunction {
+    static started: () => void = () => undefined;
+    constructor() {
+        super("wtblock");
+    }
+    public async *generate(): AsyncGenerator<any> {
+        const signal = this.context!.signal;
+        WtBlock.started();
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield { x: 1 };
+    }
+}
 
 async function run(statement: string, parameters?: Record<string, any>) {
     const runner = new Runner(statement, null, null, { parameters });
@@ -22,6 +43,7 @@ function seed(): void {
     mock.addNodes("WC", COMPANIES);
     mock.addRelationships("KNOWS", [{ id: 99, left_id: 1, right_id: 2, since: 2010 }]);
     mock.addRelationships("WORKS_AT", [{ id: 98, left_id: 13, right_id: 42 }]);
+    mock.addNodes("TP", PEOPLE);
 }
 
 beforeAll(async () => {
@@ -42,6 +64,9 @@ beforeAll(async () => {
         "CREATE VIRTUAL (:WRO) WITH CAPABILITIES {writes: false} AS { LOAD JSON FROM mockbackend($request) AS n RETURN n.id AS id }"
     );
     await run("CREATE VIRTUAL (:WEager) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }");
+    await run(
+        "CREATE VIRTUAL (:TP) AS { LOAD JSON FROM mocktxbackend($request) AS n RETURN n.id AS id, n.name AS name, n.title AS title }"
+    );
 });
 
 beforeEach(() => seed());
@@ -277,6 +302,141 @@ describe("validation", () => {
         expect(() => new Runner("WITH 1 AS x SET x.y = 2")).toThrow(
             /SET target x must be a node or relationship/
         );
-        expect(() => new Runner("MATCH (n:WP) SET n = {a: 1}")).toThrow(/use SET n \+= \{\.\.\.\}/);
+        expect(() => new Runner("MERGE (n:WP {name: 'x'}) ON CREATE SET n = {a: 1}")).toThrow(
+            /ON CREATE \/ ON MATCH SET only supports property updates/
+        );
+    });
+
+    test("transactions requires writes", async () => {
+        await expect(
+            run(
+                "CREATE VIRTUAL (:TBad) WITH CAPABILITIES {writes: false, transactions: true} AS { LOAD JSON FROM mockbackend($request) AS n RETURN n.id AS id }"
+            )
+        ).rejects.toThrow(/transactions requires writes: true/);
+    });
+});
+
+describe("SET x = {...} replaces all properties", () => {
+    test("on a node", async () => {
+        const runner = await run(
+            "MATCH (p:WP {id: 13}) SET p = {title: 'CTO'} RETURN p.name AS name, p.title AS title"
+        );
+        expect(mock.changeSets[0]).toEqual([
+            { op: "replaceProperties", target: 13, label: "WP", properties: { title: "CTO" } },
+        ]);
+        expect(runner.results[0].title).toBe("CTO");
+        expect(runner.results[0].name ?? null).toBeNull();
+        expect(mock.node(13, "WP")!.properties).toEqual({ title: "CTO" });
+    });
+
+    test("on a relationship, with a parameter", async () => {
+        await run("MATCH (a:WP {id: 1})-[r:KNOWS]->(b:WP) SET r = $props", {
+            props: { note: "x" },
+        });
+        expect(mock.changeSets[0]).toEqual([
+            { op: "replaceProperties", target: 99, type: "KNOWS", properties: { note: "x" } },
+        ]);
+        expect(mock.relationshipRows("KNOWS")).toEqual([
+            { id: 99, left_id: 1, right_id: 2, note: "x" },
+        ]);
+    });
+});
+
+describe("transactions (read-your-writes)", () => {
+    const operations = () => mock.requests.map((r) => r?.operation);
+
+    test("a later clause reads the query's own writes, with final ids", async () => {
+        const runner = await run(
+            "CREATE (n:TP {name: 'S2'}) WITH n MATCH (m:TP {name: 'S2'}) RETURN n.id AS n, m.id AS m"
+        );
+        expect(runner.results.length).toBe(1);
+        expect(typeof runner.results[0].n).toBe("number");
+        expect(runner.results[0].m).toBe(runner.results[0].n);
+        expect(mock.commits).toBe(1);
+        expect(mock.nodeRows("TP").some((r) => r.name === "S2")).toBe(true);
+    });
+
+    test("later statements read earlier statements' writes", async () => {
+        const runner = await run(
+            "CREATE (n:TP {name: 'S1'}); MATCH (n:TP {name: 'S1'}) RETURN n.name AS name"
+        );
+        expect(runner.results).toEqual([{ name: "S1" }]);
+    });
+
+    test("without later reads, changes are sent once and committed", async () => {
+        await run("UNWIND ['a', 'b', 'c'] AS x CREATE (:TP {name: x})");
+        expect(mock.changeSets.length).toBe(1);
+        expect(mock.changeSets[0].length).toBe(3);
+        expect(operations().filter((o) => o === "write" || o === "commit")).toEqual([
+            "write",
+            "commit",
+        ]);
+    });
+
+    test("with later reads, each row's writes are sent before the next read", async () => {
+        const runner = await run(
+            "UNWIND ['p', 'q'] AS x CREATE (:TP {name: x}) WITH x MATCH (t:TP) WHERE t.name IN ['p', 'q'] RETURN x, count(t) AS c"
+        );
+        expect(mock.changeSets.length).toBe(2);
+        expect(runner.results).toEqual([
+            { x: "p", c: 1 },
+            { x: "q", c: 2 },
+        ]);
+    });
+
+    test("an aggregation makes every row's writes visible first", async () => {
+        const runner = await run(
+            "UNWIND ['r', 's'] AS x CREATE (:TP {name: x}) WITH collect(x) AS xs MATCH (t:TP) WHERE t.name IN xs RETURN count(t) AS c"
+        );
+        expect(runner.results).toEqual([{ c: 2 }]);
+    });
+
+    test("cached reads are dropped after a write", async () => {
+        const runner = await run(
+            "MATCH (a:TP {id: 1}) SET a.title = 'New' WITH a MATCH (b:TP {id: 1}) RETURN b.title AS title"
+        );
+        expect(runner.results).toEqual([{ title: "New" }]);
+    });
+
+    test("MERGE binds the final id before later reads", async () => {
+        const runner = await run(
+            "MERGE (p:TP {name: 'Zed'}) WITH p MATCH (q:TP {name: 'Zed'}) RETURN p.id AS p, q.id AS q"
+        );
+        expect(typeof runner.results[0].p).toBe("number");
+        expect(runner.results).toEqual([{ p: runner.results[0].p, q: runner.results[0].p }]);
+    });
+
+    test("a failing query rolls back what was sent", async () => {
+        mock.failOn = "scan";
+        await expect(
+            run("CREATE (n:TP {name: 'F'}) WITH n MATCH (m:TP {name: 'F'}) RETURN m.id AS id")
+        ).rejects.toThrow(/backend failure/);
+        expect(mock.changeSets.length).toBe(1);
+        expect(mock.rollbacks).toBe(1);
+        expect(mock.commits).toBe(0);
+        expect(mock.nodeRows("TP").some((r) => r.name === "F")).toBe(false);
+    });
+
+    test("a cancelled query rolls back what was sent", async () => {
+        const started = new Promise<void>((resolve) => (WtBlock.started = resolve));
+        const runner = new Runner(
+            "CREATE (n:TP {name: 'C'}) WITH n LOAD JSON FROM wtblock() AS x RETURN x"
+        );
+        const done = runner.run();
+        await started;
+        runner.cancel();
+        await expect(done).rejects.toBeInstanceOf(QueryCancelledError);
+        expect(mock.changeSets.length).toBe(1);
+        expect(mock.rollbacks).toBe(1);
+        expect(mock.nodeRows("TP").some((r) => r.name === "C")).toBe(false);
+    });
+
+    test("a failing commit fails the query and rolls back", async () => {
+        mock.failOn = "commit";
+        await expect(run("CREATE (n:TP {name: 'K'})")).rejects.toThrow(
+            /Commit through mocktxbackend failed: backend failure/
+        );
+        expect(mock.rollbacks).toBe(1);
+        expect(mock.nodeRows("TP").some((r) => r.name === "K")).toBe(false);
     });
 });

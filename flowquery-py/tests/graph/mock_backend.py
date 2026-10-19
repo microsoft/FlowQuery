@@ -12,7 +12,7 @@ several tables.  Relationships have ids and are exposed per type as
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Set
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Set, Tuple
 
 from flowquery.graph.testing import in_memory_node_source, in_memory_relationship_source
 from flowquery.parsing.functions.async_function import AsyncFunction
@@ -94,6 +94,8 @@ class Mock:
         self.opened = 0
         self.closed = 0
         self.fail_on: Optional[str] = None
+        self.commits = 0
+        self.rollbacks = 0
 
     @property
     def requests(self) -> List[Any]:
@@ -108,6 +110,8 @@ class Mock:
         self.opened = 0
         self.closed = 0
         self.fail_on = None
+        self.commits = 0
+        self.rollbacks = 0
 
     def clear(self) -> None:
         """Drop all data."""
@@ -131,15 +135,17 @@ class Mock:
                 rid, rel_type, row["left_id"], row["right_id"], properties
             )
 
-    def node_rows(self, label: str) -> List[Dict[str, Any]]:
+    def node_rows(self, label: str, store: Optional[Store] = None) -> List[Dict[str, Any]]:
         """Current rows of a node label (definition shape)."""
-        return [{"id": n.id, **n.properties} for n in self.store.labels.get(label, {}).values()]
+        source = store if store is not None else self.store
+        return [{"id": n.id, **n.properties} for n in source.labels.get(label, {}).values()]
 
-    def relationship_rows(self, rel_type: str) -> List[Dict[str, Any]]:
+    def relationship_rows(self, rel_type: str, store: Optional[Store] = None) -> List[Dict[str, Any]]:
         """Current rows of a relationship type (definition shape)."""
+        source = store if store is not None else self.store
         return [
             {"id": r.id, "left_id": r.start, "right_id": r.end, **r.properties}
-            for r in self.store.relationships.values()
+            for r in source.relationships.values()
             if r.type == rel_type
         ]
 
@@ -186,9 +192,9 @@ def _matches_key(properties: Dict[str, Any], match: Optional[Dict[str, Any]]) ->
     return all(k in properties and properties[k] == v for k, v in (match or {}).items())
 
 
-def apply_changes(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Apply a change set to a copy of the store; commit only if every change succeeds."""
-    store = mock.store.clone()
+def apply_changes(changes: List[Dict[str, Any]], base: Store) -> Tuple[Store, Dict[str, Any]]:
+    """Apply a change set to a copy of ``base``; the copy is only kept if every change succeeds."""
+    store = base.clone()
     ids: Dict[str, Any] = {}
     created: Dict[str, StoredNode] = {}
     stats = {
@@ -243,6 +249,14 @@ def apply_changes(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if "type" in change
                 else node(change["target"], change.get("label")).properties
             )
+            stats["propertiesSet"] += _set_properties(target_properties, change["properties"])
+        elif op == "replaceProperties":
+            target_properties = (
+                _find_relationship(store, change, ids).properties
+                if "type" in change
+                else node(change["target"], change.get("label")).properties
+            )
+            target_properties.clear()
             stats["propertiesSet"] += _set_properties(target_properties, change["properties"])
         elif op == "addLabels":
             n = node(change["target"], change.get("label"))
@@ -317,8 +331,7 @@ def apply_changes(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
                 stats["relationshipsCreated"] += 1
         else:
             raise ValueError(f"Unknown change {op}")
-    mock.store = store
-    return {"ids": ids, "stats": stats}
+    return store, {"ids": ids, "stats": stats}
 
 
 def _rows_of(pages: Iterable[List[Dict[str, Any]]]) -> Iterable[Dict[str, Any]]:
@@ -365,9 +378,30 @@ class MockBackend(AsyncFunction):
         })
         if mock.fail_on is not None and isinstance(request, dict) and request.get("operation") == mock.fail_on:
             raise RuntimeError("backend failure")
-        if isinstance(request, dict) and request.get("operation") == "write":
+        # Inside a transaction (mocktxbackend) reads and writes use the
+        # transaction's private copy of the store.
+        snapshot = context.snapshot if context is not None else None
+        tx = snapshot if isinstance(snapshot, dict) and "store" in snapshot else None
+        store: Store = tx["store"] if tx is not None else mock.store
+        operation = request.get("operation") if isinstance(request, dict) else None
+        if operation == "write":
             mock.change_sets.append(request["changes"])
-            yield apply_changes(request["changes"])
+            next_store, result = apply_changes(request["changes"], store)
+            if tx is not None:
+                tx["store"] = next_store
+            else:
+                mock.store = next_store
+            yield result
+            return
+        if operation == "commit":
+            if tx is not None:
+                mock.store = tx["store"]
+            mock.commits += 1
+            yield {}
+            return
+        if operation == "rollback":
+            mock.rollbacks += 1
+            yield {}
             return
         req = request if request is not None else {"operation": "scan", "predicate": None, "pageSize": 1000}
         if request is not None:
@@ -377,12 +411,31 @@ class MockBackend(AsyncFunction):
         pages: Any
         if not is_relationship:
             label = request.get("label") if request is not None else fallback
-            node_source: Any = in_memory_node_source(mock.node_rows(label or ""))
+            node_source: Any = in_memory_node_source(mock.node_rows(label or "", store))
             pages = node_source.lookup(req, None) if req.get("operation") == "lookup" else node_source.scan(req, None)
         else:
             rel_type = request["type"] if request is not None else (fallback or "")[4:]
-            rel_source: Any = in_memory_relationship_source(mock.relationship_rows(rel_type))
+            rel_source: Any = in_memory_relationship_source(mock.relationship_rows(rel_type, store))
             pages = rel_source.expand(req, None) if req.get("operation") == "expand" else rel_source.scan(req, None)
         for row in _rows_of(pages):
             mock.yielded += 1
             yield row
+
+
+@FunctionDef({
+    "description": "Transactional mock backend: one transaction per query (tests only)",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "rows or write result", "type": "object"},
+})
+class MockTxBackend(MockBackend):
+    capabilities: Any = {**MockBackend.capabilities, "transactions": True}
+
+    @staticmethod
+    def open_read_context() -> Dict[str, Any]:
+        """The transaction: a private copy of the store, published on commit."""
+        mock.opened += 1
+        return {"snapshot": mock.opened, "store": mock.store.clone()}
+
+    def __init__(self, name: str = "mocktxbackend") -> None:
+        super().__init__(name)

@@ -22,12 +22,22 @@
  * - `{op: "mergeNode", ref, label, key, onCreate, onMatch}`
  * - `{op: "mergeRelationship", ref, type, start, end, key, onCreate, onMatch}`
  * - `{op: "setProperties", target, label | type, properties}` — `null` removes
+ * - `{op: "replaceProperties", target, label | type, properties}` — `SET x = {...}`
  * - `{op: "addLabels" | "removeLabels", target, label, labels}`
  * - `{op: "deleteRelationship", target, type}`
  * - `{op: "deleteNode", target, label, detach}`
  *
  * A relationship `target` is the row's `id` column when the definition
  * returns one, otherwise `{left_id, right_id}`.
+ *
+ * **Transactions.**  Backends declaring `transactions: true` (with
+ * `writes: true`) run each query in one transaction, opened by the
+ * function's `openReadContext()` and shared by reads and writes.  Change
+ * sets are then sent as the query goes (before a read that follows a
+ * write, and at the end of every statement) so later clauses and
+ * statements read the query's own writes, and the query ends with
+ * `{version: 1, operation: "commit"}`, or `{operation: "rollback"}` when
+ * it fails or is cancelled.
  */
 export const WRITE_CONTRACT_VERSION = 1;
 
@@ -39,12 +49,18 @@ export interface WriteRequest {
     changes: WriteChange[];
 }
 
+/** Ends a transactional query (`transactions: true`). */
+export interface TransactionRequest {
+    version: number;
+    operation: "commit" | "rollback";
+}
+
 export interface WriteResult {
     /** Final ids of the temporary refs (`"$1"` → backend id). */
     ids: Record<string, any>;
     /** Backend-reported counters (`nodesCreated`, `propertiesSet`, ...). */
     stats: Record<string, number>;
-    /** The change set that was sent. */
+    /** Every change that was sent, in order. */
     changes: WriteChange[];
 }
 
@@ -60,8 +76,23 @@ export interface WriteBackend {
 
 /** Query-scoped collector of write changes. */
 export class WriteSet {
+    /** Every change recorded by the query, in order. */
     public readonly changes: WriteChange[] = [];
     public backend: WriteBackend | null = null;
+    /** True when every target declares `transactions: true`. */
+    public transactional: boolean = true;
+    /** Send changes after each write-clause row (reads follow the writes). */
+    public perRow: boolean = false;
+    /** Changes were sent inside the backend's transaction. */
+    public sent: boolean = false;
+    /** The transaction was committed. */
+    public committed: boolean = false;
+    /** Final ids of temporary refs, merged across sends. */
+    public readonly ids: Record<string, any> = {};
+    /** Backend counters, summed across sends. */
+    public readonly stats: Record<string, number> = {};
+    private _pending: WriteChange[] = [];
+    private _bindings: Map<string, (id: any) => void> = new Map();
     private _next: number = 1;
 
     /** A fresh temporary ref for a new node or relationship. */
@@ -75,7 +106,48 @@ export class WriteSet {
     }
     public add(change: WriteChange): void {
         this.changes.push(change);
+        this._pending.push(change);
     }
+    public get pending(): number {
+        return this._pending.length;
+    }
+    /**
+     * Take the changes not sent yet, with refs resolved by earlier sends
+     * replaced by their final ids.
+     */
+    public takePending(): WriteChange[] {
+        const out = this._pending.map((c) => replaceRefs(structuredCopy(c), this.ids, this.refs));
+        this._pending = [];
+        return out;
+    }
+    /** Rebind a variable once the backend has assigned `ref` an id. */
+    public bind(ref: string, rebind: (id: any) => void): void {
+        this._bindings.set(ref, rebind);
+    }
+    /** Record a backend response: final ids (rebinding variables) and stats. */
+    public absorb(response: { ids?: Record<string, any>; stats?: Record<string, number> }): void {
+        for (const [ref, id] of Object.entries(response.ids ?? {})) {
+            this.ids[ref] = id;
+            const rebind = this._bindings.get(ref);
+            if (rebind !== undefined) {
+                this._bindings.delete(ref);
+                rebind(id);
+            }
+        }
+        for (const [key, value] of Object.entries(response.stats ?? {})) {
+            if (typeof value === "number") this.stats[key] = (this.stats[key] ?? 0) + value;
+        }
+    }
+}
+
+function structuredCopy<T>(value: T): T {
+    if (Array.isArray(value)) return value.map(structuredCopy) as any;
+    if (value !== null && typeof value === "object" && !(value instanceof Date)) {
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(value)) out[k] = structuredCopy(v);
+        return out as T;
+    }
+    return value;
 }
 
 /**

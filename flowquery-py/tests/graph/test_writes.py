@@ -1,16 +1,40 @@
 """Declarative writes (CREATE / MERGE / SET / REMOVE / [DETACH] DELETE)
 sent as one change set to the definitions' backend function."""
 
+import asyncio
 import re
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 import pytest
 
 from flowquery.compute.runner import Runner, RunnerOptions
 from flowquery.graph.database import Database
 from flowquery.graph.source_provider import QueryCancelledError
+from flowquery.parsing.functions.async_function import AsyncFunction
+from flowquery.parsing.functions.function_metadata import FunctionDef
 
 from .mock_backend import mock
+
+
+@FunctionDef({
+    "description": "Blocks until the query signal aborts (tests only)",
+    "category": "async",
+    "parameters": [],
+    "output": {"description": "rows", "type": "object"},
+})
+class WtBlock(AsyncFunction):
+    started: Optional[asyncio.Event] = None
+
+    def __init__(self) -> None:
+        super().__init__("wtblock")
+
+    async def generate(self) -> AsyncIterator[Any]:
+        assert self.context is not None
+        signal = self.context.signal
+        if WtBlock.started is not None:
+            WtBlock.started.set()
+        await signal.wait()
+        yield {"x": 1}
 
 
 async def run(statement: str, parameters: Optional[Dict[str, Any]] = None) -> Runner:
@@ -34,6 +58,7 @@ def seed() -> None:
     mock.add_nodes("WC", COMPANIES)
     mock.add_relationships("KNOWS", [{"id": 99, "left_id": 1, "right_id": 2, "since": 2010}])
     mock.add_relationships("WORKS_AT", [{"id": 98, "left_id": 13, "right_id": 42}])
+    mock.add_nodes("TP", PEOPLE)
 
 
 _defined = False
@@ -63,6 +88,10 @@ async def ensure_definitions() -> None:
         "{ LOAD JSON FROM mockbackend($request) AS n RETURN n.id AS id }"
     )
     await run("CREATE VIRTUAL (:WEager) AS { UNWIND [{id: 1}] AS r RETURN r.id AS id }")
+    await run(
+        "CREATE VIRTUAL (:TP) AS { LOAD JSON FROM mocktxbackend($request) AS n RETURN n.id AS id, "
+        "n.name AS name, n.title AS title }"
+    )
     _defined = True
 
 
@@ -75,7 +104,7 @@ def keep_other_modules_data() -> Iterator[None]:
     mock.store = saved
     mock.reset()
     db = Database.get_instance()
-    for label in ("WP", "WC", "WRO", "WEager"):
+    for label in ("WP", "WC", "WRO", "WEager", "TP"):
         db.nodes.pop(label, None)
     db.relationships.get("KNOWS", {}).pop("WP:WP", None)
     if not db.relationships.get("KNOWS", True):
@@ -293,5 +322,129 @@ class TestValidation:
     def test_set_targets_must_be_bound_graph_elements(self) -> None:
         with pytest.raises(Exception, match="SET target x must be a node or relationship"):
             Runner("WITH 1 AS x SET x.y = 2")
-        with pytest.raises(Exception, match=re.escape("use SET n += {...}")):
-            Runner("MATCH (n:WP) SET n = {a: 1}")
+        with pytest.raises(
+            Exception, match=re.escape("ON CREATE / ON MATCH SET only supports property updates")
+        ):
+            Runner("MERGE (n:WP {name: 'x'}) ON CREATE SET n = {a: 1}")
+
+    async def test_transactions_requires_writes(self) -> None:
+        with pytest.raises(Exception, match=re.escape("transactions requires writes: true")):
+            await run(
+                "CREATE VIRTUAL (:TBad) WITH CAPABILITIES {writes: false, transactions: true} AS "
+                "{ LOAD JSON FROM mockbackend($request) AS n RETURN n.id AS id }"
+            )
+
+
+class TestReplaceProperties:
+    async def test_on_a_node(self) -> None:
+        runner = await run(
+            "MATCH (p:WP {id: 13}) SET p = {title: 'CTO'} RETURN p.name AS name, p.title AS title"
+        )
+        assert mock.change_sets[0] == [
+            {"op": "replaceProperties", "target": 13, "label": "WP", "properties": {"title": "CTO"}},
+        ]
+        assert runner.results[0]["title"] == "CTO"
+        assert runner.results[0].get("name") is None
+        node = mock.node(13, "WP")
+        assert node is not None
+        assert node.properties == {"title": "CTO"}
+
+    async def test_on_a_relationship_with_a_parameter(self) -> None:
+        await run("MATCH (a:WP {id: 1})-[r:KNOWS]->(b:WP) SET r = $props", {"props": {"note": "x"}})
+        assert mock.change_sets[0] == [
+            {"op": "replaceProperties", "target": 99, "type": "KNOWS", "properties": {"note": "x"}},
+        ]
+        assert mock.relationship_rows("KNOWS") == [{"id": 99, "left_id": 1, "right_id": 2, "note": "x"}]
+
+
+def _operations() -> List[Any]:
+    return [r.get("operation") if isinstance(r, dict) else None for r in mock.requests]
+
+
+def _tp_names() -> List[Any]:
+    return [r.get("name") for r in mock.node_rows("TP")]
+
+
+class TestTransactions:
+    async def test_a_later_clause_reads_the_querys_own_writes_with_final_ids(self) -> None:
+        runner = await run(
+            "CREATE (n:TP {name: 'S2'}) WITH n MATCH (m:TP {name: 'S2'}) RETURN n.id AS n, m.id AS m"
+        )
+        assert len(runner.results) == 1
+        assert isinstance(runner.results[0]["n"], int)
+        assert runner.results[0]["m"] == runner.results[0]["n"]
+        assert mock.commits == 1
+        assert "S2" in _tp_names()
+
+    async def test_later_statements_read_earlier_statements_writes(self) -> None:
+        runner = await run("CREATE (n:TP {name: 'S1'}); MATCH (n:TP {name: 'S1'}) RETURN n.name AS name")
+        assert runner.results == [{"name": "S1"}]
+
+    async def test_without_later_reads_changes_are_sent_once_and_committed(self) -> None:
+        await run("UNWIND ['a', 'b', 'c'] AS x CREATE (:TP {name: x})")
+        assert len(mock.change_sets) == 1
+        assert len(mock.change_sets[0]) == 3
+        assert [o for o in _operations() if o in ("write", "commit")] == ["write", "commit"]
+
+    async def test_with_later_reads_each_rows_writes_are_sent_before_the_next_read(self) -> None:
+        runner = await run(
+            "UNWIND ['p', 'q'] AS x CREATE (:TP {name: x}) WITH x MATCH (t:TP) "
+            "WHERE t.name IN ['p', 'q'] RETURN x, count(t) AS c"
+        )
+        assert len(mock.change_sets) == 2
+        assert runner.results == [{"x": "p", "c": 1}, {"x": "q", "c": 2}]
+
+    async def test_an_aggregation_makes_every_rows_writes_visible_first(self) -> None:
+        runner = await run(
+            "UNWIND ['r', 's'] AS x CREATE (:TP {name: x}) WITH collect(x) AS xs "
+            "MATCH (t:TP) WHERE t.name IN xs RETURN count(t) AS c"
+        )
+        assert runner.results == [{"c": 2}]
+
+    async def test_cached_reads_are_dropped_after_a_write(self) -> None:
+        runner = await run(
+            "MATCH (a:TP {id: 1}) SET a.title = 'New' WITH a MATCH (b:TP {id: 1}) RETURN b.title AS title"
+        )
+        assert runner.results == [{"title": "New"}]
+
+    async def test_merge_binds_the_final_id_before_later_reads(self) -> None:
+        runner = await run(
+            "MERGE (p:TP {name: 'Zed'}) WITH p MATCH (q:TP {name: 'Zed'}) RETURN p.id AS p, q.id AS q"
+        )
+        p = runner.results[0]["p"]
+        assert isinstance(p, int)
+        assert runner.results == [{"p": p, "q": p}]
+
+    async def test_a_failing_query_rolls_back_what_was_sent(self) -> None:
+        mock.fail_on = "scan"
+        with pytest.raises(Exception, match="backend failure"):
+            await run("CREATE (n:TP {name: 'F'}) WITH n MATCH (m:TP {name: 'F'}) RETURN m.id AS id")
+        assert len(mock.change_sets) == 1
+        assert mock.rollbacks == 1
+        assert mock.commits == 0
+        assert "F" not in _tp_names()
+
+    async def test_a_cancelled_query_rolls_back_what_was_sent(self) -> None:
+        started = asyncio.Event()
+        WtBlock.started = started
+        runner = Runner("CREATE (n:TP {name: 'C'}) WITH n LOAD JSON FROM wtblock() AS x RETURN x")
+        done = asyncio.ensure_future(runner.run())
+        try:
+            await asyncio.wait_for(started.wait(), 5)
+            runner.cancel()
+            with pytest.raises(QueryCancelledError):
+                await done
+        finally:
+            WtBlock.started = None
+        assert len(mock.change_sets) == 1
+        assert mock.rollbacks == 1
+        assert "C" not in _tp_names()
+
+    async def test_a_failing_commit_fails_the_query_and_rolls_back(self) -> None:
+        mock.fail_on = "commit"
+        with pytest.raises(
+            Exception, match=re.escape("Commit through mocktxbackend failed: backend failure")
+        ):
+            await run("CREATE (n:TP {name: 'K'})")
+        assert mock.rollbacks == 1
+        assert "K" not in _tp_names()

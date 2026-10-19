@@ -1662,11 +1662,15 @@ class Parser extends BaseParser {
                     }
                     items.push({ kind: "merge", element, expression });
                 } else if (clause === "SET" && this.token.isEquals()) {
-                    throw new Error(
-                        `SET ${name} = {...} is not supported; use SET ${name} += {...}`
-                    );
+                    this.setNextToken();
+                    this.skipWhitespaceAndComments();
+                    const expression = this.parseExpression();
+                    if (expression === null) {
+                        throw new Error(`Expected map expression after ${name} =`);
+                    }
+                    items.push({ kind: "replace", element, expression });
                 } else {
-                    throw new Error(`Expected property, label or += after ${name} in ${clause}`);
+                    throw new Error(`Expected property, label, = or += after ${name} in ${clause}`);
                 }
             }
             const saved = this.tokenIndex;

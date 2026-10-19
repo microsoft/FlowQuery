@@ -729,11 +729,16 @@ class Parser(BaseParser):
                         raise ValueError("Expected map expression after +=")
                     items.append(SetItem(kind="merge", element=element, expression=expression))
                 elif clause == "SET" and self.token.is_equals():
-                    raise ValueError(
-                        f"SET {name} = {{...}} is not supported; use SET {name} += {{...}}"
-                    )
+                    self.set_next_token()
+                    self._skip_whitespace_and_comments()
+                    expression = self._parse_expression()
+                    if expression is None:
+                        raise ValueError(f"Expected map expression after {name} =")
+                    items.append(SetItem(kind="replace", element=element, expression=expression))
                 else:
-                    raise ValueError(f"Expected property, label or += after {name} in {clause}")
+                    raise ValueError(
+                        f"Expected property, label, = or += after {name} in {clause}"
+                    )
             saved = self._token_index
             self._skip_whitespace_and_comments()
             if not self.token.is_comma():

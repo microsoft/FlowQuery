@@ -70,7 +70,7 @@ async def bound() -> AsyncIterator[None]:
 async def test_works_out_of_the_box_for_the_change_request_queries() -> None:
     created = await run(
         "CREATE (p:Person {name: 'Ada'}) CREATE (x:Project {name: 'Beacon'}) "
-        "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN p.id AS person, x.id AS project"
+        "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN id(p) AS person, id(x) AS project"
     )
     assert created.results == [{"person": 1, "project": 2}]
     assert created.write_result is not None
@@ -84,7 +84,7 @@ async def test_works_out_of_the_box_for_the_change_request_queries() -> None:
     )
     assert read.results == [{"person": "Ada", "project": "Beacon", "role": "lead"}]
     merged = await run(
-        "MERGE (p:Person {name: 'Ada'}) ON MATCH SET p.title = 'Lead' RETURN p.id AS id"
+        "MERGE (p:Person {name: 'Ada'}) ON MATCH SET p.title = 'Lead' RETURN id(p) AS id"
     )
     assert merged.results == [{"id": 1}]
     title = await run("MATCH (p:Person) RETURN p.title AS title")
@@ -92,11 +92,11 @@ async def test_works_out_of_the_box_for_the_change_request_queries() -> None:
 
 
 async def test_merge_of_nodes_and_relationships_is_idempotent() -> None:
-    m = "MERGE (a:Team {name: 'core'}) ON CREATE SET a.n = 1 ON MATCH SET a.n = 2 RETURN a.id AS id"
+    m = "MERGE (a:Team {name: 'core'}) ON CREATE SET a.n = 1 ON MATCH SET a.n = 2 RETURN id(a) AS id"
     assert (await run(m)).results == [{"id": 1}]
     assert (await run(m)).results == [{"id": 1}]
     await run("CREATE (:Person {name: 'Ada'})")
-    r = "MATCH (p:Person), (t:Team) MERGE (p)-[m:MEMBER_OF]->(t) RETURN m.id AS id"
+    r = "MATCH (p:Person), (t:Team) MERGE (p)-[m:MEMBER_OF]->(t) RETURN id(m) AS id"
     first = await run(r)
     assert (await run(r)).results == first.results
     counts = await run(
@@ -164,7 +164,7 @@ async def test_a_commit_after_a_concurrent_commit_to_the_same_store_fails() -> N
     MgGate.started = asyncio.Event()
     try:
         slow = asyncio.ensure_future(
-            run("CREATE (n:A) WITH n LOAD JSON FROM mggate() AS g RETURN n.id AS id")
+            run("CREATE (n:A) WITH n LOAD JSON FROM mggate() AS g RETURN id(n) AS id")
         )
         await asyncio.wait_for(MgGate.started.wait(), 5)
         await run("CREATE (:B)")

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...graph.graph_records import is_graph_record
 from .function import Function
 from .function_metadata import FunctionDef
 
@@ -38,6 +39,10 @@ class ElementId(Function):
             return None
         if not isinstance(obj, dict):
             raise ValueError("elementId() expects a node or relationship")
+
+        # Graph entities: their entity id (also for relationships).
+        if is_graph_record(obj):
+            return str(obj["id"])
 
         # If it's a RelationshipMatchRecord (has type, startNode, endNode, properties)
         if all(k in obj for k in ("type", "startNode", "endNode", "properties")):

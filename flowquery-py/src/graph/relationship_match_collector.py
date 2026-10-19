@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from .graph_records import GRAPH_KEY, is_graph_record, user_properties
+from .graph_records import GRAPH_KEY, PROPERTIES_KEY, is_graph_record, user_properties
 
 if TYPE_CHECKING:
     from .node import Node
@@ -80,6 +80,7 @@ class RelationshipMatchCollector:
         }
         if flat is not None:
             match[GRAPH_KEY] = current_record[GRAPH_KEY]
+            match[PROPERTIES_KEY] = dict(rel_props)
         # Thread inner virtual sub-query lineage through to the match
         # record so :class:`ProvenanceSites` can attach it to the hop.
         if current_record is not None:

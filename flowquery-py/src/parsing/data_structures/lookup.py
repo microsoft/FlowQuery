@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...graph.graph_records import is_graph_record, property_of
 from ..ast_node import ASTNode
 
 
@@ -41,6 +42,10 @@ class Lookup(ASTNode):
         if obj is None:
             return None
         key = self.index.value()
+        # Graph entities: always the stored user property (None when unset),
+        # as in Cypher; the entity id is read with id(n).
+        if is_graph_record(obj):
+            return property_of(obj, key)
         # Try dict-like access first, then fall back to attribute access for objects
         try:
             return obj[key]

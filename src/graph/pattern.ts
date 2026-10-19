@@ -14,6 +14,7 @@ import Relationship, { RelationshipScope } from "./relationship";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
 import RelationshipReference from "./relationship_reference";
 import {
+    IDENTITY_PROPERTY,
     MemoryNodeAccess,
     MemoryRelationshipAccess,
     NodeAccess,
@@ -256,8 +257,9 @@ class Pattern extends ASTNode {
     private static _score(node: Node): number {
         if (node instanceof NodeReference) return 3;
         const { terms } = node.sourceTerms();
-        const idTerm = terms.find((t) => t.op === "eq" && t.property === "id" && t.value != null);
-        if (idTerm !== undefined && (node.access === null || node.access.canLookup())) return 2;
+        if (node.access !== null ? node.access.identityLookup(terms) : identityPinned(terms)) {
+            return 2;
+        }
         if (node.access !== null && node.access.deferred && node.access.pushes(terms)) return 1;
         return 0;
     }
@@ -300,11 +302,7 @@ class Pattern extends ASTNode {
             if (id !== undefined) {
                 pages = [(await access.lookup(id, terms, args, origin)) as NodeRecord[]];
             } else {
-                const idTerm = terms.find((t) => t.op === "eq" && t.property === "id");
-                pages =
-                    idTerm !== undefined && idTerm.value != null && access.canLookup()
-                        ? [(await access.lookup(idTerm.value, terms, args)) as NodeRecord[]]
-                        : (access.scan(terms, args) as AsyncIterable<NodeRecord[]>);
+                pages = access.start(terms, args) as AsyncIterable<NodeRecord[]>;
             }
         }
         for await (const page of pages) {
@@ -404,6 +402,16 @@ class Pattern extends ASTNode {
             }
         }
     }
+}
+
+/** The terms pin a definition node's id (eager nodes are always definitions). */
+function identityPinned(terms: { op: string; property: string; value?: any }[]): boolean {
+    return terms.some(
+        (t) =>
+            t.op === "eq" &&
+            (t.property === "id" || t.property === IDENTITY_PROPERTY) &&
+            t.value != null
+    );
 }
 
 interface ReversalPlan {

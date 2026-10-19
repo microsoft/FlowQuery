@@ -7,7 +7,7 @@ from ...graph.node import Node
 from ...graph.pattern import Pattern
 from ...graph.patterns import Patterns
 from ...graph.relationship import RelationshipScope
-from ...graph.source_access import is_static_expression
+from ...graph.source_access import IDENTITY_PROPERTY, is_static_expression
 from ..ast_node import ASTNode
 from ..data_structures.lookup import Lookup
 from ..expressions.expression import Expression
@@ -22,6 +22,7 @@ from ..expressions.operator import (
     LessThanOrEqual,
 )
 from ..expressions.reference import Reference
+from ..functions.function import Function
 from .operation import Operation
 from .where import Where
 
@@ -116,10 +117,16 @@ class Match(Operation):
             for element in pattern.chain:
                 if isinstance(element, Node) and element.identifier is not None:
                     node_map[element.identifier] = element
-        # Add extracted predicates as properties on the matching nodes
+        # Add extracted predicates as properties (or, for ``id(n) = v``, the
+        # identity) of the matching nodes
         for node_id, prop, value_expr in predicates:
             node = node_map.get(node_id)
-            if node is not None and prop not in node.properties:
+            if node is None:
+                continue
+            if prop == IDENTITY_PROPERTY:
+                if node.identity is None:
+                    node.identity = value_expr
+            elif prop not in node.properties:
                 node.set_property(prop, value_expr)
 
     def _extract_pushdown_predicates(self) -> None:
@@ -217,6 +224,12 @@ class Match(Operation):
         self, lookup_side: ASTNode, value_side: ASTNode
     ) -> Optional[Tuple[str, str, Expression]]:
         """Tries to extract a (nodeIdentifier, property, valueExpression) from a pair."""
+        identified = Match._identity_of(lookup_side)
+        if identified is not None and self._is_literal_value(value_side):
+            identity = Expression()
+            identity.add_node(value_side)
+            identity.finish()
+            return (identified, IDENTITY_PROPERTY, identity)
         if not isinstance(lookup_side, Lookup):
             return None
         if not isinstance(lookup_side.variable, Reference):
@@ -231,6 +244,19 @@ class Match(Operation):
         expr.add_node(value_side)
         expr.finish()
         return (node_identifier, prop, expr)
+
+    @staticmethod
+    def _identity_of(node: ASTNode) -> Optional[str]:
+        """The variable of ``id(variable)``, or None for any other expression."""
+        if not isinstance(node, Function) or node.name != "id":
+            return None
+        args = node.get_children()
+        if len(args) != 1:
+            return None
+        arg: ASTNode = args[0]
+        if isinstance(arg, Expression) and arg.child_count() == 1:
+            arg = arg.first_child()
+        return arg.identifier if isinstance(arg, Reference) else None
 
     def _is_literal_value(self, node: ASTNode) -> bool:
         """Checks whether a node is a simple literal value."""

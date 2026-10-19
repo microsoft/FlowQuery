@@ -207,10 +207,7 @@ def _graph_read(request: Dict[str, Any], store: Store) -> List[Dict[str, Any]]:
             for r in mock.graph_relationships(store)
             if (request["type"] is None or r["type"] == request["type"])
             and (ids is None or key(r[field_name]) in ids)
-            and matches_predicate(
-                request.get("predicate"),
-                {**r["properties"], "id": r["id"], "left_id": r["left_id"], "right_id": r["right_id"]},
-            )
+            and matches_predicate(request.get("predicate"), r["properties"])
         ]
     wanted = request.get("labels")
     if wanted is None:
@@ -220,7 +217,7 @@ def _graph_read(request: Dict[str, Any], store: Store) -> List[Dict[str, Any]]:
         for n in mock.graph_nodes(store)
         if all(label in n["labels"] for label in wanted)
         and (ids is None or key(n["id"]) in ids)
-        and matches_predicate(request.get("predicate"), {**n["properties"], "id": n["id"]})
+        and matches_predicate(request.get("predicate"), n["properties"])
     ]
 
 

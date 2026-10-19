@@ -236,7 +236,8 @@ def _update_node_value(node: Node, properties: Dict[str, Any]) -> None:
             if stored is not None:
                 stored[key] = item
     if stored is not None:
-        # Metadata wins over a user property of the same name.
+        # ``id`` stays the entity id; the stored ``id`` property lives in the
+        # user properties, which property access reads.
         updated["id"] = value.get("id")
         updated[PROPERTIES_KEY] = stored
     node.set_value(updated)
@@ -281,6 +282,17 @@ def _replace_relationship_value(rel: Relationship, properties: Dict[str, Any]) -
     if value is None or isinstance(value, list):
         return
     props = _without_nulls(properties)
+    if is_graph_record(value):
+        rel.override_value({
+            "id": value.get("id"),
+            "type": value.get("type"),
+            "startNode": value.get("startNode"),
+            "endNode": value.get("endNode"),
+            "properties": dict(props),
+            GRAPH_KEY: value.get(GRAPH_KEY),
+            PROPERTIES_KEY: dict(props),
+        })
+        return
     updated: Dict[str, Any] = {
         **props,
         "type": value.get("type"),
@@ -298,6 +310,19 @@ def _update_relationship_value(rel: Relationship, properties: Dict[str, Any]) ->
     if value is None or isinstance(value, list):
         return
     updated: Dict[str, Any] = {**value, "properties": dict(value.get("properties") or {})}
+    if is_graph_record(value):
+        # Graph relationships: property access reads the stored properties.
+        stored = dict(user_properties(value) or {})
+        for key, item in properties.items():
+            if item is None:
+                stored.pop(key, None)
+                updated["properties"].pop(key, None)
+            else:
+                stored[key] = item
+                updated["properties"][key] = item
+        updated[PROPERTIES_KEY] = stored
+        rel.override_value(updated)
+        return
     for key, item in properties.items():
         if item is None:
             updated.pop(key, None)
@@ -362,6 +387,11 @@ def _bind_relationship(
         "startNode": start,
         "endNode": end,
         "properties": dict(properties),
+        **(
+            {GRAPH_KEY: route.graph_name, PROPERTIES_KEY: dict(properties)}
+            if route.graph_name is not None
+            else {}
+        ),
     })
 
     def rebind(id_: Any) -> None:

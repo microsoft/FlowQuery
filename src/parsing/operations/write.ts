@@ -225,7 +225,8 @@ function updateNodeValue(node: Node, properties: Record<string, any>): void {
         }
     }
     if (stored !== null) {
-        // Metadata wins over a user property of the same name.
+        // `id` stays the entity id; the stored `id` property lives in the
+        // user properties, which property access reads.
         next.id = value.id;
         next[PROPERTIES_KEY] = stored;
     }
@@ -273,6 +274,18 @@ function replaceRelationshipValue(rel: Relationship, properties: Record<string, 
     const value = rel.value();
     if (value === null || Array.isArray(value)) return;
     const props = withoutNulls(properties);
+    if (isGraphRecord(value)) {
+        rel.overrideValue({
+            id: value.id,
+            type: value.type,
+            startNode: value.startNode,
+            endNode: value.endNode,
+            properties: { ...props },
+            [GRAPH_KEY]: value[GRAPH_KEY],
+            [PROPERTIES_KEY]: { ...props },
+        } as any);
+        return;
+    }
     const next: any = {
         ...props,
         type: value.type,
@@ -288,6 +301,22 @@ function updateRelationshipValue(rel: Relationship, properties: Record<string, a
     const value = rel.value();
     if (value === null || Array.isArray(value)) return;
     const next: any = { ...value, properties: { ...value.properties } };
+    if (isGraphRecord(value)) {
+        // Graph relationships: property access reads the stored properties.
+        const stored = { ...userProperties(value) };
+        for (const [k, v] of Object.entries(properties)) {
+            if (v === null || v === undefined) {
+                delete stored[k];
+                delete next.properties[k];
+            } else {
+                stored[k] = v;
+                next.properties[k] = v;
+            }
+        }
+        next[PROPERTIES_KEY] = stored;
+        rel.overrideValue(next);
+        return;
+    }
     for (const [k, v] of Object.entries(properties)) {
         if (v === null || v === undefined) {
             delete next[k];
@@ -656,6 +685,9 @@ function bindRelationship(
         startNode: start,
         endNode: end,
         properties: { ...properties },
+        ...(route.graphName !== undefined
+            ? { [GRAPH_KEY]: route.graphName, [PROPERTIES_KEY]: { ...properties } }
+            : {}),
     });
     writes.bind(ref, (id) => {
         if (rel.createdRecord !== null && rel.createdRecord.id === ref) {

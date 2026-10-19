@@ -7,11 +7,12 @@ properties apart:
 - nodes: ``{id, labels: [...], properties: {...}}``
 - relationships: ``{id, type, left_id, right_id, properties: {...}}``
 
-FlowQuery binds them as flat records (user properties plus ``id``, and
-``left_id`` / ``right_id`` for relationships) so property access works
-exactly like for virtual definitions.  Metadata wins in that flat
-view; the exact stored labels, type and user properties travel in
-internal keys that are never returned to callers.
+FlowQuery binds them as records whose ``id`` (and ``left_id`` / ``right_id``
+for relationships) is the entity's identity, used for traversal.  User
+properties travel separately, in an internal key: property access
+(``n.name``, ``n.id``, ``{key: ...}`` constraints) always reads the stored
+user properties, as in Cypher, and the identity is read with ``id(n)``.
+Internal keys are never returned to callers.
 """
 
 from __future__ import annotations
@@ -161,8 +162,24 @@ def labels_of(value: Mapping[str, Any]) -> List[str]:
     return [label] if label else []
 
 
+def property_of(record: Mapping[str, Any], key: str) -> Any:
+    """A user property of an entity: the stored property for graph records, else the column."""
+    if is_graph_record(record):
+        properties = user_properties(record)
+        return properties.get(key) if properties is not None else None
+    return record.get(key)
+
+
+def has_property(record: Mapping[str, Any], key: str) -> bool:
+    """The entity has user property (or column) ``key``."""
+    if is_graph_record(record):
+        properties = user_properties(record)
+        return properties is not None and key in properties
+    return key in record
+
+
 def user_properties(value: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """User properties of an entity value (exact for default-graph records)."""
+    """User properties of an entity value (exact for graph records)."""
     properties = value.get(PROPERTIES_KEY)
     return properties if isinstance(properties, dict) else None
 
@@ -186,6 +203,30 @@ def without_graph_keys(value: T) -> T:
     return result
 
 
+_RELATIONSHIP_ENVELOPE = ("type", "startNode", "endNode", "properties")
+
+
+def _public_view(value: Dict[str, Any]) -> None:
+    """Rewrite a graph entity, in place, as returned to callers: its stored
+    user properties, plus ``id`` (the entity id) unless the entity stores a
+    property of that name; ``id(n)`` always returns the entity id.
+    Relationship values keep their ``type`` / ``startNode`` / ``endNode`` /
+    ``properties`` envelope."""
+    has_id = "id" in value
+    id_ = value.get("id")
+    stored = user_properties(value) or {}
+    relationship = all(key in value for key in _RELATIONSHIP_ENVELOPE)
+    envelope: Dict[str, Any] = {}
+    if relationship:
+        for key in _RELATIONSHIP_ENVELOPE:
+            envelope[key] = value[key]
+    value.clear()
+    value.update(stored)
+    if "id" not in stored and has_id:
+        value["id"] = id_
+    value.update(envelope)
+
+
 def strip_graph_keys(value: Any) -> Any:
     """Remove the internal keys of graph records, in place,
     throughout a result value.  Other values are left untouched."""
@@ -197,13 +238,7 @@ def strip_graph_keys(value: Any) -> Any:
         return value
     if isinstance(value, dict):
         if is_graph_record(value):
-            value.pop(GRAPH_KEY, None)
-            value.pop(LABELS_KEY, None)
-            value.pop(PROPERTIES_KEY, None)
-            value.pop(LEFT_NAMESPACE_KEY, None)
-            value.pop(RIGHT_NAMESPACE_KEY, None)
-            value.pop("_label", None)
-            value.pop("_type", None)
+            _public_view(value)
         for key in list(value.keys()):
             strip_graph_keys(value[key])
     return value

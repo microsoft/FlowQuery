@@ -43,7 +43,7 @@ afterEach(async () => {
 test("works out of the box for the change-request queries", async () => {
     const created = await run(
         "CREATE (p:Person {name: 'Ada'}) CREATE (x:Project {name: 'Beacon'}) " +
-            "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN p.id AS person, x.id AS project"
+            "CREATE (p)-[:WORKS_ON {role: 'lead'}]->(x) RETURN id(p) AS person, id(x) AS project"
     );
     expect(created.results).toEqual([{ person: 1, project: 2 }]);
     expect(created.writeResult!.stats).toMatchObject({
@@ -56,7 +56,7 @@ test("works out of the box for the change-request queries", async () => {
     );
     expect(read.results).toEqual([{ person: "Ada", project: "Beacon", role: "lead" }]);
     const merged = await run(
-        "MERGE (p:Person {name: 'Ada'}) ON MATCH SET p.title = 'Lead' RETURN p.id AS id"
+        "MERGE (p:Person {name: 'Ada'}) ON MATCH SET p.title = 'Lead' RETURN id(p) AS id"
     );
     expect(merged.results).toEqual([{ id: 1 }]);
     const title = await run("MATCH (p:Person) RETURN p.title AS title");
@@ -65,11 +65,11 @@ test("works out of the box for the change-request queries", async () => {
 
 test("MERGE of nodes and relationships is idempotent", async () => {
     const m =
-        "MERGE (a:Team {name: 'core'}) ON CREATE SET a.n = 1 ON MATCH SET a.n = 2 RETURN a.id AS id";
+        "MERGE (a:Team {name: 'core'}) ON CREATE SET a.n = 1 ON MATCH SET a.n = 2 RETURN id(a) AS id";
     expect((await run(m)).results).toEqual([{ id: 1 }]);
     expect((await run(m)).results).toEqual([{ id: 1 }]);
     await run("CREATE (:Person {name: 'Ada'})");
-    const r = "MATCH (p:Person), (t:Team) MERGE (p)-[m:MEMBER_OF]->(t) RETURN m.id AS id";
+    const r = "MATCH (p:Person), (t:Team) MERGE (p)-[m:MEMBER_OF]->(t) RETURN id(m) AS id";
     const first = await run(r);
     expect((await run(r)).results).toEqual(first.results);
     const counts = await run(
@@ -141,7 +141,7 @@ test("a commit after a concurrent commit to the same store fails", async () => {
     let open!: () => void;
     MgGate.release = new Promise<void>((resolve) => (open = resolve));
     const started = new Promise<void>((resolve) => (MgGate.started = resolve));
-    const slow = run("CREATE (n:A) WITH n LOAD JSON FROM mggate() AS g RETURN n.id AS id");
+    const slow = run("CREATE (n:A) WITH n LOAD JSON FROM mggate() AS g RETURN id(n) AS id");
     await started;
     await run("CREATE (:B)");
     open();

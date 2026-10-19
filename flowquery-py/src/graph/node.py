@@ -10,9 +10,11 @@ from ..parsing.expressions.expression import Expression
 from .graph_records import (
     common_namespace,
     endpoint_namespace,
+    has_property,
     labels_of,
     namespace_of,
     origin_matches,
+    property_of,
 )
 from .node_data import NodeData, NodeRecord
 from .source_access import PushedPredicate, SourceTerms, build_terms
@@ -37,6 +39,7 @@ class Node(ASTNode):
         self._all_labels = False
         #: Graph named by a qualified label, ``(n:hr.Person)``; None when unqualified.
         self._graph: Optional[str] = None
+        self._identity: Optional[Expression] = None
         self._properties: Dict[str, Expression] = {}
         self._value: Optional['NodeRecord'] = None
         self._incoming: Optional['Relationship'] = None
@@ -105,19 +108,36 @@ class Node(ASTNode):
 
     def _matches_properties(self, hop: int = 0) -> bool:
         """Check if current record matches all constraint properties."""
-        if not self._properties:
+        if not self._properties and self._identity is None:
             return True
         if self._data is None:
             return True
+        record = self._data.current(hop)
+        if record is None:
+            raise ValueError("No current node data available")
+        return self.matches_constraints(record)
+
+    def matches_constraints(self, record: Dict[str, Any]) -> bool:
+        """The row satisfies the pattern's identity (``id(n) = ...``) and property
+        constraints.  Graph nodes are matched on their stored user
+        properties; definition rows on their columns."""
+        if self._identity is not None and record.get("id") != self._identity.value():
+            return False
         for key, expression in self._properties.items():
-            record = self._data.current(hop)
-            if record is None:
-                raise ValueError("No current node data available")
-            if key not in record:
+            if not has_property(record, key):
                 return False
-            if record[key] != expression.value():
+            if property_of(record, key) != expression.value():
                 return False
         return True
+
+    @property
+    def identity(self) -> Optional[Expression]:
+        """``id(n) = value`` from the WHERE clause (set by MATCH), or None."""
+        return self._identity
+
+    @identity.setter
+    def identity(self, expression: Optional[Expression]) -> None:
+        self._identity = expression
 
     def set_value(self, value: Optional[Dict[str, Any]]) -> None:
         self._value = value  # type: ignore[assignment]
@@ -165,7 +185,7 @@ class Node(ASTNode):
         self._pushed_predicates = predicates
 
     def source_terms(self) -> SourceTerms:
-        return build_terms(self._properties, self._pushed_predicates)
+        return build_terms(self._properties, self._pushed_predicates, self._identity)
 
     def matches_labels(self, record: Dict[str, Any]) -> bool:
         """Every label of ``(n:A:B)`` is carried by the row (always true otherwise)."""
@@ -176,14 +196,7 @@ class Node(ASTNode):
 
     def matches_record(self, record: Dict[str, Any]) -> bool:
         """Residual check of the pattern's own property constraints against a row."""
-        if not self.matches_labels(record):
-            return False
-        for key, expression in self._properties.items():
-            if key not in record:
-                return False
-            if record[key] != expression.value():
-                return False
-        return True
+        return self.matches_labels(record) and self.matches_constraints(record)
 
     async def next(self) -> AsyncGenerator[None, None]:
         if self._access is not None:
@@ -249,18 +262,7 @@ class Node(ASTNode):
     async def _deferred_next(self) -> AsyncGenerator[None, None]:
         access = self._access
         terms, args = self.source_terms()
-        id_term = next(
-            (t for t in terms if t.get("op") == "eq" and t.get("property") == "id"), None
-        )
-
-        async def single() -> AsyncGenerator[List[Dict[str, Any]], None]:
-            assert id_term is not None
-            yield await access.lookup(id_term["value"], terms, args)
-
-        if id_term is not None and id_term.get("value") is not None and access.can_lookup():
-            pages = single()
-        else:
-            pages = access.scan(terms, args)
+        pages = access.start(terms, args)
         async with aclosing(pages) as page_iter:
             async for page in page_iter:
                 rows = [row for row in page if self.matches_record(row)]

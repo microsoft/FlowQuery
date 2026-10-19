@@ -4,8 +4,10 @@ import {
     commonNamespace,
     endpointMatches,
     endpointNamespace,
+    hasProperty,
     isGraphRecord,
     namespaceOf,
+    propertyOf,
 } from "./graph_records";
 import Hops from "./hops";
 import Node from "./node";
@@ -163,12 +165,12 @@ class Relationship extends ASTNode {
             if (record === null) {
                 throw new Error("No current relationship data available");
             }
-            if (!(key in record)) {
-                // Default-graph relationships have no fixed columns.
+            if (!hasProperty(record, key)) {
+                // Graph relationships have no fixed columns.
                 if (isGraphRecord(record)) return false;
                 throw new Error("Relationship does not have property");
             }
-            if (record[key] !== expression.value()) {
+            if (propertyOf(record, key) !== expression.value()) {
                 return false;
             }
         }
@@ -441,11 +443,11 @@ class Relationship extends ASTNode {
     }
     public matchesRecord(record: RelationshipRecord): boolean {
         for (const [key, expression] of this._properties) {
-            if (!(key in record)) {
+            if (!hasProperty(record, key)) {
                 if (isGraphRecord(record)) return false;
                 throw new Error("Relationship does not have property");
             }
-            if (record[key] !== expression.value()) {
+            if (propertyOf(record, key) !== expression.value()) {
                 return false;
             }
         }

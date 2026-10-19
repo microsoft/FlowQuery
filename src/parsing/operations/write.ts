@@ -643,6 +643,7 @@ async function callBackend(
     await fn.prepareContext(afterCancel);
     const args = [...backend.args];
     args[backend.requestIndex] = { version: WRITE_CONTRACT_VERSION, ...request };
+    const what = `${request.operation[0].toUpperCase()}${request.operation.slice(1)}`;
     let response: any = undefined;
     try {
         for await (const item of fn.generate(...args)) {
@@ -652,10 +653,6 @@ async function callBackend(
     } catch (e) {
         if (e instanceof QueryCancelledError) throw e;
         const message = e instanceof Error ? e.message : String(e);
-        const what =
-            request.operation === "write"
-                ? "Write"
-                : `${request.operation[0].toUpperCase()}${request.operation.slice(1)}`;
         throw new SourceError(
             `${what} through ${backend.name} failed: ${message}`,
             backend.name,
@@ -665,7 +662,7 @@ async function callBackend(
     }
     if (response !== undefined && (response === null || typeof response !== "object")) {
         throw new SourceError(
-            `Write through ${backend.name} returned an invalid response`,
+            `${what} through ${backend.name} returned an invalid response`,
             backend.name,
             request.operation
         );

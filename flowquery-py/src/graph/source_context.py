@@ -274,6 +274,11 @@ class SourceContext:
             return
         self._cache.set(key, rows)
 
+    def clear_cache(self) -> None:
+        """Drop cached and materialized reads (after the query wrote to a backend)."""
+        self._cache = RowCache(self.options.cache_capacity)
+        self._materialized.clear()
+
     async def coalesce(self, key: str, load: Callable[[], Awaitable[Any]]) -> Any:
         existing = self._inflight.get(key)
         if existing is None:
@@ -327,7 +332,11 @@ class SourceContext:
                 entry["future"] = asyncio.ensure_future(open_it())
         future = entry["future"]
         if future is not None:
-            entry["snapshot"] = await self.race(asyncio.shield(future))
+            # An opened context is reused as is, also by a cancelled query's rollback.
+            if future.done() and not future.cancelled() and future.exception() is None:
+                entry["snapshot"] = future.result()
+            else:
+                entry["snapshot"] = await self.race(asyncio.shield(future))
         return SourceReadContext(signal=self.signal, snapshot=entry["snapshot"], _owner=self)
 
     async def close(self) -> None:

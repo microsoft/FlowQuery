@@ -15,19 +15,23 @@ from ...graph.database import Database
 from ...graph.node import Node
 from ...graph.node_reference import NodeReference
 from ...graph.pattern import Pattern
+from ...graph.pattern_expression import PatternExpression
 from ...graph.relationship import Relationship
 from ...graph.source_provider import QueryCancelledError, SourceError
 from ...graph.write_set import (
     WRITE_CONTRACT_VERSION,
     WriteBackend,
-    WriteChange,
     WriteResult,
     WriteSet,
 )
 from ..ast_node import ASTNode
 from ..expressions.expression import Expression
+from ..expressions.subquery_expression import SubqueryExpression
 from ..functions.function_factory import FunctionFactory
+from .call import Call
 from .definition_backend import definition_backend
+from .load import Load
+from .match import Match
 from .operation import Operation
 
 if TYPE_CHECKING:
@@ -50,8 +54,9 @@ class SetItem:
     """One item of ``SET``, ``REMOVE`` or ``ON CREATE`` / ``ON MATCH SET``.
 
     ``kind`` is ``"property"`` (``n.p = v``), ``"merge"`` (``n += map``),
-    ``"addLabels"`` (``n:Label``), ``"removeProperty"`` (``REMOVE n.p``) or
-    ``"removeLabels"`` (``REMOVE n:Label``).
+    ``"replace"`` (``n = map``), ``"addLabels"`` (``n:Label``),
+    ``"removeProperty"`` (``REMOVE n.p``) or ``"removeLabels"``
+    (``REMOVE n:Label``).
     """
 
     kind: str
@@ -65,7 +70,7 @@ def _item_expressions(items: List[SetItem]) -> List[ASTNode]:
     return [
         item.expression
         for item in items
-        if item.kind in ("property", "merge") and item.expression is not None
+        if item.kind in ("property", "merge", "replace") and item.expression is not None
     ]
 
 
@@ -141,6 +146,36 @@ def _update_node_value(node: Node, properties: Dict[str, Any]) -> None:
     node.set_value(updated)
 
 
+def _without_nulls(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if v is not None}
+
+
+def _replace_node_value(node: Node, properties: Dict[str, Any]) -> None:
+    value = _node_value(node)
+    if value is None:
+        return
+    node.set_value({"id": value.get("id"), **_without_nulls(properties)})
+
+
+def _replace_relationship_value(rel: Relationship, properties: Dict[str, Any]) -> None:
+    value = rel.value()
+    if value is None or isinstance(value, list):
+        return
+    props = _without_nulls(properties)
+    updated: Dict[str, Any] = {
+        **props,
+        "type": value.get("type"),
+        "startNode": value.get("startNode"),
+        "endNode": value.get("endNode"),
+        "properties": dict(props),
+    }
+    if "id" in value:
+        updated["id"] = value["id"]
+    rel.override_value(updated)
+
+
 def _update_relationship_value(rel: Relationship, properties: Dict[str, Any]) -> None:
     value = rel.value()
     if value is None or isinstance(value, list):
@@ -161,7 +196,19 @@ def _map_value(expression: Optional[Expression]) -> Dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _bind_node(writes: WriteSet, node: Node, ref: str) -> None:
+    """Swap a node variable's temporary id for the final one once known."""
+
+    def rebind(id_: Any) -> None:
+        value = node.value()
+        if isinstance(value, dict) and value.get("id") == ref:
+            node.set_value({**value, "id": id_})
+
+    writes.bind(ref, rebind)
+
+
 def _bind_relationship(
+    writes: WriteSet,
     rel: Relationship,
     ref: str,
     start: Dict[str, Any],
@@ -182,6 +229,15 @@ def _bind_relationship(
         "endNode": end,
         "properties": dict(properties),
     })
+
+    def rebind(id_: Any) -> None:
+        if rel.created_record is not None and rel.created_record.get("id") == ref:
+            rel.created_record = {**rel.created_record, "id": id_}
+        value = rel.value()
+        if isinstance(value, dict) and value.get("id") == ref:
+            rel.override_value({**value, "id": id_})
+
+    writes.bind(ref, rebind)
 
 
 class WriteOperation(Operation):
@@ -225,7 +281,11 @@ class WriteOperation(Operation):
     async def run(self) -> None:
         if self._context is not None:
             self._context.throw_if_cancelled()
-        self._apply(self._writes)
+        writes = self._writes
+        self._apply(writes)
+        if writes.transactional and writes.per_row:
+            assert self._context is not None
+            await flush_writes(self._context, writes)
         if self.next:
             await self.next.run()
 
@@ -252,6 +312,16 @@ class WriteOperation(Operation):
                 target = _relationship_target(element)
                 if target is None:
                     continue
+                if item.kind == "replace":
+                    properties = _map_value(item.expression)
+                    writes.add({
+                        "op": "replaceProperties",
+                        "target": target,
+                        "type": element.type,
+                        "properties": properties,
+                    })
+                    _replace_relationship_value(element, properties)
+                    continue
                 if item.kind == "property":
                     assert item.property is not None and item.expression is not None
                     properties = {item.property: item.expression.value()}
@@ -274,7 +344,16 @@ class WriteOperation(Operation):
             if value is None:
                 continue
             label = label_of(element)
-            if item.kind in ("property", "merge", "removeProperty"):
+            if item.kind == "replace":
+                properties = _map_value(item.expression)
+                writes.add({
+                    "op": "replaceProperties",
+                    "target": value.get("id"),
+                    "label": label,
+                    "properties": properties,
+                })
+                _replace_node_value(element, properties)
+            elif item.kind in ("property", "merge", "removeProperty"):
                 if item.kind == "property":
                     assert item.property is not None and item.expression is not None
                     properties = {item.property: item.expression.value()}
@@ -338,6 +417,7 @@ class CreateWrite(WriteOperation):
                         "properties": properties,
                     })
                     element.set_value({"id": ref, **properties})
+                    _bind_node(writes, element, ref)
             for element in pattern.chain:
                 if isinstance(element, Relationship):
                     left, right = _endpoints(element)
@@ -355,7 +435,7 @@ class CreateWrite(WriteOperation):
                         "end": end.get("id"),
                         "properties": properties,
                     })
-                    _bind_relationship(element, ref, start, end, properties)
+                    _bind_relationship(writes, element, ref, start, end, properties)
 
 
 class MergeWrite(WriteOperation):
@@ -429,6 +509,7 @@ class MergeWrite(WriteOperation):
                 "onMatch": on_match,
             })
             node.set_value({"id": ref, **key})
+            _bind_node(writes, node, ref)
             return
         left, right = _endpoints(rel)
         start = _node_value(left) if left is not None else None
@@ -446,7 +527,7 @@ class MergeWrite(WriteOperation):
             "onCreate": on_create,
             "onMatch": on_match,
         })
-        _bind_relationship(rel, ref, start, end, key)
+        _bind_relationship(writes, rel, ref, start, end, key)
 
 
 class SetWrite(WriteOperation):
@@ -528,8 +609,9 @@ def _describe(target: WriteTarget) -> str:
     )
 
 
-def resolve_write_backend(target: WriteTarget) -> WriteBackend:
-    """Resolve the backend function a write target is applied through.  The
+def resolve_write_backend(target: WriteTarget) -> Tuple[WriteBackend, bool]:
+    """Resolve the backend function a write target is applied through, and
+    whether its definition declares ``transactions: true``.  The
     target must have a statement-backed ``CREATE VIRTUAL`` definition whose
     effective capabilities declare ``writes: true`` and whose body loads
     from ``fn($request)``."""
@@ -571,49 +653,76 @@ def resolve_write_backend(target: WriteTarget) -> WriteBackend:
         None if i == backend.request_index else child.value()
         for i, child in enumerate(backend.func.get_children())
     ]
-    return WriteBackend(
-        name=backend.name,
-        function_class=backend.function_class,
-        request_index=backend.request_index,
-        args=args,
+    return (
+        WriteBackend(
+            name=backend.name,
+            function_class=backend.function_class,
+            request_index=backend.request_index,
+            args=args,
+        ),
+        capabilities.get("transactions") is True,
     )
 
 
-def prepare_writes(operations: List[WriteOperation], ctx: "SourceContext") -> None:
-    """Check every target of a statement's write clauses before it runs and
-    pin the query to a single backend function."""
+def reads_after_writes(first: Optional[Operation]) -> bool:
+    """True when a clause after the statement's first write clause reads data."""
+    written = False
+    op = first
+    while op is not None:
+        if isinstance(op, WriteOperation):
+            written = True
+        elif written and (isinstance(op, (Match, Load, Call)) or _contains_read(op)):
+            return True
+        op = op.next
+    return False
+
+
+def _contains_read(node: ASTNode) -> bool:
+    if isinstance(node, (SubqueryExpression, PatternExpression)):
+        return True
+    return any(_contains_read(child) for child in node.get_children())
+
+
+def prepare_writes(first: Operation, ctx: "SourceContext") -> None:
+    """Check every target of a statement's write clauses before it runs, pin
+    the query to a single backend function and decide when changes are
+    sent (see :class:`WriteSet`)."""
+    operations = WriteOperation.collect(first)
     if len(operations) == 0:
         return
     if ctx.writes is None:
         ctx.writes = WriteSet()
+    writes = ctx.writes
     for op in operations:
         for target in op.targets:
-            backend = resolve_write_backend(target)
-            current = ctx.writes.backend
+            backend, transactions = resolve_write_backend(target)
+            current = writes.backend
             if current is None:
-                ctx.writes.backend = backend
+                writes.backend = backend
             elif current.function_class is not backend.function_class:
                 raise ValueError(
                     "A query can only write through one backend function "
                     f"({current.name} and {backend.name})"
                 )
+            writes.transactional = writes.transactional and transactions
+    writes.per_row = writes.transactional and reads_after_writes(first)
 
 
-async def commit_writes(ctx: "SourceContext", writes: WriteSet) -> WriteResult:
-    """Send the collected change set to the backend in one call."""
-    backend = writes.backend
-    assert backend is not None
-    changes: List[WriteChange] = writes.changes
+async def _call_backend(
+    ctx: "SourceContext",
+    backend: WriteBackend,
+    request: Dict[str, Any],
+    after_cancel: bool = False,
+) -> Dict[str, Any]:
+    """Call the backend function once with ``request`` and return its first item."""
+    operation = request["operation"]
     fn = FunctionFactory.create_async(backend.name)
     fn.source_context = ctx
-    await fn.prepare_context()
+    await fn.prepare_context(after_cancel)
     args = list(backend.args)
-    args[backend.request_index] = {
-        "version": WRITE_CONTRACT_VERSION,
-        "operation": "write",
-        "changes": changes,
-    }
+    args[backend.request_index] = {"version": WRITE_CONTRACT_VERSION, **request}
     response: Any = _NO_RESPONSE
+    what = operation[:1].upper() + operation[1:]
     generator = fn.generate(*args)
     try:
         async for item in generator:
@@ -623,7 +732,7 @@ async def commit_writes(ctx: "SourceContext", writes: WriteSet) -> WriteResult:
         raise
     except Exception as e:
         raise SourceError(
-            f"Write through {backend.name} failed: {e}", backend.name, "write", e
+            f"{what} through {backend.name} failed: {e}", backend.name, operation, e
         ) from e
     finally:
         aclose = getattr(generator, "aclose", None)
@@ -631,20 +740,48 @@ async def commit_writes(ctx: "SourceContext", writes: WriteSet) -> WriteResult:
             await aclose()
     if response is not _NO_RESPONSE and not isinstance(response, dict):
         raise SourceError(
-            f"Write through {backend.name} returned an invalid response", backend.name, "write"
+            f"{what} through {backend.name} returned an invalid response", backend.name, operation
         )
-    ids: Dict[str, Any] = {}
-    stats: Dict[str, Any] = {}
-    if isinstance(response, dict):
-        ids = response.get("ids") or {}
-        stats = response.get("stats") or {}
-    return WriteResult(ids=ids, stats=stats, changes=changes)
+    return response if isinstance(response, dict) else {}
 
 
 _NO_RESPONSE: Any = object()
 
 
-def has_writes(root: ASTNode) -> bool:
-    """True when ``root`` contains a write clause anywhere in its operation chain."""
-    first = root.first_child()
-    return len(WriteOperation.collect(first if isinstance(first, Operation) else None)) > 0
+async def flush_writes(ctx: "SourceContext", writes: WriteSet) -> None:
+    """Send the changes not sent yet.  In a transactional query they are
+    applied inside the backend's open transaction, so the query's later
+    reads see them; the query-scoped read cache is dropped."""
+    if writes.pending == 0 or writes.backend is None:
+        return
+    ctx.throw_if_cancelled()
+    changes = writes.take_pending()
+    writes.absorb(
+        await _call_backend(ctx, writes.backend, {"operation": "write", "changes": changes})
+    )
+    writes.sent = True
+    ctx.clear_cache()
+
+
+async def commit_writes(ctx: "SourceContext", writes: WriteSet) -> WriteResult:
+    """Finish the query's writes: send the remaining changes (all of them, in
+    one call, for non-transactional backends) and commit a transactional
+    query."""
+    ctx.throw_if_cancelled()
+    await flush_writes(ctx, writes)
+    if writes.transactional and writes.sent and writes.backend is not None:
+        ctx.throw_if_cancelled()
+        await _call_backend(ctx, writes.backend, {"operation": "commit"})
+        writes.committed = True
+    return WriteResult(ids=dict(writes.ids), stats=dict(writes.stats), changes=writes.changes)
+
+
+async def rollback_writes(ctx: "SourceContext", writes: WriteSet) -> None:
+    """Roll back a transactional query whose changes were already sent.
+    Failures are ignored so the query's own error is reported."""
+    if not writes.transactional or not writes.sent or writes.committed or writes.backend is None:
+        return
+    try:
+        await _call_backend(ctx, writes.backend, {"operation": "rollback"}, True)
+    except Exception:
+        pass

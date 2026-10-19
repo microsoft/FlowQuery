@@ -285,6 +285,10 @@ def _validate_base(caps: Any, name: str) -> None:
             raise SourceCapabilityError(f"Source {name}: maxBatchSize must be a positive integer", name)
     if "writes" in caps and not isinstance(caps["writes"], bool):
         raise SourceCapabilityError(f"Source {name}: writes must be true or false", name)
+    if "transactions" in caps and not isinstance(caps["transactions"], bool):
+        raise SourceCapabilityError(f"Source {name}: transactions must be true or false", name)
+    if caps.get("transactions") is True and caps.get("writes") is not True:
+        raise SourceCapabilityError(f"Source {name}: transactions requires writes: true", name)
     if "predicates" in caps and caps["predicates"] is not None:
         p = caps["predicates"]
         if not isinstance(p, dict) or not isinstance(p.get("operators"), list):

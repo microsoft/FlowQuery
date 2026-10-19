@@ -19,18 +19,28 @@ Change entries (node targets carry ``label``, relationship targets ``type``):
 - ``{op: "mergeNode", ref, label, key, onCreate, onMatch}``
 - ``{op: "mergeRelationship", ref, type, start, end, key, onCreate, onMatch}``
 - ``{op: "setProperties", target, label | type, properties}`` — ``None`` removes
+- ``{op: "replaceProperties", target, label | type, properties}`` — ``SET x = {...}``
 - ``{op: "addLabels" | "removeLabels", target, label, labels}``
 - ``{op: "deleteRelationship", target, type}``
 - ``{op: "deleteNode", target, label, detach}``
 
 A relationship ``target`` is the row's ``id`` column when the definition
 returns one, otherwise ``{left_id, right_id}``.
+
+**Transactions.**  Backends declaring ``transactions: true`` (with
+``writes: true``) run each query in one transaction, opened by the
+function's ``open_read_context()`` and shared by reads and writes.  Change
+sets are then sent as the query goes (before a read that follows a write,
+and at the end of every statement) so later clauses and statements read
+the query's own writes, and the query ends with
+``{"version": 1, "operation": "commit"}``, or ``{"operation": "rollback"}``
+when it fails or is cancelled.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 WRITE_CONTRACT_VERSION = 1
 
@@ -45,7 +55,7 @@ class WriteResult:
     ids: Dict[str, Any] = field(default_factory=dict)
     #: Backend-reported counters (``nodesCreated``, ``propertiesSet``, ...).
     stats: Dict[str, Any] = field(default_factory=dict)
-    #: The change set that was sent.
+    #: Every change that was sent, in order.
     changes: List[WriteChange] = field(default_factory=list)
 
 
@@ -65,8 +75,23 @@ class WriteSet:
     """Query-scoped collector of write changes."""
 
     def __init__(self) -> None:
+        #: Every change recorded by the query, in order.
         self.changes: List[WriteChange] = []
         self.backend: Optional[WriteBackend] = None
+        #: True when every target declares ``transactions: true``.
+        self.transactional = True
+        #: Send changes after each write-clause row (reads follow the writes).
+        self.per_row = False
+        #: Changes were sent inside the backend's transaction.
+        self.sent = False
+        #: The transaction was committed.
+        self.committed = False
+        #: Final ids of temporary refs, merged across sends.
+        self.ids: Dict[str, Any] = {}
+        #: Backend counters, summed across sends.
+        self.stats: Dict[str, Any] = {}
+        self._pending: List[WriteChange] = []
+        self._bindings: Dict[str, Callable[[Any], None]] = {}
         self._next = 1
 
     def ref(self) -> str:
@@ -81,6 +106,42 @@ class WriteSet:
 
     def add(self, change: WriteChange) -> None:
         self.changes.append(change)
+        self._pending.append(change)
+
+    @property
+    def pending(self) -> int:
+        return len(self._pending)
+
+    def take_pending(self) -> List[WriteChange]:
+        """Take the changes not sent yet, with refs resolved by earlier sends
+        replaced by their final ids."""
+        refs = self.refs
+        out = [replace_refs(_copy(change), self.ids, refs) for change in self._pending]
+        self._pending = []
+        return out
+
+    def bind(self, ref: str, rebind: Callable[[Any], None]) -> None:
+        """Rebind a variable once the backend has assigned ``ref`` an id."""
+        self._bindings[ref] = rebind
+
+    def absorb(self, response: Dict[str, Any]) -> None:
+        """Record a backend response: final ids (rebinding variables) and stats."""
+        for ref, id_ in (response.get("ids") or {}).items():
+            self.ids[ref] = id_
+            rebind = self._bindings.pop(ref, None)
+            if rebind is not None:
+                rebind(id_)
+        for key, value in (response.get("stats") or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                self.stats[key] = self.stats.get(key, 0) + value
+
+
+def _copy(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_copy(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _copy(v) for k, v in value.items()}
+    return value
 
 
 def replace_refs(value: Any, ids: Dict[str, Any], refs: Set[str]) -> Any:

@@ -26,7 +26,13 @@ from ..parsing.operations.match import Match
 from ..parsing.operations.operation import Operation
 from ..parsing.operations.return_op import Return
 from ..parsing.operations.union import Union
-from ..parsing.operations.write import WriteOperation, commit_writes, prepare_writes
+from ..parsing.operations.write import (
+    WriteOperation,
+    commit_writes,
+    flush_writes,
+    prepare_writes,
+    rollback_writes,
+)
 from ..parsing.parser import Parser
 from ..parsing.statement_info_crawler import (
     ColumnLineage,
@@ -276,6 +282,9 @@ class Runner:
             await self._run_statements(resolver, inherited, previous_context, sink, last)
         except BaseException:
             failed = True
+            ctx = self._source_context if self._is_top_level else None
+            if ctx is not None and ctx.writes is not None:
+                await rollback_writes(ctx, ctx.writes)
             raise
         finally:
             if sink is not None and isinstance(last, Return):
@@ -319,17 +328,17 @@ class Runner:
             Runner._assign_source_context(child, ctx)
 
     async def _commit_writes(self) -> None:
-        """Send the change set collected by write clauses to the backend in
-        one call, then replace temporary refs in the results by final ids.
-        Only runs when every statement succeeded and the query was not
-        cancelled."""
+        """Finish the query's writes: send the remaining changes (the whole
+        change set, in one call, for non-transactional backends), commit a
+        transactional query, then replace temporary refs in the results by
+        final ids.  Only runs when every statement succeeded and the query
+        was not cancelled."""
         ctx = self._source_context
         if not self._is_top_level or ctx is None or ctx.writes is None:
             return
         writes = ctx.writes
         if len(writes.changes) == 0 or writes.backend is None:
             return
-        ctx.throw_if_cancelled()
         self._write_result = await commit_writes(ctx, writes)
         # Aggregating projections rebuild their rows on every read, so keep
         # the rows whose temporary refs were replaced.
@@ -399,10 +408,22 @@ class Runner:
             if len(writes) > 0:
                 if not self._is_top_level or self._source_context is None:
                     raise ValueError("Write clauses are only allowed in top-level queries")
-                prepare_writes(writes, self._source_context)
+                prepare_writes(stmt.first, self._source_context)
             await stmt.first.initialize()
             await stmt.first.run()
             await stmt.first.finish()
+            # Transactional backends get each statement's changes before
+            # the next statement reads.
+            ctx = self._source_context
+            pending = ctx.writes if ctx is not None else None
+            if (
+                self._is_top_level
+                and ctx is not None
+                and pending is not None
+                and pending.transactional
+                and pending.backend is not None
+            ):
+                await flush_writes(ctx, pending)
         await self._commit_writes()
 
     def _enable_provenance(self) -> None:

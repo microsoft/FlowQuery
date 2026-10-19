@@ -1006,6 +1006,7 @@ CREATE VIRTUAL (:Person) WITH CAPABILITIES {lookup: true} AS {
 | `cacheable`    | Identical reads within one query may be cached.                                                                                                                |
 | `maxBatchSize` | Maximum ids per `lookup`/`expand` request.                                                                                                                     |
 | `writes`       | The backend function accepts change sets (see [Writing to Backends](#writing-to-backends)).                                                                    |
+| `transactions` | With `writes`: one backend transaction per query, so the query reads its own writes (see [Transactions](#transactions-read-your-writes)).                      |
 
 `version` defaults to the current contract version, node-only keys are ignored for relationships and the reverse, and invalid capabilities reject the whole definition with `SourceCapabilityError`. Redefining the label without capabilities, or deleting it, restores eager loading.
 
@@ -1089,8 +1090,6 @@ Errors are reported through typed exceptions: `SourceCapabilityError` (invalid d
 
 Query-level tuning goes in `RunnerOptions.sources`. The defaults are `pageSize: 256`, `maxBatchSize: 100`, `cacheCapacity: 10000`, `maxPrefetchRows: 1024` and `reorder: true`.
 
-**Deprecated programmatic API.** `FlowQuery.registerNodeSource`, `registerRelationshipSource`, `setNodeSourceCapabilities` and `setRelationshipSourceCapabilities` still work but log a one-time deprecation warning and will be removed in the next major release. Move each provider's `scan`/`lookup`/`expand` into one async function, use `this.context.signal` / `this.context.snapshot` instead of the provider's `ctx`, and define the labels with `CREATE VIRTUAL ... AS { LOAD JSON FROM fn($request) ... }`. The in-memory providers (`inMemoryNodeSource`, `inMemoryRelationshipSource`) are no longer exported; use a definition over a list as shown above.
-
 #### Writing to Backends
 
 `CREATE`, `MERGE`, `SET`, `REMOVE` and `DELETE` change data behind statement-backed definitions whose capabilities include `writes: true` (declared by the function or in `WITH CAPABILITIES`):
@@ -1101,6 +1100,7 @@ MATCH (b:Person {name: 'Ben'}) CREATE (a:Person {name: 'Ada'})-[:KNOWS {since: 2
 MERGE (p:Person {name: 'Ben'}) ON CREATE SET p.team = 'Core' ON MATCH SET p.seen = true
 MATCH (a:Person {id: 1}), (b:Person {id: 2}) MERGE (a)-[:KNOWS]->(b)
 MATCH (p:Person {id: 7}) SET p.title = 'CTO', p += {team: 'Core'}, p:Manager
+MATCH (p:Person {id: 7}) SET p = {name: 'Ada', title: 'CTO'}   // replace all properties
 MATCH (p:Person {id: 7}) REMOVE p.title, p:Intern
 MATCH (:Person {id: 1})-[r:KNOWS]->() DELETE r
 MATCH (p:Person {id: 13}) DETACH DELETE p
@@ -1115,6 +1115,7 @@ While the query runs, FlowQuery collects the changes into one ordered change set
     { op: "mergeNode", ref: "$3", label: "Person", key: { name: "Ben" }, onCreate: { team: "Core" }, onMatch: { seen: true } },
     { op: "mergeRelationship", ref: "$4", type: "KNOWS", start: 1, end: 2, key: {}, onCreate: {}, onMatch: {} },
     { op: "setProperties", target: 7, label: "Person", properties: { title: "CTO" } }, // null removes a property
+    { op: "replaceProperties", target: 7, label: "Person", properties: { name: "Ada", title: "CTO" } },
     { op: "addLabels", target: 7, label: "Person", labels: ["Manager"] },
     { op: "removeLabels", target: 7, label: "Person", labels: ["Intern"] },
     { op: "deleteRelationship", target: 99, type: "KNOWS" },
@@ -1124,12 +1125,33 @@ While the query runs, FlowQuery collects the changes into one ordered change set
 
 Node targets carry their `label`, relationship targets their `type`; a relationship `target` is its `id` column when the definition returns one, otherwise `{left_id, right_id}`. The backend applies the list **atomically** and yields `{ ids: { "$1": 1001, ... }, stats: { nodesCreated, ... } }`. `MERGE` is resolved by the backend inside its transaction, which avoids read-then-write races. A plain `DELETE` of a node that still has relationships must fail in the backend.
 
-The outcome is available as `runner.writeResult` (`changes`, `ids`, `stats`), and `RETURN` after a write returns FlowQuery's values with temporary ids replaced by the final ids. Deliberate limits:
+The outcome is available as `runner.writeResult` (`changes`, `ids`, `stats`), and `RETURN` after a write returns FlowQuery's values with temporary ids replaced by the final ids.
 
-- **No read-your-writes inside a query.** `MATCH` sees the store as it was when the query started; changes take effect when the query finishes. Later statements of a multi-statement query don't see them either.
-- **One transaction per query**, through one backend function. A failing or cancelled query sends nothing; a failing backend write fails the query.
+By default (`writes: true` only) the change set is sent once, when the query succeeds, so the query does **not** read its own writes: `MATCH` sees the store as it was when the query started, and later statements of a multi-statement query don't see the changes either. A failing or cancelled query sends nothing.
+
+##### Transactions (read-your-writes)
+
+Backends that declare `transactions: true` (with `writes: true`) get Cypher's transactional semantics: the query reads its own writes.
+
+- The query runs in **one backend transaction**, opened by the function's `openReadContext()` and shared by every read and write of the query.
+- FlowQuery sends the changes **as the query goes**: before any read (`MATCH`, `LOAD`, `CALL`, `EXISTS` / `COUNT` / `COLLECT`) that follows a write in the same statement, and at the end of every statement. When nothing reads after the writes, they are still sent in one call.
+- New nodes and relationships get their final ids as soon as their change is sent, and FlowQuery's per-query read cache is dropped after each send.
+- When the query succeeds the function receives `{ version: 1, operation: "commit" }`; when it fails, is cancelled or the commit fails, `{ version: 1, operation: "rollback" }`. Then `closeReadContext()` runs as usual.
+
+```cypher
+CREATE (n:Person {name: 'Ada'})
+WITH n
+MATCH (m:Person {name: 'Ada'})   // finds Ada, with her final id
+RETURN n.id = m.id
+```
+
+FlowQuery processes rows one at a time, so a later clause sees the writes of the current and all earlier rows, but not of rows still to come (Neo4j completes each clause for all rows first). To make every row's writes visible before reading, aggregate first (`WITH collect(...) AS ...`) or use a separate statement.
+
+Other limits:
+
+- Writes go through **one backend function** per query.
 - Writes to labels without a definition, to eager definitions or to definitions without `writes: true` are rejected before the query runs. Write clauses are not allowed inside definitions.
-- `SET n = {...}` (replace all properties) and schema changes are not supported.
+- `ON CREATE SET` / `ON MATCH SET` take `x.prop = v` and `x += {...}` items; schema changes (indexes, constraints) are not supported.
 
 ### Reserved Keywords as Identifiers
 

@@ -80,14 +80,17 @@ class AsyncFunction(Function):
         running query, or ``None`` when the function is called outside a query."""
         return self._context
 
-    async def prepare_context(self) -> None:
+    async def prepare_context(self, after_cancel: bool = False) -> None:
         """Opens the class's read context for this query (once) and exposes
-        the query's signal, snapshot and stats as ``self.context`` (internal)."""
+        the query's signal, snapshot and stats as ``self.context`` (internal).
+        ``after_cancel`` skips the cancellation check (to roll back a
+        cancelled query)."""
         ctx = self._source_context
         if ctx is None:
             self._context = None
             return
-        ctx.throw_if_cancelled()
+        if not after_cancel:
+            ctx.throw_if_cancelled()
         read_context = await ctx.read_context(type(self))
         self._context = FunctionContext(
             signal=read_context.signal,

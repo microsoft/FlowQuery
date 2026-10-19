@@ -1,3 +1,4 @@
+import type DefaultGraph from "./default_graph";
 import {
     QueryCancelledError,
     SOURCE_CONTRACT_VERSION,
@@ -150,6 +151,11 @@ class SourceContext {
     public parameters: Record<string, any> = {};
     /** Changes collected by write clauses; sent to the backend when the query succeeds. */
     public writes: WriteSet | null = null;
+    /**
+     * Default graph pinned by this query (the registry's binding when the
+     * query started, or one bound by the query's own `USE GRAPH`).
+     */
+    public graph: DefaultGraph | null = null;
     private _controller: AbortController = new AbortController();
     private _cache: RowCache;
     private _inflight: Map<string, Promise<SourceRow[]>> = new Map();

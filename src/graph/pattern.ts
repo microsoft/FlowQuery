@@ -1,5 +1,6 @@
 import ASTNode from "../parsing/ast_node";
 import DataResolver from "./data_resolver";
+import { commonOrigin, isGraphRecord, originMatches } from "./graph_records";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import NodeReference from "./node_reference";
@@ -271,7 +272,8 @@ class Pattern extends ASTNode {
         plan: ReversalPlan,
         i: number,
         id: any,
-        relRows: RelationshipRecord[]
+        relRows: RelationshipRecord[],
+        origin?: boolean
     ): AsyncGenerator<void> {
         const node = plan.nodes[i];
         const access = plan.nodeAccess[i];
@@ -279,13 +281,18 @@ class Pattern extends ASTNode {
         let filter = true;
         if (access === null) {
             const referenced = (node as NodeReference).reference?.value();
-            if (referenced == null || (id !== undefined && id !== referenced.id)) return;
+            if (
+                referenced == null ||
+                (id !== undefined && (id !== referenced.id || !originMatches(referenced, origin)))
+            ) {
+                return;
+            }
             pages = [[referenced]];
             filter = false;
         } else {
             const { terms, args } = node.sourceTerms();
             if (id !== undefined) {
-                pages = [(await access.lookup(id, terms, args)) as NodeRecord[]];
+                pages = [(await access.lookup(id, terms, args, origin)) as NodeRecord[]];
             } else {
                 const idTerm = terms.find((t) => t.op === "eq" && t.property === "id");
                 pages =
@@ -308,7 +315,8 @@ class Pattern extends ASTNode {
                     rows.map((r) => r.id),
                     side,
                     relTerms!.terms,
-                    relTerms!.args
+                    relTerms!.args,
+                    commonOrigin(rows)
                 );
                 const prev = plan.nodeAccess[i - 1];
                 if (buffered !== null && prev !== null && prev.deferred) {
@@ -316,7 +324,8 @@ class Pattern extends ASTNode {
                     await prev.prefetch(
                         buffered.map((r) => r[nextField]),
                         prevTerms.terms,
-                        prevTerms.args
+                        prevTerms.args,
+                        commonOrigin(buffered)
                     );
                 }
             }
@@ -330,7 +339,8 @@ class Pattern extends ASTNode {
                     row.id,
                     side,
                     relTerms!.terms,
-                    relTerms!.args
+                    relTerms!.args,
+                    isGraphRecord(row)
                 )) {
                     const prev = plan.nodeAccess[i - 1];
                     if (prev !== null && prev.deferred && relPage.length > 1) {
@@ -338,7 +348,8 @@ class Pattern extends ASTNode {
                         await prev.prefetch(
                             relPage.map((r) => r[nextField]),
                             prevTerms.terms,
-                            prevTerms.args
+                            prevTerms.args,
+                            commonOrigin(relPage)
                         );
                     }
                     for (const relRow of relPage as RelationshipRecord[]) {
@@ -347,7 +358,13 @@ class Pattern extends ASTNode {
                         if (claimed === null) continue;
                         try {
                             relRows[i - 1] = relRow;
-                            yield* this._reverseFrom(plan, i - 1, relRow[nextField], relRows);
+                            yield* this._reverseFrom(
+                                plan,
+                                i - 1,
+                                relRow[nextField],
+                                relRows,
+                                isGraphRecord(relRow)
+                            );
                         } finally {
                             rel.release(claimed);
                         }

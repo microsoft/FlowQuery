@@ -95,6 +95,7 @@ from .operations.union_all import UnionAll
 from .operations.unwind import Unwind
 from .operations.update import Update
 from .operations.update_delete import UpdateDelete
+from .operations.use_graph import DropGraph, UseGraph
 from .operations.where import Where
 from .operations.with_op import With
 from .operations.write import (
@@ -207,6 +208,8 @@ class Parser(BaseParser):
                     DeleteNode,
                     DeleteRelationship,
                     DropBinding,
+                    UseGraph,
+                    DropGraph,
                     RefreshNode,
                     RefreshRelationship,
                     RefreshBinding,
@@ -328,6 +331,8 @@ class Parser(BaseParser):
                 DeleteNode,
                 DeleteRelationship,
                 DropBinding,
+                    UseGraph,
+                    DropGraph,
                 RefreshNode,
                 RefreshRelationship,
                 RefreshBinding,
@@ -347,6 +352,7 @@ class Parser(BaseParser):
 
     def _parse_operation(self) -> Optional[Operation]:
         return (
+            self._parse_use_graph() or
             self._parse_with() or
             self._parse_unwind() or
             self._parse_return() or
@@ -362,6 +368,31 @@ class Parser(BaseParser):
             self._parse_set_write() or
             self._parse_remove_write()
         )
+
+    def _is_word(self, word: str) -> bool:
+        """True when the current token is the (non-reserved) word ``word``."""
+        return self.token.is_identifier_or_keyword() and (self.token.value or "").upper() == word
+
+    def _parse_use_graph(self) -> Optional[UseGraph]:
+        """``USE GRAPH fn($request, ...)``: bind the default graph backend."""
+        if not self.token.is_identifier() or not self._is_word("USE"):
+            return None
+        saved = self._token_index
+        self.set_next_token()
+        self._skip_whitespace_and_comments()
+        if not self._is_word("GRAPH"):
+            self._token_index = saved
+            return None
+        self._assert_writes_allowed("USE GRAPH")
+        self.set_next_token()
+        self._expect_and_skip_whitespace_and_comments()
+        fn = self._parse_async_function()
+        if fn is None:
+            raise ValueError(
+                "Expected a registered async function after USE GRAPH, "
+                "e.g. USE GRAPH backend($request)"
+            )
+        return UseGraph(fn)
 
     def _parse_with(self) -> Optional[With]:
         if not self.token.is_with():
@@ -574,8 +605,10 @@ class Parser(BaseParser):
                             "CREATE cannot add labels or properties to bound variable "
                             f"{element.identifier}"
                         )
-                elif len(element.labels) != 1:
+                elif len(element.labels) > 1 and not element.all_labels:
                     raise ValueError("CREATE requires exactly one label for each new node")
+                # Unlabelled and multi-label nodes are checked when the query
+                # runs: only the default graph (USE GRAPH) accepts them.
         return CreateWrite(patterns)
 
     def _parse_merge_write(self) -> MergeWrite:
@@ -587,7 +620,11 @@ class Parser(BaseParser):
         chain = pattern.chain
         if len(chain) == 1:
             node = chain[0]
-            if isinstance(node, NodeReference) or not isinstance(node, Node) or len(node.labels) != 1:
+            if (
+                isinstance(node, NodeReference)
+                or not isinstance(node, Node)
+                or (len(node.labels) > 1 and not node.all_labels)
+            ):
                 raise ValueError("MERGE of a node requires a new variable with exactly one label")
         elif (
             len(chain) == 3
@@ -829,10 +866,14 @@ class Parser(BaseParser):
             target = self._parse_node()
             if target is None:
                 raise ValueError("Expected target node definition")
+            if target.all_labels:
+                raise ValueError("CREATE VIRTUAL requires a single label per node")
             relationship = Relationship()
             relationship.type = rel_type
             relationship.source = node
             relationship.target = target
+        if node.all_labels:
+            raise ValueError("CREATE VIRTUAL requires a single label per node")
 
         self._expect_and_skip_whitespace_and_comments()
         # Optional `WITH CAPABILITIES { ... }` opts the definition into the
@@ -946,6 +987,10 @@ class Parser(BaseParser):
             and self.token.is_identifier_or_keyword()
         ):
             return self._parse_delete_write(False)
+        if not is_delete and self._is_word("GRAPH"):
+            self._assert_writes_allowed("DROP GRAPH")
+            self.set_next_token()
+            return DropGraph()
         if self.token.is_binding():
             self.set_next_token()
             self._expect_and_skip_whitespace_and_comments()
@@ -1617,20 +1662,37 @@ class Parser(BaseParser):
             self.set_next_token()
             label = cast(str, self.token.value)  # Guaranteed by is_identifier check
             self.set_next_token()
-        # Parse additional ORed labels: (n:Person|Animal)
+        # Additional labels: ORed (n:Person|Animal) or all required (n:Person:Employee)
         labels: list[str] = [label] if label is not None else []
-        while label is not None and self.token.is_pipe():
-            self.set_next_token()
-            if self.token.is_colon():
+        any_labels = False
+        all_labels = False
+        while label is not None and (
+            self.token.is_pipe()
+            or (
+                self.token.is_colon()
+                and (next_token := self.peek()) is not None
+                and next_token.is_identifier_or_keyword()
+            )
+        ):
+            if self.token.is_pipe():
+                any_labels = True
                 self.set_next_token()
-            if not self.token.is_identifier_or_keyword():
-                raise ValueError("Expected node label identifier after '|'")
+                if self.token.is_colon():
+                    self.set_next_token()
+                if not self.token.is_identifier_or_keyword():
+                    raise ValueError("Expected node label identifier after '|'")
+            else:
+                all_labels = True
+                self.set_next_token()
             labels.append(cast(str, self.token.value))
             self.set_next_token()
+        if any_labels and all_labels:
+            raise ValueError("Cannot combine ':' and '|' between node labels")
         self._skip_whitespace_and_comments()
         node = Node()
         if labels:
             node.labels = labels
+        node.all_labels = all_labels
         node.properties = dict(self._parse_properties())
         if identifier is not None and identifier in self._state.variables:
             reference = self._state.variables.get(identifier)

@@ -27,6 +27,13 @@ Change entries (node targets carry ``label``, relationship targets ``type``):
 A relationship ``target`` is the row's ``id`` column when the definition
 returns one, otherwise ``{left_id, right_id}``.
 
+**Default graph.**  Writes to labels and types without a definition go
+to the default graph (``USE GRAPH fn($request)``); its requests carry
+``graph: true``.  Targets are graph-wide entity ids, ``createNode.labels``
+may hold zero or several labels, ``mergeNode`` adds ``labels`` (all of
+them; ``label`` is the first), and relationship changes carry the stored
+``type`` of the relationship.
+
 **Transactions.**  Backends declaring ``transactions: true`` (with
 ``writes: true``) run each query in one transaction, opened by the
 function's ``open_read_context()`` and shared by reads and writes.  Change
@@ -39,6 +46,7 @@ when it fails or is cancelled.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -69,6 +77,24 @@ class WriteBackend:
     request_index: int
     #: The other arguments, evaluated from the definition's call.
     args: List[Any] = field(default_factory=list)
+    #: The backend is the default graph (requests carry ``graph: True``).
+    graph: bool = False
+
+
+@dataclass
+class WriteRoute:
+    """Where a write goes: the backend function and whether it is transactional."""
+
+    backend: WriteBackend
+    transactions: bool
+
+
+def _describe_backend(backend: WriteBackend) -> str:
+    name = f"default graph {backend.name}" if backend.graph else backend.name
+    args = [a for i, a in enumerate(backend.args) if i != backend.request_index]
+    if len(args) == 0:
+        return name
+    return f"{name}({', '.join(json.dumps(a) for a in args)})"
 
 
 class WriteSet:
@@ -90,9 +116,47 @@ class WriteSet:
         self.ids: Dict[str, Any] = {}
         #: Backend counters, summed across sends.
         self.stats: Dict[str, Any] = {}
+        #: Routes resolved for this query, by target key (internal).
+        self.routes: Dict[str, WriteRoute] = {}
         self._pending: List[WriteChange] = []
+        self._deleted: Set[str] = set()
         self._bindings: Dict[str, Callable[[Any], None]] = {}
         self._next = 1
+
+    def route(self, route: WriteRoute) -> None:
+        """Pin the query to ``route``'s backend.
+
+        A query writes through one backend function, so a second one is
+        rejected; nothing has been applied at that point unless a
+        transactional backend already received changes, which are then
+        rolled back.
+        """
+        current = self.backend
+        if current is None:
+            self.backend = route.backend
+        elif (
+            current.function_class is not route.backend.function_class
+            or current.graph != route.backend.graph
+            or _canonical_key(current.args) != _canonical_key(route.backend.args)
+        ):
+            raise ValueError(
+                "A query can only write through one backend function "
+                f"({_describe_backend(current)} and {_describe_backend(route.backend)})"
+            )
+        self.transactional = self.transactional and route.transactions
+
+    def mark_deleted(self, kind: str, target: Any) -> bool:
+        """Record that the query deletes ``target`` (``kind`` scopes the id: a
+        definition's label or type, or the default graph).
+
+        Returns False when it was already deleted earlier in the query, so
+        repeated deletes (the same entity bound in several rows) are sent once.
+        """
+        key = f"{kind}:{_canonical_key(target)}"
+        if key in self._deleted:
+            return False
+        self._deleted.add(key)
+        return True
 
     def ref(self) -> str:
         """A fresh temporary ref for a new node or relationship."""
@@ -134,6 +198,12 @@ class WriteSet:
         for key, value in (response.get("stats") or {}).items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 self.stats[key] = self.stats.get(key, 0) + value
+
+
+def _canonical_key(value: Any) -> str:
+    from .source_context import canonical_key
+
+    return canonical_key(value)
 
 
 def _copy(value: Any) -> Any:

@@ -85,6 +85,7 @@ import UnionAll from "./operations/union_all";
 import Unwind from "./operations/unwind";
 import Update from "./operations/update";
 import UpdateDelete from "./operations/update_delete";
+import { DropGraph, UseGraph } from "./operations/use_graph";
 import Where from "./operations/where";
 import With from "./operations/with";
 import {
@@ -204,6 +205,8 @@ class Parser extends BaseParser {
                 !(op instanceof DeleteNode) &&
                 !(op instanceof DeleteRelationship) &&
                 !(op instanceof DropBinding) &&
+                !(op instanceof UseGraph) &&
+                !(op instanceof DropGraph) &&
                 !(op instanceof RefreshNode) &&
                 !(op instanceof RefreshRelationship) &&
                 !(op instanceof RefreshBinding) &&
@@ -325,6 +328,8 @@ class Parser extends BaseParser {
             !(operation instanceof DeleteNode) &&
             !(operation instanceof DeleteRelationship) &&
             !(operation instanceof DropBinding) &&
+            !(operation instanceof UseGraph) &&
+            !(operation instanceof DropGraph) &&
             !(operation instanceof RefreshNode) &&
             !(operation instanceof RefreshRelationship) &&
             !(operation instanceof RefreshBinding) &&
@@ -343,6 +348,7 @@ class Parser extends BaseParser {
 
     private parseOperation(): Operation | null {
         return (
+            this.parseUseGraph() ||
             this.parseWith() ||
             this.parseUnwind() ||
             this.parseReturn() ||
@@ -358,6 +364,37 @@ class Parser extends BaseParser {
             this.parseRemoveWrite() ||
             this.parseMatch()
         );
+    }
+
+    /** True when the current token is the (non-reserved) word `word`. */
+    private isWord(word: string): boolean {
+        return (
+            this.token.isIdentifierOrKeyword() && (this.token.value || "").toUpperCase() === word
+        );
+    }
+
+    /** `USE GRAPH fn($request, ...)`: bind the default graph backend. */
+    private parseUseGraph(): UseGraph | null {
+        if (!this.token.isIdentifier() || !this.isWord("USE")) {
+            return null;
+        }
+        const saved = this.tokenIndex;
+        this.setNextToken();
+        this.skipWhitespaceAndComments();
+        if (!this.isWord("GRAPH")) {
+            this.tokenIndex = saved;
+            return null;
+        }
+        this.assertWritesAllowed("USE GRAPH");
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        const fn = this.parseAsyncFunction();
+        if (fn === null) {
+            throw new Error(
+                "Expected a registered async function after USE GRAPH, e.g. USE GRAPH backend($request)"
+            );
+        }
+        return new UseGraph(fn);
     }
 
     private parseWith(): With | null {
@@ -629,10 +666,16 @@ class Parser extends BaseParser {
             if (target === null) {
                 throw new Error("Expected target node definition");
             }
+            if (target.allLabels) {
+                throw new Error("CREATE VIRTUAL requires a single label per node");
+            }
             relationship = new Relationship();
             relationship.type = type;
             relationship.source = node;
             relationship.target = target;
+        }
+        if (node.allLabels) {
+            throw new Error("CREATE VIRTUAL requires a single label per node");
         }
         this.expectAndSkipWhitespaceAndComments();
         // Optional `WITH CAPABILITIES { ... }` opts the definition into the
@@ -739,7 +782,13 @@ class Parser extends BaseParser {
         return create;
     }
 
-    private parseDelete(): DeleteNode | DeleteRelationship | DropBinding | DeleteWrite | null {
+    private parseDelete():
+        | DeleteNode
+        | DeleteRelationship
+        | DropBinding
+        | DropGraph
+        | DeleteWrite
+        | null {
         if (this.token.isDetach()) {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
@@ -763,6 +812,11 @@ class Parser extends BaseParser {
             this.token.isIdentifierOrKeyword()
         ) {
             return this.parseDeleteWrite(false);
+        }
+        if (!isDelete && this.isWord("GRAPH")) {
+            this.assertWritesAllowed("DROP GRAPH");
+            this.setNextToken();
+            return new DropGraph();
         }
         if (this.token.isBinding()) {
             this.setNextToken();
@@ -1484,9 +1538,11 @@ class Parser extends BaseParser {
                             `CREATE cannot add labels or properties to bound variable ${element.identifier}`
                         );
                     }
-                } else if (element.labels.length !== 1) {
+                } else if (element.labels.length > 1 && !element.allLabels) {
                     throw new Error("CREATE requires exactly one label for each new node");
                 }
+                // Unlabelled and multi-label nodes are checked when the query
+                // runs: only the default graph (USE GRAPH) accepts them.
             }
         }
         return new CreateWrite(patterns);
@@ -1502,7 +1558,7 @@ class Parser extends BaseParser {
         const chain = pattern.chain;
         if (chain.length === 1) {
             const node = chain[0] as Node;
-            if (node instanceof NodeReference || node.labels.length !== 1) {
+            if (node instanceof NodeReference || (node.labels.length > 1 && !node.allLabels)) {
                 throw new Error("MERGE of a node requires a new variable with exactly one label");
             }
         } else if (
@@ -1756,18 +1812,32 @@ class Parser extends BaseParser {
             label = this.token.value || "";
             this.setNextToken();
         }
-        // Parse additional ORed labels: (n:Person|Animal)
+        // Additional labels: ORed (n:Person|Animal) or all required (n:Person:Employee)
         const labels: string[] = label !== null ? [label] : [];
-        while (label !== null && this.token.isPipe()) {
-            this.setNextToken();
-            if (this.token.isColon()) {
+        let anyLabels = false;
+        let allLabels = false;
+        while (
+            label !== null &&
+            (this.token.isPipe() || (this.token.isColon() && this.peek()?.isIdentifierOrKeyword()))
+        ) {
+            if (this.token.isPipe()) {
+                anyLabels = true;
                 this.setNextToken();
-            }
-            if (!this.token.isIdentifierOrKeyword()) {
-                throw new Error("Expected node label identifier after '|'");
+                if (this.token.isColon()) {
+                    this.setNextToken();
+                }
+                if (!this.token.isIdentifierOrKeyword()) {
+                    throw new Error("Expected node label identifier after '|'");
+                }
+            } else {
+                allLabels = true;
+                this.setNextToken();
             }
             labels.push(this.token.value || "");
             this.setNextToken();
+        }
+        if (anyLabels && allLabels) {
+            throw new Error("Cannot combine ':' and '|' between node labels");
         }
         this.skipWhitespaceAndComments();
         let node = new Node();
@@ -1775,6 +1845,7 @@ class Parser extends BaseParser {
         if (labels.length > 0) {
             node.labels = labels;
         }
+        node.allLabels = allLabels;
         if (identifier !== null && this._state.variables.has(identifier)) {
             let reference = this._state.variables.get(identifier);
             if (

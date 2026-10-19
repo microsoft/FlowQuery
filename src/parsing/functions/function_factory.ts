@@ -28,6 +28,7 @@ import "./localtime";
 import "./log";
 import "./log10";
 import "./max";
+import "./memorygraph";
 import "./min";
 import "./nodes";
 import "./pow";

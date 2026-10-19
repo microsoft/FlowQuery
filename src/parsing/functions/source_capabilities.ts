@@ -9,6 +9,7 @@ import { FunctionDef } from "./function_metadata";
  *
  * Nodes: {kind: 'node', label, mode, capabilities}
  * Relationships: {kind: 'relationship', type, from_label, to_label, mode, capabilities}
+ * Default graph: {kind: 'graph', function, mode: 'graph', capabilities}
  *
  * `mode` is `'eager'` (legacy definition, no capabilities),
  * `'statement'` (`CREATE VIRTUAL` opted into the source contract) or
@@ -62,6 +63,15 @@ class SourceCapabilities extends AsyncFunction {
                     capabilities: physical.provider?.capabilities ?? null,
                 };
             }
+        }
+        const graph = this.sourceContext !== null ? this.sourceContext.graph : db.defaultGraph;
+        if (graph !== null) {
+            yield {
+                kind: "graph",
+                function: graph.name,
+                mode: "graph",
+                capabilities: graph.capabilities,
+            };
         }
     }
 }

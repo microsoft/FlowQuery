@@ -1,3 +1,4 @@
+import { isGraphRecord } from "../../graph/graph_records";
 import ASTNode from "../ast_node";
 
 /**
@@ -37,7 +38,9 @@ class Lookup extends ASTNode {
         if (obj === null || obj === undefined) {
             return null;
         }
-        return obj[this.index.value()];
+        const value = obj[this.index.value()];
+        // A default-graph entity has no fixed columns: a missing property is null.
+        return value === undefined && isGraphRecord(obj) ? null : value;
     }
 }
 

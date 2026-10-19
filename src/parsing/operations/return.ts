@@ -4,6 +4,7 @@ import {
     RowSegment,
     mergeProvenanceSegment,
 } from "../../compute/provenance";
+import { stripGraphKeys } from "../../graph/graph_records";
 import Limit from "./limit";
 import OrderBy from "./order_by";
 import Projection from "./projection";
@@ -103,6 +104,7 @@ class Return extends Projection {
             if (value && typeof value === "object" && !Array.isArray(value) && "_label" in value) {
                 delete value._label;
             }
+            stripGraphKeys(value);
             record.set(alias, value);
         }
         // Capture sort-key values while expression bindings are still live.

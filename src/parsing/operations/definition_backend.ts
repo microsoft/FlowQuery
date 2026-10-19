@@ -23,7 +23,7 @@ function collectLoads(node: ASTNode, out: Load[]): void {
     for (const child of node.getChildren()) collectLoads(child, out);
 }
 
-function referencesRequest(node: ASTNode): boolean {
+export function referencesRequest(node: ASTNode): boolean {
     if (node instanceof ParameterReference && node.name === "$request") return true;
     return node.getChildren().some(referencesRequest);
 }

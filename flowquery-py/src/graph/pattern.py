@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, Generator, List, Op
 
 from ..parsing.ast_node import ASTNode
 from .data_resolver import DataResolver
+from .graph_records import common_origin, is_graph_record, origin_matches
 from .node import Node
 from .node_data import NodeData
 from .relationship import Relationship, RelationshipScope
@@ -283,6 +284,7 @@ class Pattern(ASTNode):
         i: int,
         id_: Any,
         rel_rows: List[Optional[Dict[str, Any]]],
+        origin: Optional[bool] = None,
     ) -> AsyncGenerator[None, None]:
         node = plan.nodes[i]
         access = plan.node_access[i]
@@ -291,14 +293,17 @@ class Pattern(ASTNode):
         if access is None:
             reference = getattr(node, 'reference', None)
             referenced = reference.value() if reference is not None else None
-            if referenced is None or (id_ is not _UNSET and id_ != referenced.get("id")):
+            if referenced is None or (
+                id_ is not _UNSET
+                and (id_ != referenced.get("id") or not origin_matches(referenced, origin))
+            ):
                 return
             pages = [[referenced]]
             filter_rows = False
         else:
             terms, args = node.source_terms()
             if id_ is not _UNSET:
-                pages = [await access.lookup(id_, terms, args)]
+                pages = [await access.lookup(id_, terms, args, origin)]
             else:
                 id_term = next(
                     (t for t in terms if t["op"] == "eq" and t["property"] == "id"), None
@@ -336,12 +341,15 @@ class Pattern(ASTNode):
                 prev = plan.node_access[i - 1] if i > 0 else None
                 if rel is not None and len(rows) > 1:
                     buffered = await plan.rel_access[i - 1].prefetch(
-                        [r.get("id") for r in rows], side, rel_terms, rel_args
+                        [r.get("id") for r in rows], side, rel_terms, rel_args, common_origin(rows)
                     )
                     if buffered is not None and prev is not None and prev.deferred:
                         prev_terms, prev_args = plan.nodes[i - 1].source_terms()
                         await prev.prefetch(
-                            [r.get(next_field) for r in buffered], prev_terms, prev_args
+                            [r.get(next_field) for r in buffered],
+                            prev_terms,
+                            prev_args,
+                            common_origin(buffered),
                         )
                 for row in rows:
                     node.set_value(row)
@@ -350,13 +358,18 @@ class Pattern(ASTNode):
                             async for _ in _gen4:
                                 yield
                         continue
-                    expansion = plan.rel_access[i - 1].expand(row.get("id"), side, rel_terms, rel_args)
+                    expansion = plan.rel_access[i - 1].expand(
+                        row.get("id"), side, rel_terms, rel_args, is_graph_record(row)
+                    )
                     try:
                         async for rel_page in expansion:
                             if prev is not None and prev.deferred and len(rel_page) > 1:
                                 prev_terms, prev_args = plan.nodes[i - 1].source_terms()
                                 await prev.prefetch(
-                                    [r.get(next_field) for r in rel_page], prev_terms, prev_args
+                                    [r.get(next_field) for r in rel_page],
+                                    prev_terms,
+                                    prev_args,
+                                    common_origin(rel_page),
                                 )
                             for rel_row in rel_page:
                                 if not rel.matches_record(rel_row):
@@ -367,7 +380,11 @@ class Pattern(ASTNode):
                                 try:
                                     rel_rows[i - 1] = rel_row
                                     async with aclosing(self._reverse_from(
-                                        plan, i - 1, rel_row.get(next_field), rel_rows
+                                        plan,
+                                        i - 1,
+                                        rel_row.get(next_field),
+                                        rel_rows,
+                                        is_graph_record(rel_row),
                                     )) as _gen5:
                                         async for _ in _gen5:
                                             yield

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+from .graph_records import GRAPH_KEY, is_graph_record, user_properties
+
 if TYPE_CHECKING:
     from .node import Node
     from .relationship import Relationship
@@ -54,7 +56,12 @@ class RelationshipMatchCollector:
         else:
             actual_type = default_type
         rel_props: Dict[str, Any]
-        if explicit:
+        flat: Optional[Dict[str, Any]] = None
+        if is_graph_record(current_record):
+            # Default graph: exact user properties; metadata wins in the flat view.
+            rel_props = dict(user_properties(current_record) or {})
+            flat = {**rel_props, "id": current_record.get("id")}
+        elif explicit:
             rel_props = {}
             if isinstance(current_record, dict):
                 rel_props = {
@@ -65,12 +72,14 @@ class RelationshipMatchCollector:
         else:
             rel_props = (rel_data.properties() or {}) if rel_data else {}
         match: RelationshipMatchRecord = {
-            **rel_props,
+            **(flat if flat is not None else rel_props),
             "type": actual_type,
             "startNode": start_node_value or {},
             "endNode": None,
             "properties": rel_props,
         }
+        if flat is not None:
+            match[GRAPH_KEY] = True
         # Thread inner virtual sub-query lineage through to the match
         # record so :class:`ProvenanceSites` can attach it to the hop.
         if current_record is not None:

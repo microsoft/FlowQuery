@@ -110,3 +110,6 @@ export type { FunctionContext } from "./parsing/functions/async_function";
 // Declarative writes (change sets sent to a definition's backend function)
 export { WRITE_CONTRACT_VERSION } from "./graph/write_set";
 export type { WriteChange, WriteRequest, WriteResult } from "./graph/write_set";
+// Built-in in-memory graph store (USE GRAPH memorygraph($request))
+export { default as MemoryGraph } from "./parsing/functions/memorygraph";
+export type { default as MemoryGraphStore } from "./graph/memory_graph_store";

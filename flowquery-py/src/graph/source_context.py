@@ -8,7 +8,7 @@ import json
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
 from .source_provider import (
     QueryCancelledError,
@@ -20,6 +20,9 @@ from .source_provider import (
     SourceSignal,
 )
 from .write_set import WriteSet
+
+if TYPE_CHECKING:
+    from .default_graph import DefaultGraph
 
 
 @dataclass
@@ -183,6 +186,9 @@ class SourceContext:
         self.parameters: Dict[str, Any] = {}
         #: Changes collected by write clauses; sent to the backend when the query succeeds.
         self.writes: Optional[WriteSet] = None
+        #: Default graph pinned by this query (the registry's binding when the
+        #: query started, or one bound by the query's own ``USE GRAPH``).
+        self.graph: Optional["DefaultGraph"] = None
         self.signal = SourceSignal()
         self._cache = RowCache(self.options.cache_capacity)
         self._inflight: Dict[str, "asyncio.Future[Any]"] = {}

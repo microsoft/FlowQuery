@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Tuple
 
 from ...compute.provenance import ProvenanceSource, RowProvenance
+from ...graph.graph_records import without_graph_keys
 from ..ast_node import ASTNode
 from .group_by import GroupBy
 from .operation import Operation
@@ -37,7 +38,7 @@ class AggregatedReturn(Return):
     @property
     def results(self) -> List[Dict[str, Any]]:
         results, _ = self._build_aggregate_output()
-        return results
+        return [without_graph_keys(r) for r in results]
 
     async def finish(self) -> None:
         if self._provenance_sink is not None:

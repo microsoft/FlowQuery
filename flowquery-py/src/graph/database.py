@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ..parsing.ast_node import ASTNode
 from .node import Node
 from .physical_node import PhysicalNode
 from .physical_relationship import PhysicalRelationship
 from .relationship import Relationship
+
+if TYPE_CHECKING:
+    from .default_graph import DefaultGraph
 
 
 class Database:
@@ -17,12 +20,26 @@ class Database:
     _instance: Optional['Database'] = None
     _nodes: Dict[str, 'PhysicalNode'] = {}
     _relationships: Dict[str, Dict[str, 'PhysicalRelationship']] = {}
+    _default_graph: Optional['DefaultGraph'] = None
 
     @classmethod
     def get_instance(cls) -> 'Database':
         if cls._instance is None:
             cls._instance = Database()
         return cls._instance
+
+    @property
+    def default_graph(self) -> Optional['DefaultGraph']:
+        """The default graph bound with ``USE GRAPH fn($request)``, or None.
+
+        Like virtual definitions it belongs to the process-wide registry;
+        each query pins the binding that was current when it started.
+        """
+        return Database._default_graph
+
+    @default_graph.setter
+    def default_graph(self, graph: Optional['DefaultGraph']) -> None:
+        Database._default_graph = graph
 
     @property
     def nodes(self) -> Dict[str, 'PhysicalNode']:

@@ -1,3 +1,4 @@
+import { GRAPH_KEY, isGraphRecord, userProperties } from "./graph_records";
 import Relationship from "./relationship";
 import { attachVirtualSource, getVirtualSource } from "./virtual_sources";
 
@@ -29,7 +30,12 @@ class RelationshipMatchCollector {
         const actualType =
             currentRecord && "_type" in currentRecord ? currentRecord["_type"] : relationship.type!;
         let relProperties: Record<string, any>;
-        if (explicit) {
+        let flat: Record<string, any> | null = null;
+        if (isGraphRecord(currentRecord)) {
+            // Default graph: exact user properties; metadata wins in the flat view.
+            relProperties = { ...userProperties(currentRecord!) };
+            flat = { ...relProperties, id: currentRecord!.id };
+        } else if (explicit) {
             relProperties = {};
             if (currentRecord != null) {
                 const { left_id, right_id, _type, ...props } = currentRecord;
@@ -39,7 +45,7 @@ class RelationshipMatchCollector {
             relProperties = data?.properties() as Record<string, any>;
         }
         const match: RelationshipMatchRecord = {
-            ...(relProperties || {}),
+            ...(flat ?? relProperties ?? {}),
             type: actualType,
             startNode: relationship.source?.value() || {},
             endNode: null,
@@ -48,6 +54,7 @@ class RelationshipMatchCollector {
         // Thread the underlying record's inner provenance onto the
         // freshly constructed match object so the snapshot can read it
         // by reference.
+        if (flat !== null) (match as any)[GRAPH_KEY] = true;
         if (currentRecord != null) {
             const src = getVirtualSource(currentRecord);
             if (src !== undefined) attachVirtualSource(match, src);

@@ -24,6 +24,7 @@ from .compute.runner import (
     RunnerMetadata,
     RunnerOptions,
 )
+from .graph.memory_graph_store import MemoryGraphStore
 from .graph.source_context import SourceOptions
 from .graph.source_provider import (
     PREDICATE_OPERATORS,
@@ -55,6 +56,7 @@ from .parsing.functions.function_metadata import (
     FunctionDef,
     FunctionMetadata,
 )
+from .parsing.functions.memorygraph import MemoryGraph
 from .parsing.functions.predicate_function import PredicateFunction
 from .parsing.functions.reducer_element import ReducerElement
 from .parsing.parser import Parser
@@ -107,6 +109,8 @@ __all__ = [
     "STRING_ORDERINGS",
     "WRITE_CONTRACT_VERSION",
     "WriteResult",
+    "MemoryGraph",
+    "MemoryGraphStore",
     "PREDICATE_OPERATORS",
     "SourceOptions",
     "SourceSignal",

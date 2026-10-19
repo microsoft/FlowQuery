@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...graph.graph_records import labels_of
 from .function import Function
 from .function_metadata import FunctionDef
 
@@ -34,7 +35,4 @@ class Labels(Function):
             return None
         if not isinstance(val, dict):
             raise ValueError("labels() expects a node")
-        label = val.get("_label")
-        if label:
-            return [label]
-        return []
+        return labels_of(val)

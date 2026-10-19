@@ -1,3 +1,4 @@
+import { isGraphRecord, originMatches } from "./graph_records";
 import Relationship from "./relationship";
 import { RelationshipRecord } from "./relationship_data";
 
@@ -12,12 +13,13 @@ class RelationshipReference extends Relationship {
         this._target = base.target;
         this._reference = reference;
     }
-    public async *find(left_id: string, hop: number = 0): AsyncGenerator<void> {
-        this.setValue(this._reference!);
+    public async *find(left_id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
         const data: RelationshipRecord = this._reference!.currentRecord(hop) as RelationshipRecord;
+        if (!originMatches(data, origin)) return;
+        this.setValue(this._reference!);
         const followId = this._direction === "left" ? "left_id" : "right_id";
         if (this._target) {
-            yield* this._target.find(data[followId], hop);
+            yield* this._target.find(data[followId], hop, isGraphRecord(data));
         } else {
             yield;
         }

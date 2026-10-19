@@ -1,3 +1,4 @@
+import { userProperties } from "../../graph/graph_records";
 import Function from "./function";
 import { FunctionDef } from "./function_metadata";
 
@@ -35,6 +36,12 @@ class Properties extends Function {
         }
         if (typeof obj !== "object" || Array.isArray(obj)) {
             throw new Error("properties() expects a node, relationship, or map");
+        }
+
+        // Default-graph entities keep their exact stored properties.
+        const stored = userProperties(obj);
+        if (stored !== undefined) {
+            return { ...stored };
         }
 
         // If it's a RelationshipMatchRecord (has type, startNode, endNode, properties)

@@ -1,5 +1,6 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
+import { commonOrigin, isGraphRecord, labelsOf, originMatches } from "./graph_records";
 import NodeData, { NodeRecord } from "./node_data";
 import Relationship from "./relationship";
 import { NodeAccess, PushedPredicate, SourceTerms, buildTerms } from "./source_access";
@@ -8,6 +9,8 @@ class Node extends ASTNode {
     protected _identifier: string | null = null;
     protected _label: string | null = null;
     protected _labels: string[] = [];
+    /** `(n:A:B)`: a match must carry every label (default graph only). */
+    protected _allLabels: boolean = false;
     protected _properties: Map<string, Expression> = new Map();
     protected _value: NodeRecord | null = null;
 
@@ -45,6 +48,16 @@ class Node extends ASTNode {
     }
     public get labels(): string[] {
         return this._labels;
+    }
+    /**
+     * True for `(n:A:B)` (every label required), false for a single label
+     * or `(n:A|B)` (any of the labels).
+     */
+    public get allLabels(): boolean {
+        return this._allLabels && this._labels.length > 1;
+    }
+    public set allLabels(value: boolean) {
+        this._allLabels = value;
     }
     public get properties(): Map<string, Expression> {
         return this._properties;
@@ -115,8 +128,15 @@ class Node extends ASTNode {
     public sourceTerms(): SourceTerms {
         return buildTerms(this._properties, this._pushedPredicates);
     }
+    /** Every label of `(n:A:B)` is carried by the row (always true otherwise). */
+    public matchesLabels(record: NodeRecord): boolean {
+        if (!this.allLabels) return true;
+        const labels = labelsOf(record);
+        return this._labels.every((label) => labels.includes(label));
+    }
     /** Residual check of the pattern's own property constraints against a row. */
     public matchesRecord(record: NodeRecord): boolean {
+        if (!this.matchesLabels(record)) return false;
         for (const [key, expression] of this._properties) {
             if (!(key in record)) {
                 return false;
@@ -135,23 +155,29 @@ class Node extends ASTNode {
         this._data?.reset();
         while (this._data?.next()) {
             this.setValue(this._data?.current()!);
-            if (!this._matchesProperties()) {
+            if (!this._matchesProperties() || !this.matchesLabels(this._value!)) {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(this._value!.id);
+                yield* this._outgoing.find(this._value!.id, 0, isGraphRecord(this._value));
             } else {
                 yield;
             }
         }
     }
-    public async *find(id: string, hop: number = 0): AsyncGenerator<void> {
+    /**
+     * Bind the node with id `id`, reached through a relationship.
+     * `origin` keeps the step within the relationship's graph (see
+     * {@link NodeAccess}).
+     */
+    public async *find(id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
         if (this._access !== null) {
-            yield* this._deferredFind(id, hop);
+            yield* this._deferredFind(id, hop, origin);
             return;
         }
         this._data?.reset();
         while (this._data?.find(id, hop)) {
+            if (!originMatches(this._data?.current(hop), origin)) continue;
             this.setValue(this._data?.current(hop) as NodeRecord);
             // Always record this node as the endNode of the incoming relationship
             // match. For variable-length patterns, the same target node instance is
@@ -161,11 +187,11 @@ class Node extends ASTNode {
             // collapse to [startNode, endNode] when the property filter only matches
             // the final node in a *m..n traversal.
             this._incoming?.setEndNode(this);
-            if (!this._matchesProperties(hop)) {
+            if (!this._matchesProperties(hop) || !this.matchesLabels(this._value!)) {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(this._value!.id, hop);
+                yield* this._outgoing.find(this._value!.id, hop, isGraphRecord(this._value));
             } else {
                 yield;
             }
@@ -184,24 +210,25 @@ class Node extends ASTNode {
         for await (const page of pages) {
             const rows = page.filter((row) => this.matchesRecord(row));
             if (this._outgoing !== null && rows.length > 1) {
-                await Node.prefetchChain(
-                    this,
-                    rows.map((row) => row.id)
-                );
+                await Node.prefetchChain(this, rows);
             }
             for (const row of rows) {
                 this.setValue(row);
                 if (this._outgoing) {
-                    yield* this._outgoing.find(row.id);
+                    yield* this._outgoing.find(row.id, 0, isGraphRecord(row));
                 } else {
                     yield;
                 }
             }
         }
     }
-    private async *_deferredFind(id: string, hop: number): AsyncGenerator<void> {
+    private async *_deferredFind(
+        id: string,
+        hop: number,
+        origin: boolean | undefined
+    ): AsyncGenerator<void> {
         const { terms, args } = this.sourceTerms();
-        const rows = (await this._access!.lookup(id, terms, args)) as NodeRecord[];
+        const rows = (await this._access!.lookup(id, terms, args, origin)) as NodeRecord[];
         for (const row of rows) {
             this.setValue(row);
             this._incoming?.setEndNode(this);
@@ -209,7 +236,7 @@ class Node extends ASTNode {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(row.id, hop);
+                yield* this._outgoing.find(row.id, hop, isGraphRecord(row));
             } else {
                 yield;
             }
@@ -217,12 +244,13 @@ class Node extends ASTNode {
     }
     /**
      * Batch-prefetch the single-hop provider-backed chain that follows
-     * `node` for a page of anchor ids, so traversal issues one request
+     * `node` for a page of anchor rows, so traversal issues one request
      * per batch instead of one per row.
      */
-    public static async prefetchChain(node: Node, ids: any[]): Promise<void> {
+    public static async prefetchChain(node: Node, anchorRows: NodeRecord[]): Promise<void> {
         let current: Node = node;
-        let anchors = ids;
+        let anchors = anchorRows.map((row) => row.id);
+        let origin = commonOrigin(anchorRows);
         while (current.outgoing !== null) {
             const rel = current.outgoing;
             const target = rel.target;
@@ -239,13 +267,15 @@ class Node extends ASTNode {
                 anchors,
                 rel.anchorSide,
                 relTerms.terms,
-                relTerms.args
+                relTerms.args,
+                origin
             );
             if (rows === null) return;
             const nextIds = rows.map((row) => row[rel.nextField]);
             if (target.access === null || !target.access.deferred) return;
             const targetTerms = target.sourceTerms();
-            await target.access.prefetch(nextIds, targetTerms.terms, targetTerms.args);
+            origin = commonOrigin(rows);
+            await target.access.prefetch(nextIds, targetTerms.terms, targetTerms.args, origin);
             anchors = nextIds;
             current = target;
         }

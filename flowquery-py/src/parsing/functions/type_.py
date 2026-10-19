@@ -7,7 +7,10 @@ from .function_metadata import FunctionDef
 
 
 @FunctionDef({
-    "description": "Returns the type of a value as a string",
+    "description": (
+        "Returns the type of a value as a string, "
+        "or the type of a relationship (e.g. 'KNOWS')"
+    ),
     "category": "scalar",
     "parameters": [
         {"name": "value", "description": "Value to check the type of", "type": "any"}
@@ -37,6 +40,14 @@ class Type(Function):
         if isinstance(val, list):
             return "array"
         if isinstance(val, dict):
+            # A relationship: its stored type, as in Cypher.
+            if (
+                isinstance(val.get("type"), str)
+                and "startNode" in val
+                and "endNode" in val
+                and "properties" in val
+            ):
+                return val["type"]
             return "object"
         if isinstance(val, bool):
             return "boolean"

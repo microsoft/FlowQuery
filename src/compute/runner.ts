@@ -1,6 +1,7 @@
 import Bindings from "../graph/bindings";
 import DataCache from "../graph/data_cache";
 import DataResolver from "../graph/data_resolver";
+import Database from "../graph/database";
 import Node from "../graph/node";
 import Pattern from "../graph/pattern";
 import Relationship from "../graph/relationship";
@@ -20,6 +21,7 @@ import AggregatedReturn from "../parsing/operations/aggregated_return";
 import AggregatedWith from "../parsing/operations/aggregated_with";
 import CreateNode from "../parsing/operations/create_node";
 import CreateRelationship from "../parsing/operations/create_relationship";
+import { referencesRequest } from "../parsing/operations/definition_backend";
 import DeleteNode from "../parsing/operations/delete_node";
 import DeleteRelationship from "../parsing/operations/delete_relationship";
 import Load from "../parsing/operations/load";
@@ -27,6 +29,7 @@ import Match from "../parsing/operations/match";
 import Operation from "../parsing/operations/operation";
 import Return from "../parsing/operations/return";
 import Union from "../parsing/operations/union";
+import { DropGraph, UseGraph } from "../parsing/operations/use_graph";
 import {
     WriteOperation,
     commitWrites,
@@ -334,6 +337,8 @@ class Runner {
                         this._options.provenance === true
                     );
                     this._sourceContext.parameters = this._options.parameters ?? {};
+                    // Pin the default graph for the whole query.
+                    this._sourceContext.graph = Database.getInstance().defaultGraph;
                     resolver.dataCache = new DataCache(
                         this._options.provenance === true,
                         this._sourceContext
@@ -467,6 +472,8 @@ class Runner {
             node.sourceContext = ctx;
         } else if (node instanceof WriteOperation) {
             node.sourceContext = ctx;
+        } else if (node instanceof UseGraph || node instanceof DropGraph) {
+            node.sourceContext = ctx;
         }
         for (const child of node.getChildren()) {
             Runner.assignSourceContext(child, ctx);
@@ -596,6 +603,13 @@ class Runner {
      * sub-query runners); a missing value is an error.
      */
     private bindParameters(node: ASTNode): void {
+        if (node instanceof UseGraph) {
+            // `$request` is a placeholder filled per backend request.
+            for (const child of node.function.getChildren()) {
+                if (!referencesRequest(child)) this.bindParameters(child);
+            }
+            return;
+        }
         if (node instanceof ParameterReference) {
             node.parameterValue = this.resolveParameter(node);
         }

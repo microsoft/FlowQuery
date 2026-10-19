@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, AsyncGenerator, Optional
 
 from ..parsing.ast_node import ASTNode
+from .graph_records import is_graph_record, origin_matches
 from .node import Node
 
 
@@ -12,6 +13,7 @@ class NodeReference(Node):
     def __init__(self, base: Node, reference: ASTNode) -> None:
         super().__init__(base.identifier, base.label)
         self._labels = base.labels
+        self._all_labels = base.all_labels
         self._reference: ASTNode = reference
         # Copy properties from base
         self._properties = base._properties
@@ -37,19 +39,29 @@ class NodeReference(Node):
             return
         self.set_value(dict(ref_value))
         if self._outgoing and self._value:
-            async for _ in self._outgoing.find(self._value['id']):
+            async for _ in self._outgoing.find(
+                self._value['id'], 0, is_graph_record(ref_value)
+            ):
                 yield
         else:
             yield
 
-    async def find(self, id_: str, hop: int = 0) -> AsyncGenerator[None, None]:
+    async def find(
+        self, id_: str, hop: int = 0, origin: Optional[bool] = None
+    ) -> AsyncGenerator[None, None]:
         """Find by ID, only matching if it equals the referenced node's ID."""
         referenced = self._reference.value()
-        if referenced is None or id_ != referenced.get('id'):
+        if (
+            referenced is None
+            or id_ != referenced.get('id')
+            or not origin_matches(referenced, origin)
+        ):
             return
         self.set_value(dict(referenced))
         if self._outgoing and self._value:
-            async for _ in self._outgoing.find(self._value['id'], hop):
+            async for _ in self._outgoing.find(
+                self._value['id'], hop, is_graph_record(referenced)
+            ):
                 yield
         else:
             yield

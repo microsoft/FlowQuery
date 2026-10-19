@@ -8,10 +8,20 @@ change set to the definitions' backend function when the query succeeds.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+import json
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ...graph.database import Database
+from ...graph.graph_records import (
+    LABELS_KEY,
+    PROPERTIES_KEY,
+    graph_node_record,
+    graph_relationship_record,
+    is_graph_record,
+    labels_of,
+    user_properties,
+)
 from ...graph.node import Node
 from ...graph.node_reference import NodeReference
 from ...graph.pattern import Pattern
@@ -22,6 +32,7 @@ from ...graph.write_set import (
     WRITE_CONTRACT_VERSION,
     WriteBackend,
     WriteResult,
+    WriteRoute,
     WriteSet,
 )
 from ..ast_node import ASTNode
@@ -33,20 +44,28 @@ from .definition_backend import definition_backend
 from .load import Load
 from .match import Match
 from .operation import Operation
+from .use_graph import DropGraph, UseGraph
 
 if TYPE_CHECKING:
+    from ...graph.default_graph import DefaultGraph
     from ...graph.source_context import SourceContext
 
 
 @dataclass
 class WriteTarget:
-    """A label (``kind == "node"``) or relationship type a write clause changes."""
+    """A label (``kind == "node"``) or relationship type a write clause changes.
+
+    New nodes (``CREATE`` / ``MERGE``) carry every label and their clause
+    (``"create"`` or ``"merge"``).
+    """
 
     kind: str
     label: Optional[str] = None
     type: Optional[str] = None
     source_label: Optional[str] = None
     target_label: Optional[str] = None
+    labels: Optional[List[str]] = None
+    clause: Optional[str] = None
 
 
 @dataclass
@@ -96,6 +115,10 @@ def _node_target_of(node: Node) -> WriteTarget:
     return WriteTarget(kind="node", label=label_of(node))
 
 
+def _new_node_target_of(node: Node, clause: str) -> WriteTarget:
+    return WriteTarget(kind="node", label=node.label, labels=list(node.labels), clause=clause)
+
+
 def _relationship_target_of(rel: Relationship) -> WriteTarget:
     start, end = _endpoints(rel)
     return WriteTarget(
@@ -138,12 +161,34 @@ def _update_node_value(node: Node, properties: Dict[str, Any]) -> None:
     if value is None:
         return
     updated = dict(value)
+    stored = dict(user_properties(value) or {}) if is_graph_record(value) else None
     for key, item in properties.items():
         if item is None:
             updated.pop(key, None)
+            if stored is not None:
+                stored.pop(key, None)
         else:
             updated[key] = item
+            if stored is not None:
+                stored[key] = item
+    if stored is not None:
+        # Metadata wins over a user property of the same name.
+        updated["id"] = value.get("id")
+        updated[PROPERTIES_KEY] = stored
     node.set_value(updated)
+
+
+def _update_node_labels(node: Node, labels: List[str], add: bool) -> None:
+    """Rebind a default-graph node variable with labels added or removed."""
+    value = _node_value(node)
+    if value is None or not is_graph_record(value):
+        return
+    current = labels_of(value)
+    if add:
+        updated = current + [label for label in labels if label not in current]
+    else:
+        updated = [label for label in current if label not in labels]
+    node.set_value({**value, LABELS_KEY: updated})
 
 
 def _without_nulls(value: Any) -> Dict[str, Any]:
@@ -155,6 +200,12 @@ def _without_nulls(value: Any) -> Dict[str, Any]:
 def _replace_node_value(node: Node, properties: Dict[str, Any]) -> None:
     value = _node_value(node)
     if value is None:
+        return
+    if is_graph_record(value):
+        updated = graph_node_record(value.get("id"), labels_of(value), _without_nulls(properties))
+        if "_label" in value:
+            updated["_label"] = value["_label"]
+        node.set_value(updated)
         return
     node.set_value({"id": value.get("id"), **_without_nulls(properties)})
 
@@ -214,13 +265,19 @@ def _bind_relationship(
     start: Dict[str, Any],
     end: Dict[str, Any],
     properties: Dict[str, Any],
+    route: WriteRoute,
 ) -> None:
-    rel.created_record = {
-        "id": ref,
-        "left_id": start.get("id"),
-        "right_id": end.get("id"),
-        **properties,
-    }
+    if route.backend.graph:
+        rel.created_record = graph_relationship_record(
+            ref, rel.type or "", start.get("id"), end.get("id"), properties
+        )
+    else:
+        rel.created_record = {
+            "id": ref,
+            "left_id": start.get("id"),
+            "right_id": end.get("id"),
+            **properties,
+        }
     rel.override_value({
         **properties,
         "id": ref,
@@ -278,6 +335,69 @@ class WriteOperation(Operation):
             self._context.writes = WriteSet()
         return self._context.writes
 
+    @property
+    def _graph(self) -> Optional["DefaultGraph"]:
+        """The default graph pinned by the query."""
+        return self._context.graph if self._context is not None else None
+
+    @staticmethod
+    def _route_by(writes: WriteSet, key: str, resolve: Callable[[], WriteRoute]) -> WriteRoute:
+        route = writes.routes.get(key)
+        if route is None:
+            route = resolve()
+            writes.routes[key] = route
+        writes.route(route)
+        return route
+
+    def _route_target(self, writes: WriteSet, target: WriteTarget) -> WriteRoute:
+        """Route a new node or relationship (by its static labels or type)."""
+
+        def resolve() -> WriteRoute:
+            route = resolve_target(target, self._graph)
+            if route is None:
+                raise ValueError(f"Cannot write to {_describe(target)}")
+            return route
+
+        key = "target:" + json.dumps(asdict(target), sort_keys=True)
+        return WriteOperation._route_by(writes, key, resolve)
+
+    def _route_node(self, writes: WriteSet, node: Node, value: Dict[str, Any]) -> WriteRoute:
+        """Route a change to a bound node by where it came from: default-graph
+        nodes go to the default graph, other nodes to their definition."""
+        if is_graph_record(value):
+            name = f"(:{':'.join(labels_of(value))})"
+            return WriteOperation._route_by(
+                writes, "graph", lambda: _default_route(self._graph, name)
+            )
+        label = value["_label"] if value.get("_label") is not None else label_of(node)
+        return WriteOperation._route_by(
+            writes,
+            f"node:{label}",
+            lambda: resolve_write_backend(WriteTarget(kind="node", label=label)),
+        )
+
+    def _route_relationship(
+        self, writes: WriteSet, rel: Relationship, record: Optional[Dict[str, Any]]
+    ) -> WriteRoute:
+        """Relationship counterpart of :meth:`_route_node`."""
+        if record is not None and is_graph_record(record):
+            name = f"[:{record.get('_type') or ''}]"
+            return WriteOperation._route_by(
+                writes, "graph", lambda: _default_route(self._graph, name)
+            )
+        start, end = _endpoints(rel)
+        target = WriteTarget(
+            kind="relationship",
+            type=rel.type if rel.type is not None else (record or {}).get("_type"),
+            source_label=label_of(start),
+            target_label=label_of(end),
+        )
+        return WriteOperation._route_by(
+            writes,
+            f"rel:{target.type}:{target.source_label}:{target.target_label}",
+            lambda: resolve_write_backend(target),
+        )
+
     async def run(self) -> None:
         if self._context is not None:
             self._context.throw_if_cancelled()
@@ -312,12 +432,19 @@ class WriteOperation(Operation):
                 target = _relationship_target(element)
                 if target is None:
                     continue
+                record = (
+                    element.created_record
+                    if element.created_record is not None
+                    else element.current_record(0)
+                )
+                self._route_relationship(writes, element, record)
+                rel_type = element.type if element.type is not None else (record or {}).get("_type")
                 if item.kind == "replace":
                     properties = _map_value(item.expression)
                     writes.add({
                         "op": "replaceProperties",
                         "target": target,
-                        "type": element.type,
+                        "type": rel_type,
                         "properties": properties,
                     })
                     _replace_relationship_value(element, properties)
@@ -335,7 +462,7 @@ class WriteOperation(Operation):
                 writes.add({
                     "op": "setProperties",
                     "target": target,
-                    "type": element.type,
+                    "type": rel_type,
                     "properties": properties,
                 })
                 _update_relationship_value(element, properties)
@@ -343,6 +470,7 @@ class WriteOperation(Operation):
             value = _node_value(element)
             if value is None:
                 continue
+            self._route_node(writes, element, value)
             label = label_of(element)
             if item.kind == "replace":
                 properties = _map_value(item.expression)
@@ -370,12 +498,22 @@ class WriteOperation(Operation):
                 })
                 _update_node_value(element, properties)
             elif item.kind in ("addLabels", "removeLabels"):
+                if item.kind == "addLabels" and is_graph_record(value):
+                    defined = [
+                        lbl for lbl in item.labels if lbl in Database.get_instance().nodes
+                    ]
+                    if len(defined) > 0:
+                        raise ValueError(
+                            f"Cannot add label :{defined[0]} to a default-graph node: "
+                            f"(:{defined[0]}) has a CREATE VIRTUAL definition"
+                        )
                 writes.add({
                     "op": item.kind,
                     "target": value.get("id"),
                     "label": label,
                     "labels": list(item.labels),
                 })
+                _update_node_labels(element, item.labels, item.kind == "addLabels")
 
 
 class CreateWrite(WriteOperation):
@@ -401,13 +539,14 @@ class CreateWrite(WriteOperation):
                 if isinstance(element, Relationship):
                     out.append(_relationship_target_of(element))
                 elif not isinstance(element, NodeReference):
-                    out.append(_node_target_of(element))
+                    out.append(_new_node_target_of(element, "create"))
         return out
 
     def _apply(self, writes: WriteSet) -> None:
         for pattern in self._patterns:
             for element in pattern.chain:
                 if isinstance(element, Node) and not isinstance(element, NodeReference):
+                    route = self._route_target(writes, _new_node_target_of(element, "create"))
                     ref = writes.ref()
                     properties = _evaluate(element.properties)
                     writes.add({
@@ -416,15 +555,21 @@ class CreateWrite(WriteOperation):
                         "labels": list(element.labels),
                         "properties": properties,
                     })
-                    element.set_value({"id": ref, **properties})
+                    element.set_value(
+                        graph_node_record(ref, element.labels, properties)
+                        if route.backend.graph
+                        else {"id": ref, **properties}
+                    )
                     _bind_node(writes, element, ref)
             for element in pattern.chain:
                 if isinstance(element, Relationship):
+                    rel_route = self._route_target(writes, _relationship_target_of(element))
                     left, right = _endpoints(element)
                     start = _node_value(left) if left is not None else None
                     end = _node_value(right) if right is not None else None
                     if start is None or end is None:
                         raise ValueError(f"Cannot create [:{element.type}]: an endpoint is null")
+                    _check_endpoints("create", element, rel_route, start, end)
                     ref = writes.ref()
                     properties = _evaluate(element.properties)
                     writes.add({
@@ -435,7 +580,30 @@ class CreateWrite(WriteOperation):
                         "end": end.get("id"),
                         "properties": properties,
                     })
-                    _bind_relationship(writes, element, ref, start, end, properties)
+                    _bind_relationship(writes, element, ref, start, end, properties, rel_route)
+
+
+def _check_endpoints(
+    verb: str,
+    rel: Relationship,
+    route: WriteRoute,
+    start: Dict[str, Any],
+    end: Dict[str, Any],
+) -> None:
+    """A relationship and its endpoints belong to the same graph: a
+    default-graph relationship never connects definition nodes, and the
+    reverse, because ids are only meaningful within their own graph."""
+    graph = route.backend.graph
+    if is_graph_record(start) != graph or is_graph_record(end) != graph:
+        if graph:
+            raise ValueError(
+                f"Cannot {verb} [:{rel.type}] in the default graph: "
+                "an endpoint is not a default-graph node"
+            )
+        raise ValueError(
+            f"Cannot {verb} [:{rel.type}]: an endpoint is a default-graph node "
+            f"but [:{rel.type}] has a CREATE VIRTUAL definition"
+        )
 
 
 class MergeWrite(WriteOperation):
@@ -479,7 +647,7 @@ class MergeWrite(WriteOperation):
         rel = self._relationship
         if rel is not None:
             return [_relationship_target_of(rel)]
-        return [_node_target_of(self._node())]
+        return [_new_node_target_of(self._node(), "merge")]
 
     @staticmethod
     def _collect_items(items: List[SetItem]) -> Dict[str, Any]:
@@ -499,23 +667,38 @@ class MergeWrite(WriteOperation):
         ref = writes.ref()
         if rel is None:
             node = self._node()
+            node_route = self._route_target(writes, _new_node_target_of(node, "merge"))
             key = _evaluate(node.properties)
-            writes.add({
-                "op": "mergeNode",
-                "ref": ref,
-                "label": label_of(node),
-                "key": key,
-                "onCreate": on_create,
-                "onMatch": on_match,
-            })
-            node.set_value({"id": ref, **key})
+            if node_route.backend.graph:
+                writes.add({
+                    "op": "mergeNode",
+                    "ref": ref,
+                    "label": node.label,
+                    "labels": list(node.labels),
+                    "key": key,
+                    "onCreate": on_create,
+                    "onMatch": on_match,
+                })
+                node.set_value(graph_node_record(ref, node.labels, key))
+            else:
+                writes.add({
+                    "op": "mergeNode",
+                    "ref": ref,
+                    "label": label_of(node),
+                    "key": key,
+                    "onCreate": on_create,
+                    "onMatch": on_match,
+                })
+                node.set_value({"id": ref, **key})
             _bind_node(writes, node, ref)
             return
+        route = self._route_target(writes, _relationship_target_of(rel))
         left, right = _endpoints(rel)
         start = _node_value(left) if left is not None else None
         end = _node_value(right) if right is not None else None
         if start is None or end is None:
             raise ValueError(f"Cannot merge [:{rel.type}]: an endpoint is null")
+        _check_endpoints("merge", rel, route, start, end)
         key = _evaluate(rel.properties)
         writes.add({
             "op": "mergeRelationship",
@@ -527,7 +710,7 @@ class MergeWrite(WriteOperation):
             "onCreate": on_create,
             "onMatch": on_match,
         })
-        _bind_relationship(writes, rel, ref, start, end, key)
+        _bind_relationship(writes, rel, ref, start, end, key, route)
 
 
 class SetWrite(WriteOperation):
@@ -587,10 +770,35 @@ class DeleteWrite(WriteOperation):
                 target = _relationship_target(element)
                 if target is None:
                     continue
-                writes.add({"op": "deleteRelationship", "target": target, "type": element.type})
+                record = (
+                    element.created_record
+                    if element.created_record is not None
+                    else element.current_record(0)
+                )
+                self._route_relationship(writes, element, record)
+                scope = (
+                    "graph"
+                    if record is not None and is_graph_record(record)
+                    else f"type:{element.type if element.type is not None else (record or {}).get('_type')}"
+                )
+                if not writes.mark_deleted(f"relationship:{scope}", target):
+                    continue
+                writes.add({
+                    "op": "deleteRelationship",
+                    "target": target,
+                    "type": element.type if element.type is not None else (record or {}).get("_type"),
+                })
             else:
                 value = _node_value(element)
                 if value is None:
+                    continue
+                self._route_node(writes, element, value)
+                node_scope = (
+                    "graph"
+                    if is_graph_record(value)
+                    else f"label:{value['_label'] if value.get('_label') is not None else label_of(element)}"
+                )
+                if not writes.mark_deleted(f"node:{node_scope}", value.get("id")):
                     continue
                 writes.add({
                     "op": "deleteNode",
@@ -602,14 +810,75 @@ class DeleteWrite(WriteOperation):
 
 def _describe(target: WriteTarget) -> str:
     if target.kind == "node":
-        return f"(:{target.label or ''})"
+        labels = (
+            target.labels
+            if target.labels is not None
+            else ([target.label] if target.label is not None else [])
+        )
+        return f"(:{':'.join(labels)})"
     return (
         f"(:{target.source_label or ''})-[:{target.type or ''}]->"
         f"(:{target.target_label or ''})"
     )
 
 
-def resolve_write_backend(target: WriteTarget) -> Tuple[WriteBackend, bool]:
+def _default_route(graph: Optional["DefaultGraph"], name: str) -> WriteRoute:
+    """Route of a write through the default graph; it must declare ``writes: true``."""
+    if graph is None:
+        raise ValueError(f"Cannot write to {name}: it has no CREATE VIRTUAL definition")
+    if not graph.writable:
+        raise ValueError(
+            f"Cannot write to {name}: the default graph backend {graph.name} "
+            "does not declare the writes capability"
+        )
+    return WriteRoute(backend=graph.write_backend, transactions=graph.transactional)
+
+
+def resolve_target(target: WriteTarget, graph: Optional["DefaultGraph"]) -> Optional[WriteRoute]:
+    """Resolve where a write target goes before the query runs.
+
+    Labels and types with a ``CREATE VIRTUAL`` definition go to that
+    definition; others go to the default graph when one is bound.  Returns
+    None when the route depends on the entity a row binds (unlabelled
+    nodes and untyped relationships with a default graph bound).
+    """
+    db = Database.get_instance()
+    if target.kind == "node":
+        if target.clause is not None:
+            labels = (
+                target.labels
+                if target.labels is not None
+                else ([target.label] if target.label is not None else [])
+            )
+            if graph is None or any(label in db.nodes for label in labels):
+                if len(labels) != 1:
+                    if graph is not None:
+                        message = (
+                            f"Cannot write to {_describe(target)}: a label with a CREATE "
+                            "VIRTUAL definition cannot be combined with other labels"
+                        )
+                    elif target.clause == "create":
+                        message = "CREATE requires exactly one label for each new node"
+                    else:
+                        message = "MERGE of a node requires a new variable with exactly one label"
+                    raise ValueError(message)
+                return resolve_write_backend(WriteTarget(kind="node", label=labels[0]))
+            if target.clause == "merge" and len(labels) == 0:
+                raise ValueError("MERGE of a node requires at least one label")
+            return _default_route(graph, _describe(target))
+        if target.label is None:
+            return resolve_write_backend(target) if graph is None else None
+        if graph is None or target.label in db.nodes:
+            return resolve_write_backend(target)
+        return _default_route(graph, _describe(target))
+    if target.type is None:
+        return resolve_write_backend(target) if graph is None else None
+    if graph is None or target.type in db.relationships:
+        return resolve_write_backend(target)
+    return _default_route(graph, _describe(target))
+
+
+def resolve_write_backend(target: WriteTarget) -> WriteRoute:
     """Resolve the backend function a write target is applied through, and
     whether its definition declares ``transactions: true``.  The
     target must have a statement-backed ``CREATE VIRTUAL`` definition whose
@@ -653,14 +922,14 @@ def resolve_write_backend(target: WriteTarget) -> Tuple[WriteBackend, bool]:
         None if i == backend.request_index else child.value()
         for i, child in enumerate(backend.func.get_children())
     ]
-    return (
-        WriteBackend(
+    return WriteRoute(
+        backend=WriteBackend(
             name=backend.name,
             function_class=backend.function_class,
             request_index=backend.request_index,
             args=args,
         ),
-        capabilities.get("transactions") is True,
+        transactions=capabilities.get("transactions") is True,
     )
 
 
@@ -686,25 +955,27 @@ def _contains_read(node: ASTNode) -> bool:
 def prepare_writes(first: Operation, ctx: "SourceContext") -> None:
     """Check every target of a statement's write clauses before it runs, pin
     the query to a single backend function and decide when changes are
-    sent (see :class:`WriteSet`)."""
+    sent (see :class:`WriteSet`).  Targets whose backend depends on the
+    matched entity are checked as each row is written."""
     operations = WriteOperation.collect(first)
     if len(operations) == 0:
         return
+    op: Optional[Operation] = first
+    while op is not None:
+        if isinstance(op, (UseGraph, DropGraph)):
+            raise ValueError(
+                "USE GRAPH and DROP GRAPH cannot be combined with write clauses in one "
+                "statement; separate the statements with ';'"
+            )
+        op = op.next
     if ctx.writes is None:
         ctx.writes = WriteSet()
     writes = ctx.writes
     for op in operations:
         for target in op.targets:
-            backend, transactions = resolve_write_backend(target)
-            current = writes.backend
-            if current is None:
-                writes.backend = backend
-            elif current.function_class is not backend.function_class:
-                raise ValueError(
-                    "A query can only write through one backend function "
-                    f"({current.name} and {backend.name})"
-                )
-            writes.transactional = writes.transactional and transactions
+            route = resolve_target(target, ctx.graph)
+            if route is not None:
+                writes.route(route)
     writes.per_row = writes.transactional and reads_after_writes(first)
 
 
@@ -720,7 +991,11 @@ async def _call_backend(
     fn.source_context = ctx
     await fn.prepare_context(after_cancel)
     args = list(backend.args)
-    args[backend.request_index] = {"version": WRITE_CONTRACT_VERSION, **request}
+    args[backend.request_index] = {
+        "version": WRITE_CONTRACT_VERSION,
+        **({"graph": True} if backend.graph else {}),
+        **request,
+    }
     response: Any = _NO_RESPONSE
     what = operation[:1].upper() + operation[1:]
     generator = fn.generate(*args)

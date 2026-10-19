@@ -33,10 +33,10 @@ def _collect_loads(node: ASTNode, out: List[Load]) -> None:
         _collect_loads(child, out)
 
 
-def _references_request(node: ASTNode) -> bool:
+def references_request(node: ASTNode) -> bool:
     if isinstance(node, ParameterReference) and node.name == "$request":
         return True
-    return any(_references_request(child) for child in node.get_children())
+    return any(references_request(child) for child in node.get_children())
 
 
 def definition_backend(statement: Optional[ASTNode]) -> Optional[DefinitionBackend]:
@@ -53,7 +53,7 @@ def definition_backend(statement: Optional[ASTNode]) -> Optional[DefinitionBacke
     if func is None:
         return None
     request_index = next(
-        (i for i, child in enumerate(func.get_children()) if _references_request(child)), -1
+        (i for i, child in enumerate(func.get_children()) if references_request(child)), -1
     )
     if request_index < 0:
         return None

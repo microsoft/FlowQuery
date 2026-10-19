@@ -1,4 +1,5 @@
 import ASTNode from "../parsing/ast_node";
+import { isGraphRecord, originMatches } from "./graph_records";
 import Node from "./node";
 
 class NodeReference extends Node {
@@ -8,6 +9,7 @@ class NodeReference extends Node {
         this._identifier = base.identifier;
         this._label = base.label;
         this._labels = base.labels;
+        this._allLabels = base.allLabels;
         this._properties = base.properties;
         this._outgoing = base.outgoing;
         this._incoming = base.incoming;
@@ -23,19 +25,19 @@ class NodeReference extends Node {
         }
         this.setValue(referenced);
         if (this._outgoing) {
-            yield* this._outgoing.find(this._value!.id);
+            yield* this._outgoing.find(this._value!.id, 0, isGraphRecord(referenced));
         } else {
             yield;
         }
     }
-    public async *find(id: string, hop: number = 0): AsyncGenerator<void> {
+    public async *find(id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
         const referenced = this._reference?.value();
-        if (id !== referenced?.id) {
+        if (id !== referenced?.id || !originMatches(referenced, origin)) {
             return;
         }
         this.setValue(referenced!);
         if (this._outgoing) {
-            yield* this._outgoing.find(this._value!.id, hop);
+            yield* this._outgoing.find(this._value!.id, hop, isGraphRecord(referenced));
         } else {
             yield;
         }

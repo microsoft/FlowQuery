@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional
 
 from ...graph.database import Database
 from ...graph.relationship import Relationship
-from ...graph.source_provider import SOURCE_CONTRACT_VERSION
+from ...graph.source_provider import SOURCE_CONTRACT_VERSION, merge_capabilities
 from ..ast_node import ASTNode
 from ..data_structures.associative_array import AssociativeArray
+from .definition_backend import declared_capabilities, definition_backend
 from .operation import Operation
 
 
@@ -51,11 +52,26 @@ class CreateRelationship(Operation):
             return None
         return {"version": SOURCE_CONTRACT_VERSION, **self._capabilities.value()}
 
+    async def effective_capabilities(self) -> Optional[Dict[str, Any]]:
+        """Effective capabilities: those declared by the body's backend
+        function, overridden by an explicit ``WITH CAPABILITIES`` clause."""
+        rel = self._relationship
+        declared = await declared_capabilities(
+            definition_backend(self._statement),
+            {
+                "operation": "capabilities",
+                "type": rel.type if rel is not None else None,
+                "sourceLabel": rel.source.label if rel is not None and rel.source is not None else None,
+                "targetLabel": rel.target.label if rel is not None and rel.target is not None else None,
+            },
+        )
+        return merge_capabilities(declared, self.capabilities, "relationship")
+
     async def run(self) -> None:
         if self._relationship is None:
             raise ValueError("Relationship is null")
         db = Database.get_instance()
-        capabilities = self.capabilities
+        capabilities = await self.effective_capabilities()
         db.add_relationship(
             self._relationship,
             self._statement,

@@ -5508,12 +5508,9 @@ test("Test create virtual node with filter pass-down and args access within defi
     expect(results[0]).toEqual({ id: 42 });
 });
 
-test("Test dollar-prefixed identifiers are not allowed outside virtual definitions", () => {
-    expect(() => {
-        new Runner("RETURN $id AS id");
-    }).toThrow(
-        "Parameter references ($id) are only allowed inside virtual node or relationship definitions"
-    );
+test("Test top-level parameter without a value fails at run time", async () => {
+    const runner = new Runner("RETURN $id AS id");
+    await expect(runner.run()).rejects.toThrow("Missing value for parameter $id");
 });
 
 test("Test filter pass-down with multiple properties", async () => {

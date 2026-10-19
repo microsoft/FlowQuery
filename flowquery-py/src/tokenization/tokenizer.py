@@ -116,6 +116,11 @@ class Tokenizer:
                 self._walker.move_next()
                 self._walker.move_next()
                 continue
+            # openCypher escapes a backtick inside a quoted identifier by doubling it.
+            if quote_char == Symbol.BACKTICK.value and self._walker.escaped_by_doubling(quote_char):
+                self._walker.move_next()
+                self._walker.move_next()
+                continue
             if self._walker.check_for_string(quote_char):
                 value = self._walker.get_string(start_position)
                 if quote_char == Symbol.BACKTICK.value:

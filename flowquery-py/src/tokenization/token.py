@@ -138,7 +138,7 @@ class Token:
     @staticmethod
     def BACKTICK_STRING(value: str, quote_char: str = '"') -> Token:
         unquoted = StringUtils.unquote(value)
-        unescaped = StringUtils.remove_escaped_quotes(unquoted, quote_char)
+        unescaped = StringUtils.remove_escaped_backticks(unquoted, quote_char)
         return Token(TokenType.BACKTICK_STRING, unescaped)
 
     @staticmethod
@@ -566,6 +566,13 @@ class Token:
 
     def is_remove(self) -> bool:
         return self._type == TokenType.KEYWORD and self._value == Keyword.REMOVE.value
+
+    @staticmethod
+    def DETACH() -> Token:
+        return Token(TokenType.KEYWORD, Keyword.DETACH.value)
+
+    def is_detach(self) -> bool:
+        return self._type == TokenType.KEYWORD and self._value == Keyword.DETACH.value
 
     @staticmethod
     def CASE() -> Token:

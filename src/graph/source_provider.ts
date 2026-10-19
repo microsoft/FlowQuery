@@ -46,7 +46,7 @@ export const PREDICATE_OPERATORS: readonly PredicateOperator[] = [
  *   value is a non-null primitive of the same type as `value` (number or
  *   string) that fails the comparison.  Rows whose value is missing,
  *   `null`, or of another type must be returned.  String bounds are only
- *   sent to sources declaring `stringOrdering: "binary"`.
+ *   sent to sources declaring `stringOrdering: "binary"` or `"codepoint"`.
  * - `in`: the property is present and equal to one of `values`.  `values`
  *   is de-duplicated, contains only primitives and never contains `null`;
  *   it may be empty (no row matches).
@@ -63,12 +63,26 @@ export interface PredicateCapabilities {
     /** Restrict push-down to these definition columns.  Omit for any column. */
     properties?: string[];
     /**
-     * String ordering used for range operators.  Only `"binary"`
-     * (code-unit order) matches FlowQuery and enables string range
-     * push-down; numeric ranges are always eligible.
+     * String ordering used for range operators; enables string range
+     * push-down (numeric ranges are always eligible).
+     *
+     * - `"binary"`: the host language's string comparison (UTF-16 code
+     *   units in TypeScript, code points in Python).
+     * - `"codepoint"`: Unicode code-point order (= UTF-8 byte order), as
+     *   used by most databases, key-value stores and Rust/Go strings.
+     *   In TypeScript a string bound is only pushed when it has no code
+     *   units at or above U+D800 (where the two orders can disagree);
+     *   other bounds are evaluated by FlowQuery.
+     *
+     * FlowQuery re-checks every row; the source must only never omit a
+     * row FlowQuery's own comparison would accept.
      */
-    stringOrdering?: "binary";
+    stringOrdering?: StringOrdering;
 }
+
+export type StringOrdering = "binary" | "codepoint";
+
+export const STRING_ORDERINGS: readonly StringOrdering[] = ["binary", "codepoint"];
 
 interface BaseSourceCapabilities {
     /** Contract version; must be {@link SOURCE_CONTRACT_VERSION}. */
@@ -85,6 +99,12 @@ interface BaseSourceCapabilities {
     cacheable?: boolean;
     /** Maximum number of ids per lookup/expand request (default: unlimited). */
     maxBatchSize?: number;
+    /**
+     * The definition's backend function accepts change sets
+     * (`{operation: 'write', changes}`) so `CREATE` / `MERGE` / `SET` /
+     * `REMOVE` / `DELETE` may target this label or type.
+     */
+    writes?: boolean;
 }
 
 export interface NodeSourceCapabilities extends BaseSourceCapabilities {
@@ -98,6 +118,72 @@ export interface RelationshipSourceCapabilities extends BaseSourceCapabilities {
      * fetched by `left_id`, `right: true` by `right_id`.
      */
     expand?: { left?: boolean; right?: boolean };
+}
+
+/**
+ * Capabilities as written in `WITH CAPABILITIES { ... }` or declared by
+ * an async function (`static capabilities`).  Shorthands:
+ *
+ * - `predicates: true` — every operator, no string-range push-down
+ *   (`stringOrdering` stays an explicit opt-in); `false` — none.
+ * - `expand: true` — `{left: true, right: true}`; `false` — none.
+ * - `version` defaults to {@link SOURCE_CONTRACT_VERSION}.
+ *
+ * Node-only fields (`lookup`) are ignored for relationship definitions
+ * and relationship-only fields (`expand`) for node definitions, so one
+ * function can serve both.
+ */
+export interface DeclaredSourceCapabilities {
+    version?: number;
+    lookup?: boolean;
+    expand?: boolean | { left?: boolean; right?: boolean };
+    predicates?: boolean | PredicateCapabilities;
+    streaming?: boolean;
+    cacheable?: boolean;
+    maxBatchSize?: number;
+    writes?: boolean;
+}
+
+/**
+ * Expand shorthands and drop fields that don't apply to `kind`.  Returns
+ * a new object; unknown fields are kept and validated later.
+ */
+export function normalizeCapabilities(
+    caps: Record<string, any>,
+    kind: "node" | "relationship"
+): Record<string, any> {
+    if (caps === null || typeof caps !== "object") return caps;
+    const out: Record<string, any> = { version: SOURCE_CONTRACT_VERSION, ...caps };
+    if (out.predicates === true) {
+        out.predicates = { operators: [...PREDICATE_OPERATORS] };
+    } else if (out.predicates === false || out.predicates === null) {
+        delete out.predicates;
+    }
+    if (out.expand === true) {
+        out.expand = { left: true, right: true };
+    } else if (out.expand === false || out.expand === null) {
+        delete out.expand;
+    }
+    if (kind === "node") {
+        delete out.expand;
+    } else {
+        delete out.lookup;
+    }
+    return out;
+}
+
+/**
+ * Combine function-declared capabilities with an explicit
+ * `WITH CAPABILITIES` map; explicit top-level keys override (or narrow)
+ * declared ones, e.g. `{predicates: false}` switches push-down off.
+ */
+export function mergeCapabilities(
+    declared: Record<string, any> | null,
+    explicit: Record<string, any> | null,
+    kind: "node" | "relationship"
+): Record<string, any> | null {
+    if (declared === null && explicit === null) return null;
+    return normalizeCapabilities({ ...(declared ?? {}), ...(explicit ?? {}) }, kind);
 }
 
 interface BaseSourceRequest {
@@ -268,6 +354,9 @@ function validateBase(caps: any, name: string): void {
             name
         );
     }
+    if (caps.writes !== undefined && typeof caps.writes !== "boolean") {
+        throw new SourceCapabilityError(`Source ${name}: writes must be true or false`, name);
+    }
     if (caps.predicates !== undefined) {
         const p = caps.predicates;
         if (p === null || typeof p !== "object" || !Array.isArray(p.operators)) {
@@ -290,9 +379,9 @@ function validateBase(caps: any, name: string): void {
                 name
             );
         }
-        if (p.stringOrdering !== undefined && p.stringOrdering !== "binary") {
+        if (p.stringOrdering !== undefined && !STRING_ORDERINGS.includes(p.stringOrdering)) {
             throw new SourceCapabilityError(
-                `Source ${name}: predicates.stringOrdering must be "binary" when set`,
+                `Source ${name}: predicates.stringOrdering must be "binary" or "codepoint" when set`,
                 name
             );
         }
@@ -430,101 +519,4 @@ export function matchesPredicate(predicate: SourcePredicate | null, row: SourceR
         }
     }
     return true;
-}
-
-/** Options for {@link inMemoryNodeSource} and {@link inMemoryRelationshipSource}. */
-export interface InMemorySourceOptions {
-    /** Declare the source cacheable (default `true`). */
-    cacheable?: boolean;
-    /** Maximum ids per lookup/expand request (default: unlimited). */
-    maxBatchSize?: number;
-}
-
-function* pagesOf(rows: SourceRow[], pageSize: number): Iterable<SourceRow[]> {
-    const size = Number.isInteger(pageSize) && pageSize > 0 ? pageSize : rows.length || 1;
-    for (let i = 0; i < rows.length; i += size) {
-        yield rows.slice(i, i + size);
-    }
-}
-
-function filterRows(
-    rows: SourceRow[],
-    predicate: SourcePredicate | null,
-    field: string | null,
-    ids: any[] | null
-): SourceRow[] {
-    const wanted = ids === null ? null : new Set(ids);
-    return rows.filter(
-        (row) =>
-            (wanted === null || (field !== null && wanted.has(row[field]))) &&
-            matchesPredicate(predicate, row)
-    );
-}
-
-function inMemoryCapabilities(options: InMemorySourceOptions): Record<string, any> {
-    const caps: Record<string, any> = {
-        version: SOURCE_CONTRACT_VERSION,
-        cacheable: options.cacheable ?? true,
-        streaming: true,
-        predicates: { operators: [...PREDICATE_OPERATORS], stringOrdering: "binary" },
-    };
-    if (options.maxBatchSize !== undefined) caps.maxBatchSize = options.maxBatchSize;
-    return caps;
-}
-
-/**
- * A ready-made node source over an in-memory array of rows (each with an
- * `id`).  It supports lookup, every predicate operator and paging, which
- * makes it handy for tests, examples and small reference data sets.  The
- * array is read on every request, so later mutations are visible.
- *
- * @example
- * ```typescript
- * FlowQuery.registerNodeSource("Person", inMemoryNodeSource([{ id: 1, name: "Ada" }]));
- * ```
- */
-export function inMemoryNodeSource(
-    rows: SourceRow[],
-    options: InMemorySourceOptions = {}
-): NodeSourceProvider {
-    return {
-        capabilities: { ...inMemoryCapabilities(options), lookup: true } as NodeSourceCapabilities,
-        scan: (req) => pagesOf(filterRows(rows, req.predicate, null, null), req.pageSize),
-        lookup: (req) => pagesOf(filterRows(rows, req.predicate, "id", req.ids), req.pageSize),
-    };
-}
-
-/**
- * A ready-made relationship source over an in-memory array of rows (each
- * with `left_id` and `right_id`), supporting expansion from both sides.
- *
- * @example
- * ```typescript
- * FlowQuery.registerRelationshipSource(
- *     "KNOWS", "Person", "Person",
- *     inMemoryRelationshipSource([{ left_id: 1, right_id: 2, since: 2020 }])
- * );
- * ```
- */
-export function inMemoryRelationshipSource(
-    rows: SourceRow[],
-    options: InMemorySourceOptions = {}
-): RelationshipSourceProvider {
-    return {
-        capabilities: {
-            ...inMemoryCapabilities(options),
-            expand: { left: true, right: true },
-        } as RelationshipSourceCapabilities,
-        scan: (req) => pagesOf(filterRows(rows, req.predicate, null, null), req.pageSize),
-        expand: (req) =>
-            pagesOf(
-                filterRows(
-                    rows,
-                    req.predicate,
-                    req.side === "left" ? "left_id" : "right_id",
-                    req.ids
-                ),
-                req.pageSize
-            ),
-    };
 }

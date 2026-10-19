@@ -54,6 +54,7 @@ from .replace import Replace
 from .round_ import Round
 from .schema import Schema
 from .size import Size
+from .source_capabilities import SourceCapabilities
 from .split import Split
 from .string_distance import StringDistance
 from .stringify import Stringify
@@ -119,6 +120,7 @@ __all__ = [
     "Replace",
     "Round",
     "Size",
+    "SourceCapabilities",
     "Split",
     "StringDistance",
     "Stringify",

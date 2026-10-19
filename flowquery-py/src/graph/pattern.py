@@ -10,7 +10,7 @@ from ..parsing.ast_node import ASTNode
 from .data_resolver import DataResolver
 from .node import Node
 from .node_data import NodeData
-from .relationship import Relationship
+from .relationship import Relationship, RelationshipScope
 from .relationship_data import RelationshipData
 from .source_access import MemoryNodeAccess, MemoryRelationshipAccess, is_static_expression
 
@@ -27,6 +27,7 @@ class Pattern(ASTNode):
         self._chain: List[Union['Node', 'Relationship']] = []
         self._context: Optional['SourceContext'] = None
         self._deferred: bool = False
+        self._scope: RelationshipScope = RelationshipScope()
 
     @property
     def identifier(self) -> Optional[str]:
@@ -60,6 +61,24 @@ class Pattern(ASTNode):
 
         self._chain.append(element)
         self.add_child(element)
+        if isinstance(element, Relationship):
+            element.scope = self._scope
+
+    def set_relationship_scope(self, scope: RelationshipScope) -> None:
+        """Share one relationship-uniqueness scope across several patterns
+        (all patterns of one MATCH clause; internal)."""
+        self._scope = scope
+        for element in self._chain:
+            if isinstance(element, Relationship):
+                element.scope = scope
+
+    @property
+    def relationship_scope(self) -> RelationshipScope:
+        return self._scope
+
+    @relationship_scope.setter
+    def relationship_scope(self, scope: RelationshipScope) -> None:
+        self.set_relationship_scope(scope)
 
     @property
     def start_node(self) -> 'Node':
@@ -342,12 +361,18 @@ class Pattern(ASTNode):
                             for rel_row in rel_page:
                                 if not rel.matches_record(rel_row):
                                     continue
-                                rel_rows[i - 1] = rel_row
-                                async with aclosing(self._reverse_from(
-                            plan, i - 1, rel_row.get(next_field), rel_rows
-                        )) as _gen5:
-                                    async for _ in _gen5:
-                                        yield
+                                claimed = rel.claim(rel_row)
+                                if claimed is None:
+                                    continue
+                                try:
+                                    rel_rows[i - 1] = rel_row
+                                    async with aclosing(self._reverse_from(
+                                        plan, i - 1, rel_row.get(next_field), rel_rows
+                                    )) as _gen5:
+                                        async for _ in _gen5:
+                                            yield
+                                finally:
+                                    rel.release(claimed)
                     finally:
                         await expansion.aclose()
 

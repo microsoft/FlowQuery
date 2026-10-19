@@ -11,10 +11,10 @@ import {
     SourceRow,
     SourceUnsupportedError,
     cursorPages,
-    inMemoryNodeSource,
-    inMemoryRelationshipSource,
     matchesPredicate,
 } from "../../src/graph/source_provider";
+import { inMemoryNodeSource, inMemoryRelationshipSource } from "../../src/graph/testing";
+import { mock } from "./mock_backend";
 
 const db = Database.getInstance();
 const drop = (...labels: string[]) => labels.forEach((l) => db.nodes.delete(l));
@@ -226,6 +226,11 @@ const DIFFERENTIAL_QUERIES = [
     "MATCH (a:$P)-[:$K]->(a) RETURN a.id AS a",
     "MATCH (a:$P)-[:$K]->(b:$P) RETURN a.id AS a, b.id AS b ORDER BY a DESC, b LIMIT 3",
     "MATCH (a:$P)-[:$K]->(b:$P) WHERE a.name >= 'C' RETURN a.id AS a, b.id AS b",
+    // Relationship uniqueness within one MATCH (openCypher isomorphism)
+    "MATCH (a:$P)-[:$K]->(b:$P)<-[:$K]-(c:$P) RETURN a.id AS a, b.id AS b, c.id AS c",
+    "MATCH (a:$P)-[:$K]-(b:$P)-[:$K]-(c:$P) RETURN a.id AS a, b.id AS b, c.id AS c",
+    "MATCH (a:$P)-[:$K]->(b:$P), (c:$P)-[:$K]->(b) RETURN a.id AS a, c.id AS c",
+    "MATCH (a:$P)-[:$K]->(b:$P) MATCH (c:$P)-[:$K]->(b) RETURN a.id AS a, c.id AS c",
 ];
 
 function bind(statement: string, prefix: string): string {
@@ -272,6 +277,37 @@ describe("backend-aware virtual sources", () => {
             sources: { reorder: false, maxBatchSize: 1 },
         });
         expect(sorted(sourced.results)).toEqual(sorted(legacy.results));
+    });
+
+    describe("through the mockbackend function", () => {
+        beforeAll(async () => {
+            mock.addNodes("MockP", PEOPLE);
+            mock.addNodes("MockC", CITIES);
+            mock.addRelationships("MockK", KNOWS);
+            mock.addRelationships("MockL", LIVES);
+            const node = (label: string, columns: string) =>
+                new Runner(
+                    `CREATE VIRTUAL (:${label}) AS { LOAD JSON FROM mockbackend($request) AS n RETURN ${columns} }`
+                ).run();
+            const rel = (type: string, from: string, to: string) =>
+                new Runner(
+                    `CREATE VIRTUAL (:${from})-[:${type}]-(:${to}) AS { LOAD JSON FROM mockbackend($request) AS r RETURN r.left_id AS left_id, r.right_id AS right_id, r.since AS since }`
+                ).run();
+            await node("MockP", "n.id AS id, n.name AS name, n.age AS age");
+            await node("MockC", "n.id AS id, n.name AS name");
+            await rel("MockK", "MockP", "MockP");
+            await rel("MockL", "MockP", "MockC");
+        });
+
+        test.each(DIFFERENTIAL_QUERIES)("mockbackend matches legacy: %s", async (statement) => {
+            const legacy = await query(bind(statement, "Leg"));
+            const sourced = await query(bind(statement, "Mock"), { sources: { pageSize: 2 } });
+            if (statement.includes("ORDER BY")) {
+                expect(sourced.results).toEqual(legacy.results);
+            } else {
+                expect(sorted(sourced.results)).toEqual(sorted(legacy.results));
+            }
+        });
     });
 
     test("correlated loading uses lookup and expand instead of scans", async () => {

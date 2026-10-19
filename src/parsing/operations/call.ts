@@ -29,8 +29,11 @@ class Call extends Projection {
         if (this._function === null) {
             throw new Error("No function set for Call operation.");
         }
+        await this._function.prepareContext();
+        const ctx = this._function.sourceContext;
         const args = this._function.getArguments();
         for await (const item of this._function.generate(...args)) {
+            ctx?.throwIfCancelled();
             if (!this.isLast) {
                 this._map.reset();
                 if (typeof item == "object" && !Array.isArray(item)) {

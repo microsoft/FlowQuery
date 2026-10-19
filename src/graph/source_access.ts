@@ -86,6 +86,20 @@ function isPushablePrimitive(value: any): boolean {
     return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
+/**
+ * UTF-16 code-unit order (JavaScript's `<`) and Unicode code-point order
+ * only disagree between surrogate pairs (U+10000 and above) and
+ * U+E000–U+FFFF.  A bound without code units at or above U+D800 compares
+ * the same way against every string under both orders, so it is safe to
+ * push to a `"codepoint"` source.
+ */
+function codePointSafe(bound: string): boolean {
+    for (let i = 0; i < bound.length; i++) {
+        if (bound.charCodeAt(i) >= 0xd800) return false;
+    }
+    return true;
+}
+
 /** Convert a term into a contract predicate the source can evaluate, or null. */
 function toPredicate(
     caps: PredicateCapabilities | undefined,
@@ -116,7 +130,11 @@ function toPredicate(
             if (typeof term.value === "number" && Number.isFinite(term.value)) {
                 return { op: term.op, property: term.property, value: term.value };
             }
-            if (typeof term.value === "string" && caps.stringOrdering === "binary") {
+            if (
+                typeof term.value === "string" &&
+                (caps.stringOrdering === "binary" ||
+                    (caps.stringOrdering === "codepoint" && codePointSafe(term.value)))
+            ) {
                 return { op: term.op, property: term.property, value: term.value };
             }
             return null;

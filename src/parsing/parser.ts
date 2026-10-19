@@ -87,6 +87,15 @@ import Update from "./operations/update";
 import UpdateDelete from "./operations/update_delete";
 import Where from "./operations/where";
 import With from "./operations/with";
+import {
+    CreateWrite,
+    DeleteWrite,
+    MergeWrite,
+    RemoveWrite,
+    SetItem,
+    SetWrite,
+    WriteOperation,
+} from "./operations/write";
 import ParserState from "./parser_state";
 
 /**
@@ -182,6 +191,11 @@ class Parser extends BaseParser {
      * terminal statement in a multi-statement query.
      */
     private validateIsCreateOrDelete(root: ASTNode): void {
+        // Statements with write clauses may precede the last statement;
+        // their changes are applied when the whole query succeeds.
+        if (WriteOperation.collect(root.firstChild() as Operation).length > 0) {
+            return;
+        }
         let op: Operation | null = root.firstChild() as Operation;
         while (op !== null) {
             if (
@@ -317,10 +331,11 @@ class Parser extends BaseParser {
             !(operation instanceof Let) &&
             !(operation instanceof Update) &&
             !(operation instanceof UpdateDelete) &&
-            !(operation instanceof Merge)
+            !(operation instanceof Merge) &&
+            !(operation instanceof WriteOperation)
         ) {
             throw new Error(
-                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, DROP, REFRESH, LET, UPDATE, or MERGE statement"
+                "Last statement must be a RETURN, WHERE, CALL, CREATE, DELETE, DROP, REFRESH, LET, UPDATE, MERGE, SET, or REMOVE statement"
             );
         }
         return root;
@@ -339,6 +354,8 @@ class Parser extends BaseParser {
             this.parseLet() ||
             this.parseUpdate() ||
             this.parseMerge() ||
+            this.parseSetWrite() ||
+            this.parseRemoveWrite() ||
             this.parseMatch()
         );
     }
@@ -392,6 +409,7 @@ class Parser extends BaseParser {
                 Reference,
                 Lookup,
                 RangeLookup,
+                ParameterReference,
             ])
         ) {
             throw new Error("Expected array, function, reference, or lookup.");
@@ -562,12 +580,15 @@ class Parser extends BaseParser {
         return call;
     }
 
-    private parseCreate(): CreateNode | CreateRelationship | null {
+    private parseCreate(): CreateNode | CreateRelationship | CreateWrite | null {
         if (!this.token.isCreate()) {
             return null;
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isLeftParenthesis()) {
+            return this.parseCreateWrite();
+        }
         let isStatic = false;
         if (this.token.isStatic()) {
             isStatic = true;
@@ -718,12 +739,31 @@ class Parser extends BaseParser {
         return create;
     }
 
-    private parseDelete(): DeleteNode | DeleteRelationship | DropBinding | null {
+    private parseDelete(): DeleteNode | DeleteRelationship | DropBinding | DeleteWrite | null {
+        if (this.token.isDetach()) {
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isDelete()) {
+                throw new Error("Expected DELETE after DETACH");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            return this.parseDeleteWrite(true);
+        }
         if (!this.token.isDelete() && !this.token.isDrop()) {
             return null;
         }
+        const isDelete = this.token.isDelete();
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (
+            isDelete &&
+            !this.token.isBinding() &&
+            !this.token.isVirtual() &&
+            this.token.isIdentifierOrKeyword()
+        ) {
+            return this.parseDeleteWrite(false);
+        }
         if (this.token.isBinding()) {
             this.setNextToken();
             this.expectAndSkipWhitespaceAndComments();
@@ -1025,12 +1065,15 @@ class Parser extends BaseParser {
      * Parses a `MERGE INTO <name> [AS <target>] USING <rhs>
      * [AS <source>] ON <on-clause> <when-clauses>` statement.
      */
-    private parseMerge(): Merge | null {
+    private parseMerge(): Merge | MergeWrite | null {
         if (!this.token.isMerge()) {
             return null;
         }
         this.setNextToken();
         this.expectAndSkipWhitespaceAndComments();
+        if (this.token.isLeftParenthesis()) {
+            return this.parseMergeWrite();
+        }
         if (!this.token.isInto()) {
             throw new Error("Expected INTO after MERGE");
         }
@@ -1404,6 +1447,255 @@ class Parser extends BaseParser {
                 this.convertUnresolvedReferencesToBindings(child, optional);
             }
         }
+    }
+
+    private assertWritesAllowed(clause: string): void {
+        if (this._state.inVirtualDefinition) {
+            throw new Error(
+                `${clause} is not allowed inside virtual node or relationship definitions`
+            );
+        }
+    }
+
+    /** `CREATE (n:Label {...})[, (a)-[:TYPE {...}]->(b) ...]` */
+    private parseCreateWrite(): CreateWrite {
+        this.assertWritesAllowed("CREATE");
+        const patterns: Pattern[] = Array.from(this.parsePatterns());
+        if (patterns.length === 0) {
+            throw new Error("Expected graph pattern after CREATE");
+        }
+        for (const pattern of patterns) {
+            for (const element of pattern.chain) {
+                if (element instanceof Relationship) {
+                    if (element instanceof RelationshipReference) {
+                        throw new Error(
+                            `CREATE cannot reuse relationship variable ${element.identifier}`
+                        );
+                    }
+                    if (element.types.length !== 1) {
+                        throw new Error("CREATE requires exactly one relationship type");
+                    }
+                    if (element.hops?.multi()) {
+                        throw new Error("CREATE does not support variable-length relationships");
+                    }
+                } else if (element instanceof NodeReference) {
+                    if (element.properties.size > 0 || element.labels.length > 0) {
+                        throw new Error(
+                            `CREATE cannot add labels or properties to bound variable ${element.identifier}`
+                        );
+                    }
+                } else if (element.labels.length !== 1) {
+                    throw new Error("CREATE requires exactly one label for each new node");
+                }
+            }
+        }
+        return new CreateWrite(patterns);
+    }
+
+    /** `MERGE (n:Label {key}) | (a)-[r:TYPE {key}]->(b)` with `ON CREATE|MATCH SET`. */
+    private parseMergeWrite(): MergeWrite {
+        this.assertWritesAllowed("MERGE");
+        const pattern = this.parsePattern();
+        if (pattern === null) {
+            throw new Error("Expected graph pattern after MERGE");
+        }
+        const chain = pattern.chain;
+        if (chain.length === 1) {
+            const node = chain[0] as Node;
+            if (node instanceof NodeReference || node.labels.length !== 1) {
+                throw new Error("MERGE of a node requires a new variable with exactly one label");
+            }
+        } else if (
+            chain.length === 3 &&
+            chain[0] instanceof NodeReference &&
+            chain[2] instanceof NodeReference
+        ) {
+            const rel = chain[1] as Relationship;
+            if (
+                rel instanceof RelationshipReference ||
+                rel.types.length !== 1 ||
+                rel.hops?.multi()
+            ) {
+                throw new Error("MERGE of a relationship requires exactly one type and one hop");
+            }
+        } else {
+            throw new Error(
+                "MERGE supports a single node, or one relationship between two bound nodes"
+            );
+        }
+        const onCreate: SetItem[] = [];
+        const onMatch: SetItem[] = [];
+        while (true) {
+            const saved = this.tokenIndex;
+            this.skipWhitespaceAndComments();
+            if (!this.token.isOn()) {
+                this.tokenIndex = saved;
+                break;
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            let target: SetItem[];
+            if (this.token.isCreate()) target = onCreate;
+            else if (this.token.isMatch()) target = onMatch;
+            else throw new Error("Expected CREATE or MATCH after ON");
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            if (!this.token.isSet()) {
+                throw new Error("Expected SET after ON CREATE / ON MATCH");
+            }
+            this.setNextToken();
+            this.expectAndSkipWhitespaceAndComments();
+            for (const item of this.parseSetItems("SET")) {
+                if (item.kind !== "property" && item.kind !== "merge") {
+                    throw new Error("ON CREATE / ON MATCH SET only supports property updates");
+                }
+                if (!chain.includes(item.element)) {
+                    throw new Error("ON CREATE / ON MATCH SET must update the merged element");
+                }
+                target.push(item);
+            }
+        }
+        return new MergeWrite(pattern, onCreate, onMatch);
+    }
+
+    private parseSetWrite(): SetWrite | null {
+        if (!this.token.isSet()) {
+            return null;
+        }
+        this.assertWritesAllowed("SET");
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        return new SetWrite(this.parseSetItems("SET"));
+    }
+
+    private parseRemoveWrite(): RemoveWrite | null {
+        if (!this.token.isRemove()) {
+            return null;
+        }
+        this.assertWritesAllowed("REMOVE");
+        this.setNextToken();
+        this.expectAndSkipWhitespaceAndComments();
+        return new RemoveWrite(this.parseSetItems("REMOVE"));
+    }
+
+    private parseDeleteWrite(detach: boolean): DeleteWrite {
+        const clause = detach ? "DETACH DELETE" : "DELETE";
+        this.assertWritesAllowed(clause);
+        const elements: (Node | Relationship)[] = [];
+        while (true) {
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error(`Expected variable after ${clause}`);
+            }
+            elements.push(this.resolveWriteVariable(this.token.value || "", clause));
+            this.setNextToken();
+            const saved = this.tokenIndex;
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                this.tokenIndex = saved;
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        return new DeleteWrite(elements, detach);
+    }
+
+    /** Items of `SET` (`n.p = v`, `n += map`, `n:Label`) or `REMOVE` (`n.p`, `n:Label`). */
+    private parseSetItems(clause: "SET" | "REMOVE"): SetItem[] {
+        const items: SetItem[] = [];
+        while (true) {
+            if (!this.token.isIdentifierOrKeyword()) {
+                throw new Error(`Expected variable in ${clause}`);
+            }
+            const name = this.token.value || "";
+            const element = this.resolveWriteVariable(name, clause);
+            this.setNextToken();
+            if (this.token.isDot()) {
+                this.setNextToken();
+                if (!this.token.isIdentifierOrKeyword()) {
+                    throw new Error(`Expected property name after ${name}.`);
+                }
+                const property = this.token.value || "";
+                this.setNextToken();
+                if (clause === "REMOVE") {
+                    items.push({ kind: "removeProperty", element, property });
+                } else {
+                    this.skipWhitespaceAndComments();
+                    if (!this.token.isEquals()) {
+                        throw new Error(`Expected '=' after ${name}.${property}`);
+                    }
+                    this.setNextToken();
+                    this.skipWhitespaceAndComments();
+                    const expression = this.parseExpression();
+                    if (expression === null) {
+                        throw new Error("Expected expression");
+                    }
+                    items.push({ kind: "property", element, property, expression });
+                }
+            } else if (this.token.isColon()) {
+                if (!(element instanceof Node)) {
+                    throw new Error(`${clause} labels requires a node variable`);
+                }
+                const labels: string[] = [];
+                while (this.token.isColon()) {
+                    this.setNextToken();
+                    if (!this.token.isIdentifierOrKeyword()) {
+                        throw new Error("Expected label");
+                    }
+                    labels.push(this.token.value || "");
+                    this.setNextToken();
+                }
+                items.push({
+                    kind: clause === "SET" ? "addLabels" : "removeLabels",
+                    element,
+                    labels,
+                });
+            } else {
+                this.skipWhitespaceAndComments();
+                if (clause === "SET" && this.token.isAdd() && this.peek()?.isEquals()) {
+                    this.setNextToken();
+                    this.setNextToken();
+                    this.skipWhitespaceAndComments();
+                    const expression = this.parseExpression();
+                    if (expression === null) {
+                        throw new Error("Expected map expression after +=");
+                    }
+                    items.push({ kind: "merge", element, expression });
+                } else if (clause === "SET" && this.token.isEquals()) {
+                    throw new Error(
+                        `SET ${name} = {...} is not supported; use SET ${name} += {...}`
+                    );
+                } else {
+                    throw new Error(`Expected property, label or += after ${name} in ${clause}`);
+                }
+            }
+            const saved = this.tokenIndex;
+            this.skipWhitespaceAndComments();
+            if (!this.token.isComma()) {
+                this.tokenIndex = saved;
+                break;
+            }
+            this.setNextToken();
+            this.skipWhitespaceAndComments();
+        }
+        return items;
+    }
+
+    /** The node or relationship a write clause variable is bound to. */
+    private resolveWriteVariable(name: string, clause: string): Node | Relationship {
+        let reference: ASTNode | undefined = this._state.variables.get(name);
+        if (reference instanceof Expression && reference.firstChild() instanceof Reference) {
+            reference = (reference.firstChild() as Reference).referred;
+        }
+        if (reference instanceof Relationship && reference.hops?.multi()) {
+            throw new Error(`${clause} does not support variable-length relationship ${name}`);
+        }
+        if (reference instanceof Node || reference instanceof Relationship) {
+            return reference;
+        }
+        throw new Error(
+            `${clause} target ${name} must be a node or relationship bound by MATCH, CREATE or MERGE`
+        );
     }
 
     private parseMatch(): Match | null {
@@ -1898,14 +2190,10 @@ class Parser extends BaseParser {
         if (this.token.isIdentifierOrKeyword() && !this.peek()?.isLeftParenthesis()) {
             const identifier: string = this.token.value || "";
             if (identifier.startsWith("$")) {
-                if (!this._state.inVirtualDefinition) {
-                    throw new Error(
-                        "Parameter references ($" +
-                            identifier.substring(1) +
-                            ") are only allowed inside virtual node or relationship definitions"
-                    );
-                }
-                const paramRef = new ParameterReference(identifier);
+                const paramRef = new ParameterReference(
+                    identifier,
+                    this._state.inVirtualDefinition
+                );
                 this.setNextToken();
                 const lookup = this.parseLookup(paramRef);
                 expression.addNode(lookup);

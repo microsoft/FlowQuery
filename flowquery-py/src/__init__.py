@@ -28,6 +28,7 @@ from .graph.source_context import SourceOptions
 from .graph.source_provider import (
     PREDICATE_OPERATORS,
     SOURCE_CONTRACT_VERSION,
+    STRING_ORDERINGS,
     NodeSource,
     QueryCancelledError,
     RelationshipSource,
@@ -41,13 +42,13 @@ from .graph.source_provider import (
     SourceSignal,
     SourceUnsupportedError,
     cursor_pages,
-    in_memory_node_source,
-    in_memory_relationship_source,
     matches_predicate,
+    normalize_capabilities,
 )
+from .graph.write_set import WRITE_CONTRACT_VERSION, WriteResult
 from .io.command_line import CommandLine
 from .parsing.functions.aggregate_function import AggregateFunction
-from .parsing.functions.async_function import AsyncFunction
+from .parsing.functions.async_function import AsyncFunction, FunctionContext
 from .parsing.functions.function import Function
 from .parsing.functions.function_metadata import (
     FunctionCategory,
@@ -96,12 +97,16 @@ __all__ = [
     "Function",
     "AggregateFunction",
     "AsyncFunction",
+    "FunctionContext",
     "PredicateFunction",
     "ReducerElement",
     "FunctionDef",
     "FunctionMetadata",
     "FunctionCategory",
     "SOURCE_CONTRACT_VERSION",
+    "STRING_ORDERINGS",
+    "WRITE_CONTRACT_VERSION",
+    "WriteResult",
     "PREDICATE_OPERATORS",
     "SourceOptions",
     "SourceSignal",
@@ -118,7 +123,6 @@ __all__ = [
     "RelationshipSource",
     "cursor_pages",
     "matches_predicate",
-    "in_memory_node_source",
-    "in_memory_relationship_source",
+    "normalize_capabilities",
 ]
 

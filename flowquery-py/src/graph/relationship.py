@@ -3,16 +3,63 @@
 from __future__ import annotations
 
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set, Union
 
 from ..parsing.ast_node import ASTNode
 from .hops import Hops
 from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
 from .source_access import SourceTerms, build_terms
+from .source_context import canonical_key
 
 if TYPE_CHECKING:
     from .node import Node
+
+
+class RelationshipScope:
+    """Relationship uniqueness scope (openCypher "relationship isomorphism").
+
+    Within one MATCH clause, including comma-separated patterns and
+    variable-length hops, each relationship is bound at most once.
+    Relationships are identified by type plus their ``id`` column when the
+    definition returns one, otherwise by type plus the whole row.
+    """
+
+    def __init__(self) -> None:
+        self._members: List["Relationship"] = []
+        self._used: Set[str] = set()
+        self._enforced: Optional[bool] = None
+
+    def register(self, relationship: "Relationship") -> None:
+        if not any(member is relationship for member in self._members):
+            self._members.append(relationship)
+        self._enforced = None
+
+    @property
+    def enforced(self) -> bool:
+        """Uniqueness only matters when a binding can reuse a relationship."""
+        if self._enforced is None:
+            self._enforced = len(self._members) > 1 or any(
+                r.hops is not None and r.hops.multi() for r in self._members
+            )
+        return self._enforced
+
+    def claim(self, key: str) -> bool:
+        if key in self._used:
+            return False
+        self._used.add(key)
+        return True
+
+    def release(self, key: str) -> None:
+        self._used.discard(key)
+
+    def reset(self) -> None:
+        """Forget every claim (start of a new MATCH execution)."""
+        self._used.clear()
+
+
+#: Claim result for relationships that need no uniqueness tracking.
+_UNTRACKED = ""
 
 
 class Relationship(ASTNode):
@@ -32,6 +79,49 @@ class Relationship(ASTNode):
         self._properties: Dict[str, Any] = {}
         self._access: Any = None
         self._frames: Dict[int, Dict[str, Any]] = {}
+        self._scope: Optional[RelationshipScope] = None
+        #: Row of a relationship created or merged by a write clause in the
+        #: current row (``{id: "$n", left_id, right_id, ...}``), if any (internal).
+        self.created_record: Optional[Dict[str, Any]] = None
+
+    @property
+    def scope(self) -> RelationshipScope:
+        """The uniqueness scope (the enclosing MATCH or pattern; internal)."""
+        if self._scope is None:
+            self.scope = RelationshipScope()
+        assert self._scope is not None
+        return self._scope
+
+    @scope.setter
+    def scope(self, scope: RelationshipScope) -> None:
+        self._scope = scope
+        scope.register(self)
+
+    def uniqueness_key(self, record: Optional[Dict[str, Any]]) -> str:
+        """Identity of a bound row for uniqueness checks."""
+        row = record if record is not None else {}
+        rel_type = row.get("_type")
+        if rel_type is None:
+            rel_type = self.type or ""
+        if row.get("id") is not None:
+            return f"{rel_type}\u0000#{canonical_key(row['id'])}"
+        rest = {k: v for k, v in row.items() if k != "_type"}
+        return f"{rel_type}\u0000{canonical_key(rest)}"
+
+    def claim(self, record: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Claim ``record`` for the current binding (internal).  Returns the
+        key to release on backtrack, or ``None`` when the relationship is
+        already bound elsewhere in the same MATCH."""
+        scope = self.scope
+        if not scope.enforced:
+            return _UNTRACKED
+        key = self.uniqueness_key(record)
+        return key if scope.claim(key) else None
+
+    def release(self, key: str) -> None:
+        """Release a key returned by :meth:`claim` (internal)."""
+        if key != _UNTRACKED:
+            self.scope.release(key)
 
     @property
     def identifier(self) -> Optional[str]:
@@ -194,6 +284,10 @@ class Relationship(ASTNode):
     def value(self) -> Optional[Union[RelationshipMatchRecord, List[RelationshipMatchRecord]]]:
         return self._value
 
+    def override_value(self, value: Optional[RelationshipMatchRecord]) -> None:
+        """Rebind the variable's value (write clauses; internal)."""
+        self._value = value
+
     @property
     def matches(self) -> List[RelationshipMatchRecord]:
         return self._matches.matches
@@ -239,20 +333,30 @@ class Relationship(ASTNode):
                     self.set_value(self, left_id)
                     if not self._matches_properties(hop):
                         continue
-                    if self._target:
-                        async for _ in self._target.find(id, hop):
-                            yield
-                    if hop + 1 < self._hops.max:
-                        if self._matches.is_circular(id):
-                            self._matches.pop()
-                            continue
-                        async for _ in self.find(id, hop + 1):
-                            yield
+                    claimed = self.claim(data)
+                    if claimed is None:
+                        self._matches.pop()
+                        continue
+                    try:
+                        if self._target:
+                            async for _ in self._target.find(id, hop):
+                                yield
+                        if hop + 1 < self._hops.max and not self._matches.is_circular(id):
+                            async for _ in self.find(id, hop + 1):
+                                yield
+                    finally:
+                        self.release(claimed)
                     self._matches.pop()
                 else:
                     # Below minimum hops: traverse the edge without yielding a match
-                    async for _ in self.find(id, hop + 1):
-                        yield
+                    claimed = self.claim(data)
+                    if claimed is None:
+                        continue
+                    try:
+                        async for _ in self.find(id, hop + 1):
+                            yield
+                    finally:
+                        self.release(claimed)
         finally:
             # Restore original source node
             self._source = original
@@ -305,6 +409,9 @@ class Relationship(ASTNode):
         if hop + 1 >= self._hops.min:
             if not self.matches_record(record):
                 return
+            claimed = self.claim(record)
+            if claimed is None:
+                return
             self.push_match(record, left_id)
             try:
                 if self._target is not None:
@@ -317,10 +424,17 @@ class Relationship(ASTNode):
                             yield
             finally:
                 self._matches.pop()
+                self.release(claimed)
         else:
-            async with aclosing(self.find(id_, hop + 1)) as below:
-                async for _ in below:
-                    yield
+            claimed = self.claim(record)
+            if claimed is None:
+                return
+            try:
+                async with aclosing(self.find(id_, hop + 1)) as below:
+                    async for _ in below:
+                        yield
+            finally:
+                self.release(claimed)
 
     def matches_record(self, record: Dict[str, Any]) -> bool:
         """Re-check relationship property constraints against a provider row."""

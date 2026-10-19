@@ -19,6 +19,7 @@ from .source_provider import (
     SourceRow,
     SourceSignal,
 )
+from .write_set import WriteSet
 
 
 @dataclass
@@ -178,6 +179,10 @@ class SourceContext:
         self.options = resolve_options(options)
         self.stats: Dict[str, Any] = empty_source_stats()
         self.provenance = provenance
+        #: Top-level query parameters, visible to nested runs.
+        self.parameters: Dict[str, Any] = {}
+        #: Changes collected by write clauses; sent to the backend when the query succeeds.
+        self.writes: Optional[WriteSet] = None
         self.signal = SourceSignal()
         self._cache = RowCache(self.options.cache_capacity)
         self._inflight: Dict[str, "asyncio.Future[Any]"] = {}

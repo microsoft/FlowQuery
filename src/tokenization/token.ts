@@ -122,7 +122,7 @@ class Token {
 
     public static BACKTICK_STRING(value: string, quoteChar: string = '"'): Token {
         const unquoted = StringUtils.unquote(value);
-        const unescaped = StringUtils.removeEscapedQuotes(unquoted, quoteChar);
+        const unescaped = StringUtils.removeEscapedBackticks(unquoted, quoteChar);
         return new Token(TokenType.BACKTICK_STRING, unescaped);
     }
 
@@ -625,6 +625,14 @@ class Token {
 
     public isRemove(): boolean {
         return this._type === TokenType.KEYWORD && this._value === Keyword.REMOVE;
+    }
+
+    public static get DETACH(): Token {
+        return new Token(TokenType.KEYWORD, Keyword.DETACH);
+    }
+
+    public isDetach(): boolean {
+        return this._type === TokenType.KEYWORD && this._value === Keyword.DETACH;
     }
 
     public static get CASE(): Token {

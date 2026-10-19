@@ -7,6 +7,47 @@ import RelationshipMatchCollector, {
     RelationshipMatchRecord,
 } from "./relationship_match_collector";
 import { RelationshipAccess, SourceTerms, buildTerms } from "./source_access";
+import { canonicalKey } from "./source_context";
+
+/**
+ * Relationship uniqueness scope (openCypher "relationship isomorphism"):
+ * within one MATCH clause, including comma-separated patterns and
+ * variable-length hops, each relationship is bound at most once.
+ * Relationships are identified by type plus their `id` column when the
+ * definition returns one, otherwise by type plus the whole row.
+ */
+export class RelationshipScope {
+    private _members: Relationship[] = [];
+    private _used: Set<string> = new Set();
+    private _enforced: boolean | null = null;
+
+    public register(relationship: Relationship): void {
+        if (!this._members.includes(relationship)) this._members.push(relationship);
+        this._enforced = null;
+    }
+    /** Uniqueness only matters when a binding can reuse a relationship. */
+    public get enforced(): boolean {
+        if (this._enforced === null) {
+            this._enforced =
+                this._members.length > 1 || this._members.some((r) => r.hops?.multi() === true);
+        }
+        return this._enforced;
+    }
+    public claim(key: string): boolean {
+        if (this._used.has(key)) return false;
+        this._used.add(key);
+        return true;
+    }
+    public release(key: string): void {
+        this._used.delete(key);
+    }
+}
+
+/** Claim result for relationships that need no uniqueness tracking. */
+const UNTRACKED = "";
+
+/** Uniqueness keys of relationship rows (rows are reused across traversal steps). */
+const keyCache: WeakMap<object, string> = new WeakMap();
 
 class Relationship extends ASTNode {
     protected _identifier: string | null = null;
@@ -24,6 +65,7 @@ class Relationship extends ASTNode {
     private _data: RelationshipData | null = null;
     private _access: RelationshipAccess | null = null;
     private _frames: Map<number, RelationshipRecord> = new Map();
+    private _scope: RelationshipScope | null = null;
 
     constructor(identifier: string | null = null, type: string | null = null) {
         super();
@@ -31,6 +73,46 @@ class Relationship extends ASTNode {
         if (type !== null) {
             this._types = [type];
         }
+    }
+    /** @internal The uniqueness scope (the enclosing MATCH or pattern). */
+    public set scope(scope: RelationshipScope) {
+        this._scope = scope;
+        scope.register(this);
+    }
+    public get scope(): RelationshipScope {
+        if (this._scope === null) this.scope = new RelationshipScope();
+        return this._scope!;
+    }
+    /** Identity of a bound row for uniqueness checks. */
+    public uniquenessKey(record: RelationshipRecord): string {
+        const cached =
+            record !== null && typeof record === "object" ? keyCache.get(record) : undefined;
+        if (cached !== undefined) return cached;
+        const type = record?._type ?? this.type ?? "";
+        let key: string;
+        if (record?.id !== undefined && record.id !== null) {
+            key = `${type}\u0000#${canonicalKey(record.id)}`;
+        } else {
+            const { _type, ...row } = record ?? {};
+            key = `${type}\u0000${canonicalKey(row)}`;
+        }
+        if (record !== null && typeof record === "object") keyCache.set(record, key);
+        return key;
+    }
+    /**
+     * @internal Claim `record` for the current binding.  Returns the key
+     * to release on backtrack, or `null` when the relationship is already
+     * bound elsewhere in the same MATCH.
+     */
+    public claim(record: RelationshipRecord): string | null {
+        const scope = this.scope;
+        if (!scope.enforced) return UNTRACKED;
+        const key = this.uniquenessKey(record);
+        return scope.claim(key) ? key : null;
+    }
+    /** @internal Release a key returned by {@link claim}. */
+    public release(key: string): void {
+        if (key !== UNTRACKED) this.scope.release(key);
     }
     public set identifier(identifier: string) {
         this._identifier = identifier;
@@ -109,6 +191,15 @@ class Relationship extends ASTNode {
     public value(): RelationshipMatchRecord | RelationshipMatchRecord[] | null {
         return this._value;
     }
+    /** @internal Rebind the variable's value (write clauses). */
+    public overrideValue(value: RelationshipMatchRecord | null): void {
+        this._value = value;
+    }
+    /**
+     * @internal Row of a relationship created or merged by a write clause
+     * in the current row (`{id: "$n", left_id, right_id, ...}`), if any.
+     */
+    public createdRecord: RelationshipRecord | null = null;
     public get matches(): RelationshipMatchRecord[] {
         return this._matches.matches;
     }
@@ -200,18 +291,31 @@ class Relationship extends ASTNode {
                     if (!this._matchesProperties(hop)) {
                         continue;
                     }
-                    yield* this._target!.find(id, hop);
-                    if (hop + 1 < this.hops!.max) {
-                        if (this._matches.isCircular(id)) {
-                            this._matches.pop();
-                            continue;
+                    const claimed = this.claim(data);
+                    if (claimed === null) {
+                        this._matches.pop();
+                        continue;
+                    }
+                    try {
+                        yield* this._target!.find(id, hop);
+                        if (hop + 1 < this.hops!.max && !this._matches.isCircular(id)) {
+                            yield* this.find(id, hop + 1);
                         }
-                        yield* this.find(id, hop + 1);
+                    } finally {
+                        this.release(claimed);
                     }
                     this._matches.pop();
                 } else {
                     // Below minimum hops: traverse the edge without yielding a match
-                    yield* this.find(id, hop + 1);
+                    const claimed = this.claim(data);
+                    if (claimed === null) {
+                        continue;
+                    }
+                    try {
+                        yield* this.find(id, hop + 1);
+                    } finally {
+                        this.release(claimed);
+                    }
                 }
             }
         } finally {
@@ -266,6 +370,10 @@ class Relationship extends ASTNode {
             if (!this.matchesRecord(record)) {
                 return;
             }
+            const claimed = this.claim(record);
+            if (claimed === null) {
+                return;
+            }
             this.pushMatch(record, left_id);
             try {
                 yield* this._target!.find(id, hop);
@@ -274,9 +382,18 @@ class Relationship extends ASTNode {
                 }
             } finally {
                 this._matches.pop();
+                this.release(claimed);
             }
         } else {
-            yield* this.find(id, hop + 1);
+            const claimed = this.claim(record);
+            if (claimed === null) {
+                return;
+            }
+            try {
+                yield* this.find(id, hop + 1);
+            } finally {
+                this.release(claimed);
+            }
         }
     }
     public matchesRecord(record: RelationshipRecord): boolean {

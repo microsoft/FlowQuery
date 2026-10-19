@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from ...graph.node import Node
 from ...graph.pattern import Pattern
 from ...graph.patterns import Patterns
+from ...graph.relationship import RelationshipScope
 from ...graph.source_access import is_static_expression
 from ..ast_node import ASTNode
 from ..data_structures.lookup import Lookup
@@ -36,6 +37,12 @@ class Match(Operation):
         self._patterns = Patterns(patterns or [])
         self._optional = optional
         self._source_context: Optional["SourceContext"] = None
+        # openCypher: a relationship is bound at most once per MATCH clause,
+        # across all of its comma-separated patterns.
+        scope = RelationshipScope()
+        for pattern in patterns or []:
+            pattern.relationship_scope = scope
+        self._scope = scope
 
     @property
     def patterns(self) -> List[Pattern]:
@@ -66,6 +73,9 @@ class Match(Operation):
         If optional and no match is found, continues with null values."""
         self._extract_where_predicates()
         self._extract_pushdown_predicates()
+        # Drop claims an abandoned traversal (early termination) may not
+        # have released yet; no binding of this MATCH is live here.
+        self._scope.reset()
         await self._patterns.initialize(self._source_context)
         matched = False
 

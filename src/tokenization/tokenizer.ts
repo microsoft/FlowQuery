@@ -133,6 +133,12 @@ class Tokenizer {
                 this.walker.moveNext();
                 continue;
             }
+            // openCypher escapes a backtick inside a quoted identifier by doubling it.
+            if (quoteChar === Symbol.BACKTICK && this.walker.escapedByDoubling(quoteChar)) {
+                this.walker.moveNext();
+                this.walker.moveNext();
+                continue;
+            }
             if (this.walker.checkForString(quoteChar)) {
                 const value = this.walker.getString(startPosition);
                 if (quoteChar === Symbol.BACKTICK) {

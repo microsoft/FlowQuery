@@ -204,7 +204,11 @@ class Database:
         self, label: str, capabilities: Optional[Dict[str, Any]]
     ) -> None:
         """Opts a statement-defined virtual node into source access (None opts out)."""
-        from .source_provider import SourceCapabilityError, validate_node_provider
+        from .source_provider import (
+            SourceCapabilityError,
+            normalize_capabilities,
+            validate_node_provider,
+        )
         from .statement_source import StatementSourceProvider
 
         name = f"(:{label})"
@@ -216,7 +220,9 @@ class Database:
         if capabilities is None:
             physical.provider = None
             return
-        provider = StatementSourceProvider(physical.virtual, capabilities)
+        provider = StatementSourceProvider(
+            physical.virtual, normalize_capabilities(capabilities, "node")
+        )
         validate_node_provider(provider, name)
         physical.provider = provider
 
@@ -228,7 +234,11 @@ class Database:
         capabilities: Optional[Dict[str, Any]],
     ) -> None:
         """Opts a statement-defined virtual relationship into source access."""
-        from .source_provider import SourceCapabilityError, validate_relationship_provider
+        from .source_provider import (
+            SourceCapabilityError,
+            normalize_capabilities,
+            validate_relationship_provider,
+        )
         from .statement_source import StatementSourceProvider
 
         name = f"(:{source_label or ''})-[:{rel_type}]->(:{target_label or ''})"
@@ -242,7 +252,9 @@ class Database:
         if capabilities is None:
             physical.provider = None
             return
-        provider = StatementSourceProvider(physical.virtual, capabilities)
+        provider = StatementSourceProvider(
+            physical.virtual, normalize_capabilities(capabilities, "relationship")
+        )
         validate_relationship_provider(provider, name)
         physical.provider = provider
 

@@ -7,6 +7,7 @@ import {
     SourceRow,
     SourceUnsupportedError,
 } from "./source_provider";
+import type { WriteSet } from "./write_set";
 
 /** Options controlling provider-backed execution (`RunnerOptions.sources`). */
 export interface SourceOptions {
@@ -145,6 +146,10 @@ class SourceContext {
     public readonly options: ResolvedSourceOptions;
     public readonly stats: SourceStats = emptySourceStats();
     public readonly provenance: boolean;
+    /** Top-level query parameters (`RunnerOptions.parameters`), visible to nested runs. */
+    public parameters: Record<string, any> = {};
+    /** Changes collected by write clauses; sent to the backend when the query succeeds. */
+    public writes: WriteSet | null = null;
     private _controller: AbortController = new AbortController();
     private _cache: RowCache;
     private _inflight: Map<string, Promise<SourceRow[]>> = new Map();

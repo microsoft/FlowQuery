@@ -33,7 +33,6 @@ from typing import (
     Callable,
     Dict,
     Iterable,
-    Iterator,
     List,
     Optional,
     Protocol,
@@ -44,6 +43,10 @@ from typing import (
 SOURCE_CONTRACT_VERSION = 1
 
 PREDICATE_OPERATORS: List[str] = ["eq", "gt", "gte", "lt", "lte", "in"]
+
+#: Accepted ``predicates.stringOrdering`` values.  Python compares ``str``
+#: by code point, so ``"binary"`` and ``"codepoint"`` are equivalent here.
+STRING_ORDERINGS: List[str] = ["binary", "codepoint"]
 
 SourceRow = Dict[str, Any]
 SourcePredicate = Dict[str, Any]
@@ -98,21 +101,68 @@ class SourceRequest(Dict[str, Any]):
             raise AttributeError(name) from None
 
 
-def normalize_capabilities(caps: Any) -> Any:
-    """Returns ``caps`` with snake_case keys (``max_batch_size``,
-    ``string_ordering`` ...) converted to their camelCase names.  An
-    explicit camelCase key wins over its snake_case alias."""
-    if not isinstance(caps, dict):
-        return caps
+def _camel_keys(caps: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for key, value in caps.items():
         camel = _to_camel(key) if isinstance(key, str) else key
         if isinstance(value, dict):
-            value = normalize_capabilities(value)
+            value = _camel_keys(value)
         if camel != key and camel in caps:
             continue
         out[camel] = value
     return out
+
+
+def normalize_capabilities(caps: Any, kind: Optional[str] = None) -> Any:
+    """Returns ``caps`` with snake_case keys (``max_batch_size``,
+    ``string_ordering`` ...) converted to their camelCase names.  An
+    explicit camelCase key wins over its snake_case alias.
+
+    With ``kind`` (``"node"`` or ``"relationship"``) shorthands are also
+    expanded and fields that don't apply to ``kind`` are dropped:
+    ``predicates: True`` means every operator (without string-range
+    push-down), ``expand: True`` means ``{left: True, right: True}``,
+    ``False`` removes either, nodes drop ``expand``, relationships drop
+    ``lookup`` and ``version`` defaults to the contract version.  Unknown
+    fields are kept and validated later.
+    """
+    if not isinstance(caps, dict):
+        return caps
+    out: Dict[str, Any] = _camel_keys(caps)
+    if kind is None:
+        return out
+    out = {"version": SOURCE_CONTRACT_VERSION, **out}
+    if "predicates" in out:
+        if out["predicates"] is True:
+            out["predicates"] = {"operators": list(PREDICATE_OPERATORS)}
+        elif out["predicates"] is False or out["predicates"] is None:
+            del out["predicates"]
+    if "expand" in out:
+        if out["expand"] is True:
+            out["expand"] = {"left": True, "right": True}
+        elif out["expand"] is False or out["expand"] is None:
+            del out["expand"]
+    if kind == "node":
+        out.pop("expand", None)
+    else:
+        out.pop("lookup", None)
+    return out
+
+
+def merge_capabilities(
+    declared: Optional[Dict[str, Any]],
+    explicit: Optional[Dict[str, Any]],
+    kind: str,
+) -> Optional[Dict[str, Any]]:
+    """Combine function-declared capabilities with an explicit
+    ``WITH CAPABILITIES`` map; explicit top-level keys override (or
+    narrow) declared ones, e.g. ``{predicates: false}`` switches
+    push-down off.  ``None`` when neither is given."""
+    if declared is None and explicit is None:
+        return None
+    merged = {**_camel_keys(declared or {}), **_camel_keys(explicit or {})}
+    result: Dict[str, Any] = normalize_capabilities(merged, kind)
+    return result
 
 
 class SourceSignal:
@@ -233,6 +283,8 @@ def _validate_base(caps: Any, name: str) -> None:
         integral = _is_int(mbs) or (isinstance(mbs, float) and math.isfinite(mbs) and mbs.is_integer())
         if not integral or mbs < 1:
             raise SourceCapabilityError(f"Source {name}: maxBatchSize must be a positive integer", name)
+    if "writes" in caps and not isinstance(caps["writes"], bool):
+        raise SourceCapabilityError(f"Source {name}: writes must be true or false", name)
     if "predicates" in caps and caps["predicates"] is not None:
         p = caps["predicates"]
         if not isinstance(p, dict) or not isinstance(p.get("operators"), list):
@@ -248,9 +300,10 @@ def _validate_base(caps: Any, name: str) -> None:
             raise SourceCapabilityError(
                 f"Source {name}: predicates.properties must be an array of column names", name
             )
-        if p.get("stringOrdering") is not None and p.get("stringOrdering") != "binary":
+        if p.get("stringOrdering") is not None and p.get("stringOrdering") not in STRING_ORDERINGS:
             raise SourceCapabilityError(
-                f'Source {name}: predicates.stringOrdering must be "binary" when set', name
+                f'Source {name}: predicates.stringOrdering must be "binary" or "codepoint" when set',
+                name,
             )
 
 
@@ -445,95 +498,3 @@ class RelationshipSource(ABC):
     @abstractmethod
     def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
         """Returns all rows (optionally pre-filtered by ``request.predicate``)."""
-
-
-def _pages_of(rows: List[SourceRow], page_size: Any) -> Iterator[List[SourceRow]]:
-    size = page_size if _is_int(page_size) and page_size > 0 else (len(rows) or 1)
-    for i in range(0, len(rows), size):
-        yield rows[i : i + size]
-
-
-def _filter_rows(
-    rows: List[SourceRow],
-    predicate: Optional[SourcePredicate],
-    field_name: Optional[str],
-    ids: Optional[List[Any]],
-) -> List[SourceRow]:
-    from .source_context import canonical_key
-
-    wanted = None if ids is None else {canonical_key(i) for i in ids}
-    return [
-        row
-        for row in rows
-        if (wanted is None or (field_name is not None and field_name in row
-                               and canonical_key(row[field_name]) in wanted))
-        and matches_predicate(predicate, row)
-    ]
-
-
-def _in_memory_capabilities(cacheable: bool, max_batch_size: Optional[int]) -> Dict[str, Any]:
-    caps: Dict[str, Any] = {
-        "version": SOURCE_CONTRACT_VERSION,
-        "cacheable": cacheable,
-        "streaming": True,
-        "predicates": {"operators": list(PREDICATE_OPERATORS), "stringOrdering": "binary"},
-    }
-    if max_batch_size is not None:
-        caps["maxBatchSize"] = max_batch_size
-    return caps
-
-
-class _InMemoryNodeSource(NodeSource):
-    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
-        self.rows = rows
-        self.capabilities = {**_in_memory_capabilities(cacheable, max_batch_size), "lookup": True}
-
-    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
-                         request.get("pageSize"))
-
-    def lookup(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        rows = _filter_rows(self.rows, request.get("predicate"), "id", request.get("ids") or [])
-        return _pages_of(rows, request.get("pageSize"))
-
-
-class _InMemoryRelationshipSource(RelationshipSource):
-    def __init__(self, rows: List[SourceRow], cacheable: bool, max_batch_size: Optional[int]):
-        self.rows = rows
-        self.capabilities = {
-            **_in_memory_capabilities(cacheable, max_batch_size),
-            "expand": {"left": True, "right": True},
-        }
-
-    def scan(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        return _pages_of(_filter_rows(self.rows, request.get("predicate"), None, None),
-                         request.get("pageSize"))
-
-    def expand(self, request: SourceRequest, context: SourceReadContext) -> SourceResult:
-        field_name = "left_id" if request.get("side") == "left" else "right_id"
-        rows = _filter_rows(self.rows, request.get("predicate"), field_name, request.get("ids") or [])
-        return _pages_of(rows, request.get("pageSize"))
-
-
-def in_memory_node_source(
-    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
-) -> NodeSource:
-    """A ready-made node source over a list of rows (each with an ``id``).
-
-    Supports lookup, every predicate operator and paging; handy for tests,
-    examples and small reference data.  The list is read on every request,
-    so later mutations are visible.
-
-    Example::
-
-        FlowQuery.register_node_source("Person", in_memory_node_source([{"id": 1, "name": "Ada"}]))
-    """
-    return _InMemoryNodeSource(rows, cacheable, max_batch_size)
-
-
-def in_memory_relationship_source(
-    rows: List[SourceRow], *, cacheable: bool = True, max_batch_size: Optional[int] = None
-) -> RelationshipSource:
-    """A ready-made relationship source over a list of rows (each with
-    ``left_id`` and ``right_id``), supporting expansion from both sides."""
-    return _InMemoryRelationshipSource(rows, cacheable, max_batch_size)

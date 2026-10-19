@@ -3,7 +3,7 @@ import DataResolver from "./data_resolver";
 import Node from "./node";
 import NodeData, { NodeRecord } from "./node_data";
 import NodeReference from "./node_reference";
-import Relationship from "./relationship";
+import Relationship, { RelationshipScope } from "./relationship";
 import RelationshipData, { RelationshipRecord } from "./relationship_data";
 import RelationshipReference from "./relationship_reference";
 import {
@@ -20,6 +20,7 @@ class Pattern extends ASTNode {
     protected _chain: (Node | Relationship)[] = [];
     private _context: SourceContext | null = null;
     private _deferred: boolean = false;
+    private _scope: RelationshipScope = new RelationshipScope();
     public set identifier(id: string | null) {
         this._identifier = id;
     }
@@ -47,6 +48,19 @@ class Pattern extends ASTNode {
             }
         }
         this._chain.push(element);
+        if (element instanceof Relationship) {
+            element.scope = this._scope;
+        }
+    }
+    /**
+     * @internal Share one relationship-uniqueness scope across several
+     * patterns (all patterns of one MATCH clause).
+     */
+    public set relationshipScope(scope: RelationshipScope) {
+        this._scope = scope;
+        for (const element of this._chain) {
+            if (element instanceof Relationship) element.scope = scope;
+        }
     }
     public get chain(): (Node | Relationship)[] {
         return this._chain;
@@ -329,8 +343,14 @@ class Pattern extends ASTNode {
                     }
                     for (const relRow of relPage as RelationshipRecord[]) {
                         if (!rel.matchesRecord(relRow)) continue;
-                        relRows[i - 1] = relRow;
-                        yield* this._reverseFrom(plan, i - 1, relRow[nextField], relRows);
+                        const claimed = rel.claim(relRow);
+                        if (claimed === null) continue;
+                        try {
+                            relRows[i - 1] = relRow;
+                            yield* this._reverseFrom(plan, i - 1, relRow[nextField], relRows);
+                        } finally {
+                            rel.release(claimed);
+                        }
                     }
                 }
             }

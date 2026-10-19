@@ -103,6 +103,10 @@ class StringWalker {
         return this.currentChar === "\\" && this.nextChar === char;
     }
 
+    public escapedByDoubling(char: string): boolean {
+        return this.currentChar === char && this.nextChar === char;
+    }
+
     public escapedBrace(): boolean {
         return (
             (this.currentChar === "{" && this.nextChar === "{") ||

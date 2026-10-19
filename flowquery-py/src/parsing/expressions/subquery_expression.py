@@ -36,6 +36,11 @@ class SubqueryExpression(ASTNode):
     def introduces_scope(self) -> bool:
         return True
 
+    @property
+    def subquery(self) -> ASTNode:
+        """The nested query's AST."""
+        return self._subquery_ast
+
     async def evaluate(self) -> None:
         from ...compute.runner import Runner
         from ..operations.return_op import Return

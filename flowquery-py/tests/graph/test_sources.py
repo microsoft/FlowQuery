@@ -22,11 +22,12 @@ from flowquery.graph.source_provider import (
     SourceResponseError,
     SourceUnsupportedError,
     cursor_pages,
-    in_memory_node_source,
-    in_memory_relationship_source,
     matches_predicate,
     normalize_capabilities,
 )
+from flowquery.graph.testing import in_memory_node_source, in_memory_relationship_source
+
+from .mock_backend import mock
 
 db = Database.get_instance()
 V = 1
@@ -261,6 +262,11 @@ DIFFERENTIAL_QUERIES = [
     "MATCH (a:$P)-[:$K]->(a) RETURN a.id AS a",
     "MATCH (a:$P)-[:$K]->(b:$P) RETURN a.id AS a, b.id AS b ORDER BY a DESC, b LIMIT 3",
     "MATCH (a:$P)-[:$K]->(b:$P) WHERE a.name >= 'C' RETURN a.id AS a, b.id AS b",
+    # Relationship uniqueness within one MATCH (openCypher isomorphism)
+    "MATCH (a:$P)-[:$K]->(b:$P)<-[:$K]-(c:$P) RETURN a.id AS a, b.id AS b, c.id AS c",
+    "MATCH (a:$P)-[:$K]-(b:$P)-[:$K]-(c:$P) RETURN a.id AS a, b.id AS b, c.id AS c",
+    "MATCH (a:$P)-[:$K]->(b:$P), (c:$P)-[:$K]->(b) RETURN a.id AS a, c.id AS c",
+    "MATCH (a:$P)-[:$K]->(b:$P) MATCH (c:$P)-[:$K]->(b) RETURN a.id AS a, c.id AS c",
 ]
 
 
@@ -300,6 +306,51 @@ class TestDifferential:
         legacy, _ = await query(bind(statement, "Leg"))
         sourced, _ = await query(bind(statement, "NoRe"), opts(reorder=False, max_batch_size=1))
         assert ordered(sourced) == ordered(legacy)
+
+
+_mock_defined = False
+
+
+async def ensure_mockbackend() -> None:
+    global _mock_defined
+    if _mock_defined:
+        return
+    mock.add_nodes("MockP", PEOPLE)
+    mock.add_nodes("MockC", CITIES)
+    mock.add_relationships("MockK", KNOWS)
+    mock.add_relationships("MockL", LIVES)
+
+    async def node(label: str, columns: str) -> None:
+        await Runner(
+            f"CREATE VIRTUAL (:{label}) AS {{ LOAD JSON FROM mockbackend($request) AS n RETURN {columns} }}"
+        ).run()
+
+    async def rel(type_: str, frm: str, to: str) -> None:
+        await Runner(
+            f"CREATE VIRTUAL (:{frm})-[:{type_}]-(:{to}) AS {{ LOAD JSON FROM mockbackend($request) AS r "
+            "RETURN r.left_id AS left_id, r.right_id AS right_id, r.since AS since }"
+        ).run()
+
+    await node("MockP", "n.id AS id, n.name AS name, n.age AS age")
+    await node("MockC", "n.id AS id, n.name AS name")
+    await rel("MockK", "MockP", "MockP")
+    await rel("MockL", "MockP", "MockC")
+    _mock_defined = True
+
+
+class TestDifferentialMockBackend:
+    """The differential queries also agree through the mockbackend function."""
+
+    @pytest.mark.parametrize("statement", DIFFERENTIAL_QUERIES)
+    async def test_mockbackend_matches_legacy(self, statement: str) -> None:
+        await ensure_legacy()
+        await ensure_mockbackend()
+        legacy, _ = await query(bind(statement, "Leg"))
+        sourced, _ = await query(bind(statement, "Mock"), opts(page_size=2))
+        if "ORDER BY" in statement:
+            assert sourced == legacy
+        else:
+            assert ordered(sourced) == ordered(legacy)
 
 
 class TestSources:

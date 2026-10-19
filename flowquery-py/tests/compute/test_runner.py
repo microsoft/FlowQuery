@@ -6097,10 +6097,11 @@ class TestRunner:
         assert results[0] == {"id": 42}
 
     @pytest.mark.asyncio
-    async def test_dollar_prefixed_identifiers_are_not_allowed_outside_virtual_definitions(self):
-        """Test that $-prefixed identifiers throw when used outside a virtual definition."""
-        with pytest.raises(ValueError, match="Parameter references"):
-            Runner("RETURN $id AS id")
+    async def test_top_level_parameter_without_a_value_fails_at_run_time(self):
+        """A top-level $name without a supplied value fails when the query runs."""
+        runner = Runner("RETURN $id AS id")
+        with pytest.raises(ValueError, match=r"Missing value for parameter \$id"):
+            await runner.run()
 
     @pytest.mark.asyncio
     async def test_filter_pass_down_with_multiple_properties(self):

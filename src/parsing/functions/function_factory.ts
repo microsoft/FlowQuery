@@ -45,6 +45,7 @@ import "./replace";
 import "./round";
 import "./schema";
 import "./size";
+import "./source_capabilities";
 import "./split";
 import "./string_distance";
 import "./stringify";

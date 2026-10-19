@@ -204,3 +204,9 @@ test("Test reserved keywords as relationship types and labels", () => {
     expect(tokens).toBeDefined();
     expect(tokens.length).toBeGreaterThan(0);
 });
+
+test("Each keyword occurrence keeps its own spelling", () => {
+    const tokens = new Tokenizer("MATCH (post:Post) RETURN post").tokenize();
+    const words = tokens.filter((t) => t.isKeyword()).map((t) => t.value);
+    expect(words).toEqual(["MATCH", "post", "Post", "RETURN", "post"]);
+});

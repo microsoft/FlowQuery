@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, Generator, List, Op
 
 from ..parsing.ast_node import ASTNode
 from .data_resolver import DataResolver
-from .graph_records import common_origin, is_graph_record, origin_matches
+from .graph_records import (
+    common_namespace,
+    common_origin,
+    endpoint_namespace,
+    namespace_of,
+    origin_matches,
+)
 from .node import Node
 from .node_data import NodeData
 from .relationship import Relationship, RelationshipScope
@@ -284,7 +290,7 @@ class Pattern(ASTNode):
         i: int,
         id_: Any,
         rel_rows: List[Optional[Dict[str, Any]]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> AsyncGenerator[None, None]:
         node = plan.nodes[i]
         access = plan.node_access[i]
@@ -337,6 +343,11 @@ class Pattern(ASTNode):
                 # we are on, and the next id is the opposite endpoint.
                 side = "left" if rel is not None and rel.next_field == "left_id" else "right"
                 next_field = "right_id" if side == "left" else "left_id"
+                next_side = "right" if side == "left" else "left"
+
+                def next_namespace(r: Dict[str, Any], next_side: str = next_side) -> str:
+                    return endpoint_namespace(r, next_side)
+
                 rel_terms, rel_args = rel.source_terms() if rel is not None else ([], None)
                 prev = plan.node_access[i - 1] if i > 0 else None
                 if rel is not None and len(rows) > 1:
@@ -349,7 +360,7 @@ class Pattern(ASTNode):
                             [r.get(next_field) for r in buffered],
                             prev_terms,
                             prev_args,
-                            common_origin(buffered),
+                            common_namespace(buffered, next_namespace),
                         )
                 for row in rows:
                     node.set_value(row)
@@ -359,7 +370,7 @@ class Pattern(ASTNode):
                                 yield
                         continue
                     expansion = plan.rel_access[i - 1].expand(
-                        row.get("id"), side, rel_terms, rel_args, is_graph_record(row)
+                        row.get("id"), side, rel_terms, rel_args, namespace_of(row)
                     )
                     try:
                         async for rel_page in expansion:
@@ -369,7 +380,7 @@ class Pattern(ASTNode):
                                     [r.get(next_field) for r in rel_page],
                                     prev_terms,
                                     prev_args,
-                                    common_origin(rel_page),
+                                    common_namespace(rel_page, next_namespace),
                                 )
                             for rel_row in rel_page:
                                 if not rel.matches_record(rel_row):
@@ -384,7 +395,7 @@ class Pattern(ASTNode):
                                         i - 1,
                                         rel_row.get(next_field),
                                         rel_rows,
-                                        is_graph_record(rel_row),
+                                        next_namespace(rel_row),
                                     )) as _gen5:
                                         async for _ in _gen5:
                                             yield

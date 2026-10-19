@@ -103,8 +103,8 @@ async def test_merge_of_nodes_and_relationships_is_idempotent() -> None:
         "MATCH (t:Team) OPTIONAL MATCH (p)-[m:MEMBER_OF]->(t) RETURN t.n AS n, count(m) AS members"
     )
     assert counts.results == [{"n": 2, "members": 1}]
-    assert MemoryGraph.store().node_count == 2
-    assert MemoryGraph.store().relationship_count == 1
+    assert MemoryGraph.store().node_count() == 2
+    assert MemoryGraph.store().relationship_count() == 1
 
 
 async def test_reads_its_own_writes_within_a_query() -> None:
@@ -118,8 +118,8 @@ async def test_a_failing_query_leaves_the_store_unchanged() -> None:
         await run("MATCH (a:D {k: 1}) CREATE (:D {k: 3}) DELETE a")
     assert (await run("MATCH (n:D) RETURN n.k AS k ORDER BY k")).results == [{"k": 1}, {"k": 2}]
     await run("MATCH (n) DETACH DELETE n")
-    assert MemoryGraph.store().node_count == 0
-    assert MemoryGraph.store().relationship_count == 0
+    assert MemoryGraph.store().node_count() == 0
+    assert MemoryGraph.store().relationship_count() == 0
 
 
 async def test_unlabelled_and_multi_label_nodes_label_and_property_updates() -> None:
@@ -155,8 +155,8 @@ async def test_named_stores_are_separate() -> None:
     await run("USE GRAPH memorygraph($request, 'scratch')")
     await run("CREATE (:Item {name: 'scratch'})")
     assert (await run("MATCH (n:Item) RETURN n.name AS name")).results == [{"name": "scratch"}]
-    assert MemoryGraph.store("default").node_count == 1
-    assert MemoryGraph.store("scratch").node_count == 1
+    assert MemoryGraph.store("default").node_count() == 1
+    assert MemoryGraph.store("scratch").node_count() == 1
 
 
 async def test_a_commit_after_a_concurrent_commit_to_the_same_store_fails() -> None:
@@ -193,10 +193,10 @@ async def test_writes_stay_with_the_binding_they_were_routed_to() -> None:
         ),
     ):
         await run("CREATE (n:Foo); USE GRAPH memorygraph($request, 'd'); CREATE (m:Bar)")
-    assert MemoryGraph.store("default").node_count == 0
-    assert MemoryGraph.store("d").node_count == 0
+    assert MemoryGraph.store("default").node_count() == 0
+    assert MemoryGraph.store("d").node_count() == 0
     await run("USE GRAPH memorygraph($request, 'e'); CREATE (m:Bar)")
-    assert MemoryGraph.store("e").node_count == 1
+    assert MemoryGraph.store("e").node_count() == 1
 
 
 async def test_is_only_usable_as_the_default_graph() -> None:

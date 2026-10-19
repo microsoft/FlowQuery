@@ -7,7 +7,12 @@ import weakref
 from contextlib import aclosing
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-from .graph_records import origin_matches
+from .graph_records import (
+    VIRTUAL_NAMESPACE,
+    endpoint_matches,
+    origin_matches,
+    with_endpoint_namespaces,
+)
 from .source_context import SourceContext, canonical_key
 from .source_provider import SourceRow, SourceUnsupportedError, normalize_capabilities
 
@@ -173,19 +178,29 @@ class SourceEntry:
     kind = "node"
 
     def __init__(
-        self, ctx: SourceContext, provider: Any, name: str, graph: bool = False
+        self,
+        ctx: SourceContext,
+        provider: Any,
+        name: str,
+        namespace: str = VIRTUAL_NAMESPACE,
     ) -> None:
         self.ctx = ctx
         self.provider = provider
         self.name = name
-        #: The entry reads the default graph (rows carry graph provenance).
-        self.graph = graph
+        #: Namespace of the entry: the name of the graph it reads, or
+        #: ``"virtual"`` for a ``CREATE VIRTUAL`` definition.
+        self.namespace = namespace
         self._unsupported: set[str] = set()
         self.caps: Dict[str, Any] = normalize_capabilities(getattr(provider, "capabilities", None)) or {}
         max_batch: Any = self.caps.get("maxBatchSize")
         limit: float = max_batch if _is_number(max_batch) else math.inf
         self.batch_size = int(min(ctx.options.max_batch_size, limit))
         self.cacheable = self.caps.get("cacheable") is True
+
+    @property
+    def is_graph(self) -> bool:
+        """The entry reads a graph (rows carry their graph's namespace)."""
+        return self.namespace != VIRTUAL_NAMESPACE
 
     def base(self) -> Dict[str, Any]:
         return {}
@@ -367,13 +382,13 @@ class NodeEntry(SourceEntry):
         ctx: SourceContext,
         provider: Any,
         label: Optional[str],
-        graph: bool = False,
+        namespace: str = VIRTUAL_NAMESPACE,
         labels: Optional[List[str]] = None,
     ) -> None:
         name = ":".join(labels) if labels is not None else (label or "")
-        super().__init__(ctx, provider, name, graph)
+        super().__init__(ctx, provider, name, namespace)
         self.label = label
-        #: Labels a default-graph node must all carry (``(n:A:B)``).
+        #: Labels a graph node must all carry (``(n:A:B)``).
         self.labels = labels
 
     def base(self) -> Dict[str, Any]:
@@ -423,14 +438,20 @@ class RelationshipEntry(SourceEntry):
         type_: Optional[str],
         source_label: Optional[str],
         target_label: Optional[str],
-        graph: bool = False,
+        namespace: str = VIRTUAL_NAMESPACE,
+        left_namespace: Optional[str] = None,
+        right_namespace: Optional[str] = None,
     ) -> None:
         super().__init__(
             ctx,
             provider,
             f"(:{source_label or ''})-[:{type_ or ''}]->(:{target_label or ''})",
-            graph,
+            namespace,
         )
+        #: Namespace of the left endpoints (definitions; graphs: any).
+        self.left_namespace = left_namespace if left_namespace is not None else namespace
+        #: Namespace of the right endpoints (definitions; graphs: any).
+        self.right_namespace = right_namespace if right_namespace is not None else namespace
         self.type = type_
         self.source_label = source_label
         self.target_label = target_label
@@ -443,7 +464,22 @@ class RelationshipEntry(SourceEntry):
         }
 
     def enrich(self, row: SourceRow) -> SourceRow:
-        return {**row, "_type": self.type if self.type is not None else row.get("_type")}
+        enriched = {**row, "_type": self.type if self.type is not None else row.get("_type")}
+        if self.is_graph:
+            return enriched
+        return with_endpoint_namespaces(enriched, self.left_namespace, self.right_namespace)
+
+    def reaches(self, side: str, origin: Optional[str]) -> bool:
+        """Rows of this entry can have their ``side`` endpoint in namespace ``origin``."""
+        if origin is None or self.is_graph:
+            return True
+        return (self.left_namespace if side == "left" else self.right_namespace) == origin
+
+    def _expand_extra(self, side: str, origin: Optional[str]) -> Dict[str, Any]:
+        """Request additions of an expansion from anchors in namespace ``origin``."""
+        if self.is_graph and origin is not None:
+            return {"side": side, "anchorGraph": origin}
+        return {"side": side}
 
     def native_expand(self, side: str) -> bool:
         expand = self.caps.get("expand") or {}
@@ -456,24 +492,38 @@ class RelationshipEntry(SourceEntry):
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
         max_rows: float,
+        origin: Optional[str] = None,
     ) -> Optional[Dict[str, List[SourceRow]]]:
         return await self.fetch_keyed(
-            "expand", self.native_expand(side), f"{side}_id", ids, terms, args, {"side": side}, max_rows
+            "expand",
+            self.native_expand(side),
+            f"{side}_id",
+            ids,
+            terms,
+            args,
+            self._expand_extra(side, origin),
+            max_rows,
         )
 
     async def expand_one(
-        self, side: str, id_: Any, terms: List[PushTerm], args: Optional[Dict[str, Any]]
+        self,
+        side: str,
+        id_: Any,
+        terms: List[PushTerm],
+        args: Optional[Dict[str, Any]],
+        origin: Optional[str] = None,
     ) -> AsyncGenerator[List[SourceRow], None]:
         field = f"{side}_id"
         predicate = self.predicate(terms)
-        key = self.cache_key("expand", predicate, args, {"side": side, "id": id_})
+        keyed = self._expand_extra(side, origin)
+        key = self.cache_key("expand", predicate, args, {**keyed, "id": id_})
         if self.cacheable:
             cached = self.ctx.cache_get(key)
             if cached is not None:
                 yield cached
                 return
         if not self.native_expand(side) or "expand" in self._unsupported:
-            rows = await self.fetch_keyed("expand", False, field, [id_], terms, args, {"side": side})
+            rows = await self.fetch_keyed("expand", False, field, [id_], terms, args, keyed)
             yield (rows or {}).get(canonical_key(id_), [])
             return
         wanted = canonical_key(id_)
@@ -483,7 +533,7 @@ class RelationshipEntry(SourceEntry):
         request = {
             "operation": "expand",
             **self.base(),
-            "side": side,
+            **keyed,
             "ids": [id_],
             "predicate": predicate,
             "args": args,
@@ -510,7 +560,7 @@ class RelationshipEntry(SourceEntry):
             if yielded:
                 raise
             self._unsupported.add("expand")
-            async with aclosing(self.expand_one(side, id_, terms, args)) as pages:
+            async with aclosing(self.expand_one(side, id_, terms, args, origin)) as pages:
                 async for page in pages:
                     yield page
             return
@@ -518,15 +568,22 @@ class RelationshipEntry(SourceEntry):
             self.ctx.cache_set(key, collected)
 
 
-def _for_origin(entries: List[Any], origin: Optional[bool]) -> List[Any]:
-    return entries if origin is None else [e for e in entries if e.graph == origin]
+def _for_origin(entries: List[NodeEntry], origin: Optional[str]) -> List[NodeEntry]:
+    return entries if origin is None else [e for e in entries if e.namespace == origin]
 
 
-def _rows_for_origin(rows: List[SourceRow], origin: Optional[bool]) -> List[SourceRow]:
+def _rows_for_origin(rows: List[SourceRow], origin: Optional[str]) -> List[SourceRow]:
     return rows if origin is None else [row for row in rows if origin_matches(row, origin)]
 
 
-def _buffer_serves(built: Optional[bool], origin: Optional[bool]) -> bool:
+def _rows_anchored(rows: List[SourceRow], side: str, origin: Optional[str]) -> List[SourceRow]:
+    """Relationship rows whose ``side`` endpoint is in namespace ``origin``."""
+    if origin is None:
+        return rows
+    return [row for row in rows if endpoint_matches(row, side, origin)]
+
+
+def _buffer_serves(built: Optional[str], origin: Optional[str]) -> bool:
     """A prefetch buffer built for ``built`` can serve a step constrained to ``origin``."""
     return built is None or built == origin
 
@@ -534,9 +591,10 @@ def _buffer_serves(built: Optional[bool], origin: Optional[bool]) -> bool:
 class NodeSourceAccess:
     """Deferred, provider-backed node access for one label.
 
-    ``origin`` constrains a step reached through a relationship: True
-    keeps only default-graph rows, False only definition rows, and None
-    keeps both.  Ids never join across the two.
+    ``origin`` constrains a step reached through a relationship to one
+    namespace: the name of a graph, or ``"virtual"`` for definition
+    entities; None keeps every namespace.  Ids never join across
+    namespaces.
     """
 
     deferred = True
@@ -545,12 +603,16 @@ class NodeSourceAccess:
         self.ctx = ctx
         self.entries = [
             NodeEntry(
-                ctx, e["provider"], e["label"], e.get("graph") is True, e.get("labels")
+                ctx,
+                e["provider"],
+                e["label"],
+                e.get("graph") or VIRTUAL_NAMESPACE,
+                e.get("labels"),
             )
             for e in entries
         ]
         self._buffer: Dict[str, List[SourceRow]] = {}
-        self._buffer_origin: Optional[bool] = None
+        self._buffer_origin: Optional[str] = None
 
     async def scan(
         self, terms: List[PushTerm], args: Optional[Dict[str, Any]]
@@ -565,7 +627,7 @@ class NodeSourceAccess:
         ids: List[Any],
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> None:
         unique = distinct(ids)
         previous = self._buffer if _buffer_serves(self._buffer_origin, origin) else {}
@@ -593,7 +655,7 @@ class NodeSourceAccess:
         id_: Any,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> List[SourceRow]:
         if id_ is None:
             return []
@@ -629,20 +691,27 @@ class RelationshipSourceAccess:
 
     def __init__(self, ctx: SourceContext, entries: List[Dict[str, Any]]) -> None:
         self.ctx = ctx
-        self.entries = [
-            RelationshipEntry(
-                ctx,
-                e["provider"],
-                e["type"],
-                e.get("sourceLabel"),
-                e.get("targetLabel"),
-                e.get("graph") is True,
+        self.entries: List[RelationshipEntry] = []
+        for e in entries:
+            namespace = e.get("graph") or VIRTUAL_NAMESPACE
+            self.entries.append(
+                RelationshipEntry(
+                    ctx,
+                    e["provider"],
+                    e["type"],
+                    e.get("sourceLabel"),
+                    e.get("targetLabel"),
+                    namespace,
+                    e.get("leftNamespace") or namespace,
+                    e.get("rightNamespace") or namespace,
+                )
             )
-            for e in entries
-        ]
         self._buffer: Optional[Dict[str, List[SourceRow]]] = None
         self._buffer_side: Optional[str] = None
-        self._buffer_origin: Optional[bool] = None
+        self._buffer_origin: Optional[str] = None
+
+    def _entries_for(self, side: str, origin: Optional[str]) -> List[RelationshipEntry]:
+        return [e for e in self.entries if e.reaches(side, origin)]
 
     async def expand(
         self,
@@ -650,7 +719,7 @@ class RelationshipSourceAccess:
         side: str,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> AsyncGenerator[List[SourceRow], None]:
         if anchor is None:
             return
@@ -661,12 +730,12 @@ class RelationshipSourceAccess:
             and _buffer_serves(self._buffer_origin, origin)
             and k in self._buffer
         ):
-            yield _rows_for_origin(self._buffer[k], origin)
+            yield _rows_anchored(self._buffer[k], side, origin)
             return
-        for entry in _for_origin(self.entries, origin):
-            async with aclosing(entry.expand_one(side, anchor, terms, args)) as pages:
+        for entry in self._entries_for(side, origin):
+            async with aclosing(entry.expand_one(side, anchor, terms, args, origin)) as pages:
                 async for page in pages:
-                    yield page
+                    yield _rows_anchored(page, side, origin)
 
     async def prefetch(
         self,
@@ -674,24 +743,29 @@ class RelationshipSourceAccess:
         side: str,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> Optional[List[SourceRow]]:
         self._buffer = None
         self._buffer_side = None
         self._buffer_origin = None
         unique = distinct(anchors)
-        entries = _for_origin(self.entries, origin)
+        entries = self._entries_for(side, origin)
         if len(unique) < 2 or not all(e.native_expand(side) for e in entries):
+            return None
+        # Graph expansions are keyed by the anchors' namespace: anchors of
+        # mixed namespaces are expanded one by one instead.
+        if origin is None and any(e.is_graph for e in entries):
             return None
         buffer: Dict[str, List[SourceRow]] = {canonical_key(a): [] for a in unique}
         all_rows: List[SourceRow] = []
         remaining = self.ctx.options.max_prefetch_rows
         for entry in entries:
-            found = await entry.expand_batch(side, unique, terms, args, remaining)
+            found = await entry.expand_batch(side, unique, terms, args, remaining, origin)
             if found is None:
                 return None
             count = 0
-            for k, rows in found.items():
+            for k, fetched in found.items():
+                rows = _rows_anchored(fetched, side, origin)
                 if k in buffer:
                     buffer[k] = buffer[k] + rows
                     all_rows.extend(rows)
@@ -723,7 +797,7 @@ class MemoryNodeAccess:
         ids: List[Any],
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> None:
         return None
 
@@ -732,7 +806,7 @@ class MemoryNodeAccess:
         id_: Any,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> List[SourceRow]:
         if self._index is None:
             self._index = index_rows(self.records, "id")
@@ -763,14 +837,14 @@ class MemoryRelationshipAccess:
         side: str,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> AsyncGenerator[List[SourceRow], None]:
         field = f"{side}_id"
         index = self._indexes.get(field)
         if index is None:
             index = index_rows(self.records, field)
             self._indexes[field] = index
-        yield _rows_for_origin(index.get(canonical_key(anchor), []), origin)
+        yield _rows_anchored(index.get(canonical_key(anchor), []), side, origin)
 
     async def prefetch(
         self,
@@ -778,6 +852,6 @@ class MemoryRelationshipAccess:
         side: str,
         terms: List[PushTerm],
         args: Optional[Dict[str, Any]],
-        origin: Optional[bool] = None,
+        origin: Optional[str] = None,
     ) -> Optional[List[SourceRow]]:
         return None

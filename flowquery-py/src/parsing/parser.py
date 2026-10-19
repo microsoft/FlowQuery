@@ -3,6 +3,7 @@
 import sys
 from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, cast
 
+from ..graph.graph_records import DEFAULT_GRAPH, VIRTUAL_NAMESPACE
 from ..graph.hops import Hops
 from ..graph.node import Node
 from ..graph.node_reference import NodeReference
@@ -373,8 +374,18 @@ class Parser(BaseParser):
         """True when the current token is the (non-reserved) word ``word``."""
         return self.token.is_identifier_or_keyword() and (self.token.value or "").upper() == word
 
+    @staticmethod
+    def _validate_graph_name(name: str) -> str:
+        """A graph name: an identifier other than the reserved ``virtual``."""
+        if name.lower() == VIRTUAL_NAMESPACE:
+            raise ValueError(
+                f"'{VIRTUAL_NAMESPACE}' is reserved for CREATE VIRTUAL definitions "
+                "and cannot name a graph"
+            )
+        return name
+
     def _parse_use_graph(self) -> Optional[UseGraph]:
-        """``USE GRAPH fn($request, ...)``: bind the default graph backend."""
+        """``USE GRAPH [name =] fn($request, ...)``: bind the default graph, or a named graph."""
         if not self.token.is_identifier() or not self._is_word("USE"):
             return None
         saved = self._token_index
@@ -386,13 +397,28 @@ class Parser(BaseParser):
         self._assert_writes_allowed("USE GRAPH")
         self.set_next_token()
         self._expect_and_skip_whitespace_and_comments()
+        name = DEFAULT_GRAPH
+        peek = self.peek()
+        if self.token.is_identifier_or_keyword() and not (
+            peek is not None and peek.is_left_parenthesis()
+        ):
+            candidate = self.token.value or ""
+            before_name = self._token_index
+            self.set_next_token()
+            self._skip_whitespace_and_comments()
+            if self.token.is_equals():
+                name = Parser._validate_graph_name(candidate)
+                self.set_next_token()
+                self._skip_whitespace_and_comments()
+            else:
+                self._token_index = before_name
         fn = self._parse_async_function()
         if fn is None:
             raise ValueError(
                 "Expected a registered async function after USE GRAPH, "
-                "e.g. USE GRAPH backend($request)"
+                "e.g. USE GRAPH backend($request) or USE GRAPH name = backend($request)"
             )
-        return UseGraph(fn)
+        return UseGraph(fn, name)
 
     def _parse_with(self) -> Optional[With]:
         if not self.token.is_with():
@@ -874,6 +900,11 @@ class Parser(BaseParser):
             relationship.target = target
         if node.all_labels:
             raise ValueError("CREATE VIRTUAL requires a single label per node")
+        if node.graph is not None and relationship is None:
+            raise ValueError(
+                "CREATE VIRTUAL defines a virtual node; "
+                f"(:{node.graph}.{node.label}) belongs to graph {node.graph}"
+            )
 
         self._expect_and_skip_whitespace_and_comments()
         # Optional `WITH CAPABILITIES { ... }` opts the definition into the
@@ -990,6 +1021,13 @@ class Parser(BaseParser):
         if not is_delete and self._is_word("GRAPH"):
             self._assert_writes_allowed("DROP GRAPH")
             self.set_next_token()
+            before_name = self._token_index
+            self._skip_whitespace_and_comments()
+            if self.token.is_identifier() and not self._is_word("USE"):
+                graph_name = Parser._validate_graph_name(self.token.value or "")
+                self.set_next_token()
+                return DropGraph(graph_name)
+            self._token_index = before_name
             return DropGraph()
         if self.token.is_binding():
             self.set_next_token()
@@ -1658,10 +1696,14 @@ class Parser(BaseParser):
             raise ValueError("Expected ':' for node label")
         if self.token.is_colon() and (peek is None or not peek.is_identifier_or_keyword()):
             raise ValueError("Expected node label identifier")
+        graph: Optional[str] = None
         if self.token.is_colon() and peek is not None and peek.is_identifier_or_keyword():
             self.set_next_token()
             label = cast(str, self.token.value)  # Guaranteed by is_identifier check
             self.set_next_token()
+            qualified = self._parse_graph_qualifier(label)
+            if qualified is not None:
+                graph, label = qualified
         # Additional labels: ORed (n:Person|Animal) or all required (n:Person:Employee)
         labels: list[str] = [label] if label is not None else []
         any_labels = False
@@ -1686,6 +1728,11 @@ class Parser(BaseParser):
                 self.set_next_token()
             labels.append(cast(str, self.token.value))
             self.set_next_token()
+            if self.token.is_dot():
+                raise ValueError(
+                    "Only the first label of a node can be qualified with a graph name, "
+                    "e.g. (n:hr.Person:Employee)"
+                )
         if any_labels and all_labels:
             raise ValueError("Cannot combine ':' and '|' between node labels")
         self._skip_whitespace_and_comments()
@@ -1693,6 +1740,7 @@ class Parser(BaseParser):
         if labels:
             node.labels = labels
         node.all_labels = all_labels
+        node.graph = graph
         node.properties = dict(self._parse_properties())
         if identifier is not None and identifier in self._state.variables:
             reference = self._state.variables.get(identifier)
@@ -1732,12 +1780,17 @@ class Parser(BaseParser):
             variable = self.token.value
             self.set_next_token()
         rel_types: List[str] = []
+        relationship_graph: Optional[str] = None
         if self.token.is_colon():
             self.set_next_token()
             if not self.token.is_identifier_or_keyword():
                 raise ValueError("Expected relationship type identifier")
-            rel_types.append(self.token.value or "")
+            rel_type = self.token.value or ""
             self.set_next_token()
+            qualified = self._parse_graph_qualifier(rel_type)
+            if qualified is not None:
+                relationship_graph, rel_type = qualified
+            rel_types.append(rel_type)
             while self.token.is_pipe():
                 self.set_next_token()
                 if self.token.is_colon():
@@ -1746,6 +1799,11 @@ class Parser(BaseParser):
                     raise ValueError("Expected relationship type identifier after '|'")
                 rel_types.append(self.token.value or "")
                 self.set_next_token()
+                if self.token.is_dot():
+                    raise ValueError(
+                        "Only the first relationship type can be qualified with a graph name, "
+                        "e.g. [:hr.KNOWS|LIKES]"
+                    )
         hops = self._parse_relationship_hops()
         properties: Dict[str, Expression] = dict(self._parse_properties())
         if not self.token.is_closing_bracket():
@@ -1776,7 +1834,19 @@ class Parser(BaseParser):
         if hops is not None:
             relationship.hops = hops
         relationship.types = rel_types
+        relationship.graph = relationship_graph
         return relationship
+
+    def _parse_graph_qualifier(self, name: str) -> Optional[Tuple[str, str]]:
+        """``graph.Name`` after a label or type: returns ``(graph, Name)`` and
+        consumes the qualified name, or None when ``name`` is unqualified."""
+        peek = self.peek()
+        if not self.token.is_dot() or peek is None or not peek.is_identifier_or_keyword():
+            return None
+        self.set_next_token()
+        qualified = self.token.value or ""
+        self.set_next_token()
+        return (Parser._validate_graph_name(name), qualified)
 
     def _parse_properties(self) -> Iterator[Tuple[str, Expression]]:
         self._skip_whitespace_and_comments()

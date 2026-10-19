@@ -338,7 +338,7 @@ class Runner {
                     );
                     this._sourceContext.parameters = this._options.parameters ?? {};
                     // Pin the default graph for the whole query.
-                    this._sourceContext.graph = Database.getInstance().defaultGraph;
+                    this._sourceContext.graphs = new Map(Database.getInstance().graphs);
                     resolver.dataCache = new DataCache(
                         this._options.provenance === true,
                         this._sourceContext

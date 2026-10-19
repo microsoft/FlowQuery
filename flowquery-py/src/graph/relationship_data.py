@@ -32,5 +32,7 @@ class RelationshipData(Data):
             props.pop("left_id", None)
             props.pop("right_id", None)
             props.pop("_type", None)
+            props.pop("_leftGraph", None)
+            props.pop("_rightGraph", None)
             return props
         return None

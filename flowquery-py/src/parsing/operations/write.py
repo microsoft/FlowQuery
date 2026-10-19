@@ -10,23 +10,30 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 from ...graph.database import Database
 from ...graph.graph_records import (
+    DEFAULT_GRAPH,
+    GRAPH_KEY,
     LABELS_KEY,
     PROPERTIES_KEY,
+    VIRTUAL_NAMESPACE,
     graph_node_record,
     graph_relationship_record,
     is_graph_record,
     labels_of,
+    namespace_of,
     user_properties,
+    with_endpoint_namespaces,
 )
+from ...graph.namespaces import bound_graph, definition_endpoint_namespace
 from ...graph.node import Node
 from ...graph.node_reference import NodeReference
 from ...graph.pattern import Pattern
 from ...graph.pattern_expression import PatternExpression
 from ...graph.relationship import Relationship
+from ...graph.source_access import RelationshipSourceAccess
 from ...graph.source_provider import QueryCancelledError, SourceError
 from ...graph.write_set import (
     WRITE_CONTRACT_VERSION,
@@ -34,6 +41,7 @@ from ...graph.write_set import (
     WriteResult,
     WriteRoute,
     WriteSet,
+    same_backend,
 )
 from ..ast_node import ASTNode
 from ..expressions.expression import Expression
@@ -66,6 +74,8 @@ class WriteTarget:
     target_label: Optional[str] = None
     labels: Optional[List[str]] = None
     clause: Optional[str] = None
+    #: Graph of a qualified label (``hr.Person``) or type (``hr.KNOWS``).
+    graph: Optional[str] = None
 
 
 @dataclass
@@ -111,12 +121,32 @@ def _endpoints(rel: Relationship) -> Tuple[Optional[Node], Optional[Node]]:
     return rel.source, rel.target
 
 
+def _graph_of(node: Optional[Node]) -> Optional[str]:
+    """Graph qualifier of a node pattern element (following references)."""
+    if node is None:
+        return None
+    if node.graph is not None:
+        return node.graph
+    if isinstance(node, NodeReference) and isinstance(node.reference, Node):
+        return _graph_of(node.reference)
+    return None
+
+
+def _qualified_label_of(node: Optional[Node]) -> Optional[str]:
+    """``hr.Person`` for a graph-qualified node pattern element, else its label."""
+    label = label_of(node)
+    graph = _graph_of(node)
+    return f"{graph}.{label}" if label is not None and graph is not None else label
+
+
 def _node_target_of(node: Node) -> WriteTarget:
-    return WriteTarget(kind="node", label=label_of(node))
+    return WriteTarget(kind="node", label=label_of(node), graph=_graph_of(node))
 
 
 def _new_node_target_of(node: Node, clause: str) -> WriteTarget:
-    return WriteTarget(kind="node", label=node.label, labels=list(node.labels), clause=clause)
+    return WriteTarget(
+        kind="node", label=node.label, labels=list(node.labels), clause=clause, graph=node.graph
+    )
 
 
 def _relationship_target_of(rel: Relationship) -> WriteTarget:
@@ -124,9 +154,43 @@ def _relationship_target_of(rel: Relationship) -> WriteTarget:
     return WriteTarget(
         kind="relationship",
         type=rel.type,
-        source_label=label_of(start),
-        target_label=label_of(end),
+        source_label=_qualified_label_of(start),
+        target_label=_qualified_label_of(end),
+        graph=rel.graph,
     )
+
+
+def _graph_tag(graph_name: Optional[str]) -> Dict[str, Any]:
+    """``graphName`` of a change to an entity of a named graph."""
+    if graph_name is not None and graph_name != DEFAULT_GRAPH:
+        return {"graphName": graph_name}
+    return {}
+
+
+def _tag_of(record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """``graphName`` of a change to an existing entity (none for definitions and the default graph)."""
+    if record is not None and is_graph_record(record):
+        return _graph_tag(record[GRAPH_KEY])
+    return {}
+
+
+def _endpoint_tags(owner: str, start: Dict[str, Any], end: Dict[str, Any]) -> Dict[str, Any]:
+    """Endpoint namespaces of a new relationship stored in ``owner``'s
+    namespace: ``startGraph`` / ``endGraph`` (and the label of a definition
+    endpoint) when an endpoint lives elsewhere."""
+    out: Dict[str, Any] = {}
+    for key, value in (("start", start), ("end", end)):
+        ns = namespace_of(value)
+        if ns == owner:
+            continue
+        out[f"{key}Graph"] = ns
+        if ns == VIRTUAL_NAMESPACE and "_label" in value:
+            out[f"{key}Label"] = value["_label"]
+    return out
+
+
+def _describe_namespace(ns: str) -> str:
+    return "a definition node" if ns == VIRTUAL_NAMESPACE else f"a node of graph {ns}"
 
 
 def _evaluate(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -202,7 +266,9 @@ def _replace_node_value(node: Node, properties: Dict[str, Any]) -> None:
     if value is None:
         return
     if is_graph_record(value):
-        updated = graph_node_record(value.get("id"), labels_of(value), _without_nulls(properties))
+        updated = graph_node_record(
+            value.get("id"), labels_of(value), _without_nulls(properties), value[GRAPH_KEY]
+        )
         if "_label" in value:
             updated["_label"] = value["_label"]
         node.set_value(updated)
@@ -267,17 +333,28 @@ def _bind_relationship(
     properties: Dict[str, Any],
     route: WriteRoute,
 ) -> None:
-    if route.backend.graph:
+    if route.graph_name is not None:
         rel.created_record = graph_relationship_record(
-            ref, rel.type or "", start.get("id"), end.get("id"), properties
+            ref,
+            rel.type or "",
+            start.get("id"),
+            end.get("id"),
+            properties,
+            route.graph_name,
+            namespace_of(start),
+            namespace_of(end),
         )
     else:
-        rel.created_record = {
-            "id": ref,
-            "left_id": start.get("id"),
-            "right_id": end.get("id"),
-            **properties,
-        }
+        rel.created_record = with_endpoint_namespaces(
+            {
+                "id": ref,
+                "left_id": start.get("id"),
+                "right_id": end.get("id"),
+                **properties,
+            },
+            namespace_of(start),
+            namespace_of(end),
+        )
     rel.override_value({
         **properties,
         "id": ref,
@@ -336,9 +413,9 @@ class WriteOperation(Operation):
         return self._context.writes
 
     @property
-    def _graph(self) -> Optional["DefaultGraph"]:
-        """The default graph pinned by the query."""
-        return self._context.graph if self._context is not None else None
+    def _graphs(self) -> Mapping[str, "DefaultGraph"]:
+        """The graphs pinned by the query."""
+        return self._context.graphs if self._context is not None else {}
 
     @staticmethod
     def _route_by(writes: WriteSet, key: str, resolve: Callable[[], WriteRoute]) -> WriteRoute:
@@ -353,7 +430,7 @@ class WriteOperation(Operation):
         """Route a new node or relationship (by its static labels or type)."""
 
         def resolve() -> WriteRoute:
-            route = resolve_target(target, self._graph)
+            route = resolve_target(target, self._graphs)
             if route is None:
                 raise ValueError(f"Cannot write to {_describe(target)}")
             return route
@@ -362,18 +439,21 @@ class WriteOperation(Operation):
         return WriteOperation._route_by(writes, key, resolve)
 
     def _route_node(self, writes: WriteSet, node: Node, value: Dict[str, Any]) -> WriteRoute:
-        """Route a change to a bound node by where it came from: default-graph
-        nodes go to the default graph, other nodes to their definition."""
+        """Route a change to a bound node by where it came from: graph nodes go
+        to their graph, other nodes to their definition."""
         if is_graph_record(value):
+            graph_name: str = value[GRAPH_KEY]
             name = f"(:{':'.join(labels_of(value))})"
             return WriteOperation._route_by(
-                writes, "graph", lambda: _default_route(self._graph, name)
+                writes,
+                f"graph:{graph_name}",
+                lambda: _graph_route(self._graphs, graph_name, name),
             )
         label = value["_label"] if value.get("_label") is not None else label_of(node)
         return WriteOperation._route_by(
             writes,
             f"node:{label}",
-            lambda: resolve_write_backend(WriteTarget(kind="node", label=label)),
+            lambda: resolve_write_backend(WriteTarget(kind="node", label=label), self._graphs),
         )
 
     def _route_relationship(
@@ -381,9 +461,12 @@ class WriteOperation(Operation):
     ) -> WriteRoute:
         """Relationship counterpart of :meth:`_route_node`."""
         if record is not None and is_graph_record(record):
+            graph_name: str = record[GRAPH_KEY]
             name = f"[:{record.get('_type') or ''}]"
             return WriteOperation._route_by(
-                writes, "graph", lambda: _default_route(self._graph, name)
+                writes,
+                f"graph:{graph_name}",
+                lambda: _graph_route(self._graphs, graph_name, name),
             )
         start, end = _endpoints(rel)
         target = WriteTarget(
@@ -395,13 +478,18 @@ class WriteOperation(Operation):
         return WriteOperation._route_by(
             writes,
             f"rel:{target.type}:{target.source_label}:{target.target_label}",
-            lambda: resolve_write_backend(target),
+            lambda: resolve_write_backend(target, self._graphs),
         )
+
+    async def _check(self, writes: WriteSet) -> None:
+        """Asynchronous checks before a row is applied (internal)."""
+        return None
 
     async def run(self) -> None:
         if self._context is not None:
             self._context.throw_if_cancelled()
         writes = self._writes
+        await self._check(writes)
         self._apply(writes)
         if writes.transactional and writes.per_row:
             assert self._context is not None
@@ -446,6 +534,7 @@ class WriteOperation(Operation):
                         "target": target,
                         "type": rel_type,
                         "properties": properties,
+                        **_tag_of(record),
                     })
                     _replace_relationship_value(element, properties)
                     continue
@@ -464,6 +553,7 @@ class WriteOperation(Operation):
                     "target": target,
                     "type": rel_type,
                     "properties": properties,
+                    **_tag_of(record),
                 })
                 _update_relationship_value(element, properties)
                 continue
@@ -479,6 +569,7 @@ class WriteOperation(Operation):
                     "target": value.get("id"),
                     "label": label,
                     "properties": properties,
+                    **_tag_of(value),
                 })
                 _replace_node_value(element, properties)
             elif item.kind in ("property", "merge", "removeProperty"):
@@ -495,10 +586,11 @@ class WriteOperation(Operation):
                     "target": value.get("id"),
                     "label": label,
                     "properties": properties,
+                    **_tag_of(value),
                 })
                 _update_node_value(element, properties)
             elif item.kind in ("addLabels", "removeLabels"):
-                if item.kind == "addLabels" and is_graph_record(value):
+                if item.kind == "addLabels" and namespace_of(value) == DEFAULT_GRAPH:
                     defined = [
                         lbl for lbl in item.labels if lbl in Database.get_instance().nodes
                     ]
@@ -512,6 +604,7 @@ class WriteOperation(Operation):
                     "target": value.get("id"),
                     "label": label,
                     "labels": list(item.labels),
+                    **_tag_of(value),
                 })
                 _update_node_labels(element, item.labels, item.kind == "addLabels")
 
@@ -554,10 +647,11 @@ class CreateWrite(WriteOperation):
                         "ref": ref,
                         "labels": list(element.labels),
                         "properties": properties,
+                        **_graph_tag(route.graph_name),
                     })
                     element.set_value(
-                        graph_node_record(ref, element.labels, properties)
-                        if route.backend.graph
+                        graph_node_record(ref, element.labels, properties, route.graph_name)
+                        if route.graph_name is not None
                         else {"id": ref, **properties}
                     )
                     _bind_node(writes, element, ref)
@@ -579,6 +673,14 @@ class CreateWrite(WriteOperation):
                         "start": start.get("id"),
                         "end": end.get("id"),
                         "properties": properties,
+                        **_graph_tag(rel_route.graph_name),
+                        **_endpoint_tags(
+                            rel_route.graph_name
+                            if rel_route.graph_name is not None
+                            else VIRTUAL_NAMESPACE,
+                            start,
+                            end,
+                        ),
                     })
                     _bind_relationship(writes, element, ref, start, end, properties, rel_route)
 
@@ -590,20 +692,25 @@ def _check_endpoints(
     start: Dict[str, Any],
     end: Dict[str, Any],
 ) -> None:
-    """A relationship and its endpoints belong to the same graph: a
-    default-graph relationship never connects definition nodes, and the
-    reverse, because ids are only meaningful within their own graph."""
-    graph = route.backend.graph
-    if is_graph_record(start) != graph or is_graph_record(end) != graph:
-        if graph:
+    """A relationship stored in a graph may connect nodes of any namespace:
+    its change records where each endpoint lives.  A relationship
+    definition connects the namespaces its endpoint labels declare, since
+    ids are only meaningful within their own namespace."""
+    if route.graph_name is not None:
+        return
+    left, right = (
+        route.endpoints
+        if route.endpoints is not None
+        else (VIRTUAL_NAMESPACE, VIRTUAL_NAMESPACE)
+    )
+    for expected, value in ((left, start), (right, end)):
+        actual = namespace_of(value)
+        if actual != expected:
             raise ValueError(
-                f"Cannot {verb} [:{rel.type}] in the default graph: "
-                "an endpoint is not a default-graph node"
+                f"Cannot {verb} [:{rel.type}]: its CREATE VIRTUAL definition connects "
+                f"{_describe_namespace(left)} to {_describe_namespace(right)}, "
+                f"but an endpoint is {_describe_namespace(actual)}"
             )
-        raise ValueError(
-            f"Cannot {verb} [:{rel.type}]: an endpoint is a default-graph node "
-            f"but [:{rel.type}] has a CREATE VIRTUAL definition"
-        )
 
 
 class MergeWrite(WriteOperation):
@@ -669,7 +776,7 @@ class MergeWrite(WriteOperation):
             node = self._node()
             node_route = self._route_target(writes, _new_node_target_of(node, "merge"))
             key = _evaluate(node.properties)
-            if node_route.backend.graph:
+            if node_route.graph_name is not None:
                 writes.add({
                     "op": "mergeNode",
                     "ref": ref,
@@ -678,8 +785,9 @@ class MergeWrite(WriteOperation):
                     "key": key,
                     "onCreate": on_create,
                     "onMatch": on_match,
+                    **_graph_tag(node_route.graph_name),
                 })
-                node.set_value(graph_node_record(ref, node.labels, key))
+                node.set_value(graph_node_record(ref, node.labels, key, node_route.graph_name))
             else:
                 writes.add({
                     "op": "mergeNode",
@@ -709,6 +817,12 @@ class MergeWrite(WriteOperation):
             "key": key,
             "onCreate": on_create,
             "onMatch": on_match,
+            **_graph_tag(route.graph_name),
+            **_endpoint_tags(
+                route.graph_name if route.graph_name is not None else VIRTUAL_NAMESPACE,
+                start,
+                end,
+            ),
         })
         _bind_relationship(writes, rel, ref, start, end, key, route)
 
@@ -764,6 +878,25 @@ class DeleteWrite(WriteOperation):
             for e in self._elements
         ]
 
+    async def _check(self, writes: WriteSet) -> None:
+        """A node may be referenced by relationships that another backend
+        stores (a graph's relationship to a definition node, or to a node of
+        a graph on another backend).  That backend cannot be changed by this
+        query, so deleting the node would leave them dangling: reject it.
+        Relationships stored by the node's own backend are checked by the
+        backend itself, atomically."""
+        ctx = self._context
+        if ctx is None:
+            return
+        for element in self._elements:
+            if isinstance(element, Relationship):
+                continue
+            value = _node_value(element)
+            if value is None or value.get("id") in writes.refs:
+                continue
+            route = self._route_node(writes, element, value)
+            await _check_foreign_references(ctx, route, value)
+
     def _apply(self, writes: WriteSet) -> None:
         for element in self._elements:
             if isinstance(element, Relationship):
@@ -777,7 +910,7 @@ class DeleteWrite(WriteOperation):
                 )
                 self._route_relationship(writes, element, record)
                 scope = (
-                    "graph"
+                    f"graph:{record[GRAPH_KEY]}"
                     if record is not None and is_graph_record(record)
                     else f"type:{element.type if element.type is not None else (record or {}).get('_type')}"
                 )
@@ -787,6 +920,7 @@ class DeleteWrite(WriteOperation):
                     "op": "deleteRelationship",
                     "target": target,
                     "type": element.type if element.type is not None else (record or {}).get("_type"),
+                    **_tag_of(record),
                 })
             else:
                 value = _node_value(element)
@@ -794,7 +928,7 @@ class DeleteWrite(WriteOperation):
                     continue
                 self._route_node(writes, element, value)
                 node_scope = (
-                    "graph"
+                    f"graph:{value[GRAPH_KEY]}"
                     if is_graph_record(value)
                     else f"label:{value['_label'] if value.get('_label') is not None else label_of(element)}"
                 )
@@ -805,44 +939,140 @@ class DeleteWrite(WriteOperation):
                     "target": value.get("id"),
                     "label": label_of(element),
                     "detach": self._detach,
+                    **_tag_of(value),
                 })
 
 
+async def _check_foreign_references(
+    ctx: "SourceContext", route: WriteRoute, value: Dict[str, Any]
+) -> None:
+    """Reject the deletion of node ``value`` when relationships stored by
+    another backend than ``route``'s still reference it."""
+    ns = namespace_of(value)
+    sources: List[Dict[str, Any]] = []
+    names: List[str] = []
+    for graph in list(ctx.graphs.values()):
+        if same_backend(graph.write_backend, route.backend):
+            continue
+        sources.append({
+            "type": None,
+            "sourceLabel": None,
+            "targetLabel": None,
+            "provider": graph.relationship_provider,
+            "graph": graph.graph_name,
+        })
+        names.append(graph.description)
+    if ns != VIRTUAL_NAMESPACE:
+        for rel_type, by_endpoints in list(Database.get_instance().relationships.items()):
+            for physical in list(by_endpoints.values()):
+                if physical.provider is None:
+                    continue
+                left = definition_endpoint_namespace(physical.source, ctx.graphs)
+                right = definition_endpoint_namespace(physical.target, ctx.graphs)
+                if left != ns and right != ns:
+                    continue
+                sources.append({
+                    "type": rel_type,
+                    "sourceLabel": physical.source.label if physical.source is not None else None,
+                    "targetLabel": physical.target.label if physical.target is not None else None,
+                    "provider": physical.provider,
+                    "leftNamespace": left,
+                    "rightNamespace": right,
+                })
+                names.append(f"the definition of [:{rel_type}]")
+    if len(sources) == 0:
+        return
+    for source, name in zip(sources, names):
+        access = RelationshipSourceAccess(ctx, [source])
+        for side in ("left", "right"):
+            pages = access.expand(value.get("id"), side, [], None, ns)
+            try:
+                async for page in pages:
+                    if len(page) > 0:
+                        raise ValueError(
+                            f"Cannot delete node {json.dumps(value.get('id'))}: relationships "
+                            f"stored in {name} still reference it; delete them first in a "
+                            "separate query"
+                        )
+            finally:
+                await pages.aclose()
+
+
 def _describe(target: WriteTarget) -> str:
+    prefix = f"{target.graph}." if target.graph is not None else ""
     if target.kind == "node":
         labels = (
             target.labels
             if target.labels is not None
             else ([target.label] if target.label is not None else [])
         )
-        return f"(:{':'.join(labels)})"
+        return f"(:{prefix}{':'.join(labels)})"
     return (
-        f"(:{target.source_label or ''})-[:{target.type or ''}]->"
+        f"(:{target.source_label or ''})-[:{prefix}{target.type or ''}]->"
         f"(:{target.target_label or ''})"
     )
 
 
-def _default_route(graph: Optional["DefaultGraph"], name: str) -> WriteRoute:
-    """Route of a write through the default graph; it must declare ``writes: true``."""
-    if graph is None:
+def _graph_route(graphs: Mapping[str, "DefaultGraph"], graph_name: str, name: str) -> WriteRoute:
+    """Route of a write through the graph ``graph_name``; it must declare ``writes: true``."""
+    if graph_name == DEFAULT_GRAPH and DEFAULT_GRAPH not in graphs:
         raise ValueError(f"Cannot write to {name}: it has no CREATE VIRTUAL definition")
+    graph = bound_graph(graphs, graph_name)
     if not graph.writable:
+        if graph.is_default:
+            raise ValueError(
+                f"Cannot write to {name}: the default graph backend {graph.name} "
+                "does not declare the writes capability"
+            )
         raise ValueError(
-            f"Cannot write to {name}: the default graph backend {graph.name} "
+            f"Cannot write to {name}: the backend {graph.name} of graph {graph_name} "
             "does not declare the writes capability"
         )
-    return WriteRoute(backend=graph.write_backend, transactions=graph.transactional)
+    return WriteRoute(
+        backend=graph.write_backend,
+        transactions=graph.transactional,
+        graph_name=graph.graph_name,
+    )
 
 
-def resolve_target(target: WriteTarget, graph: Optional["DefaultGraph"]) -> Optional[WriteRoute]:
+def resolve_target(
+    target: WriteTarget, graphs: Mapping[str, "DefaultGraph"]
+) -> Optional[WriteRoute]:
     """Resolve where a write target goes before the query runs.
 
-    Labels and types with a ``CREATE VIRTUAL`` definition go to that
-    definition; others go to the default graph when one is bound.  Returns
-    None when the route depends on the entity a row binds (unlabelled
-    nodes and untyped relationships with a default graph bound).
+    Graph-qualified labels and types go to their graph; other labels and
+    types with a ``CREATE VIRTUAL`` definition go to that definition, the
+    rest to the default graph when one is bound.  Returns None when the
+    route depends on the entity a row binds (unlabelled nodes and untyped
+    relationships while graphs are bound).
     """
     db = Database.get_instance()
+    graph = graphs.get(DEFAULT_GRAPH)
+    qualifier = target.graph
+    if qualifier is not None:
+        if target.kind == "node" and qualifier == DEFAULT_GRAPH:
+            qualified_labels = (
+                target.labels
+                if target.labels is not None
+                else ([target.label] if target.label is not None else [])
+            )
+            defined = next((label for label in qualified_labels if label in db.nodes), None)
+            if target.clause is not None and defined is not None:
+                raise ValueError(
+                    f"Cannot write to {_describe(target)}: (:{defined}) has a CREATE VIRTUAL "
+                    "definition, which takes precedence over the default graph"
+                )
+        if (
+            target.kind == "relationship"
+            and qualifier == DEFAULT_GRAPH
+            and target.type is not None
+            and target.type in db.relationships
+        ):
+            raise ValueError(
+                f"Cannot write to {_describe(target)}: [:{target.type}] has a CREATE VIRTUAL "
+                "definition, which takes precedence over the default graph"
+            )
+        return _graph_route(graphs, qualifier, _describe(target))
     if target.kind == "node":
         if target.clause is not None:
             labels = (
@@ -862,23 +1092,25 @@ def resolve_target(target: WriteTarget, graph: Optional["DefaultGraph"]) -> Opti
                     else:
                         message = "MERGE of a node requires a new variable with exactly one label"
                     raise ValueError(message)
-                return resolve_write_backend(WriteTarget(kind="node", label=labels[0]))
+                return resolve_write_backend(WriteTarget(kind="node", label=labels[0]), graphs)
             if target.clause == "merge" and len(labels) == 0:
                 raise ValueError("MERGE of a node requires at least one label")
-            return _default_route(graph, _describe(target))
+            return _graph_route(graphs, DEFAULT_GRAPH, _describe(target))
         if target.label is None:
-            return resolve_write_backend(target) if graph is None else None
+            return resolve_write_backend(target, graphs) if len(graphs) == 0 else None
         if graph is None or target.label in db.nodes:
-            return resolve_write_backend(target)
-        return _default_route(graph, _describe(target))
+            return resolve_write_backend(target, graphs)
+        return _graph_route(graphs, DEFAULT_GRAPH, _describe(target))
     if target.type is None:
-        return resolve_write_backend(target) if graph is None else None
+        return resolve_write_backend(target, graphs) if len(graphs) == 0 else None
     if graph is None or target.type in db.relationships:
-        return resolve_write_backend(target)
-    return _default_route(graph, _describe(target))
+        return resolve_write_backend(target, graphs)
+    return _graph_route(graphs, DEFAULT_GRAPH, _describe(target))
 
 
-def resolve_write_backend(target: WriteTarget) -> WriteRoute:
+def resolve_write_backend(
+    target: WriteTarget, graphs: Optional[Mapping[str, "DefaultGraph"]] = None
+) -> WriteRoute:
     """Resolve the backend function a write target is applied through, and
     whether its definition declares ``transactions: true``.  The
     target must have a statement-backed ``CREATE VIRTUAL`` definition whose
@@ -930,6 +1162,14 @@ def resolve_write_backend(target: WriteTarget) -> WriteRoute:
             args=args,
         ),
         transactions=capabilities.get("transactions") is True,
+        endpoints=(
+            (
+                definition_endpoint_namespace(physical.source, graphs or {}),
+                definition_endpoint_namespace(physical.target, graphs or {}),
+            )
+            if target.kind == "relationship"
+            else None
+        ),
     )
 
 
@@ -973,7 +1213,7 @@ def prepare_writes(first: Operation, ctx: "SourceContext") -> None:
     writes = ctx.writes
     for op in operations:
         for target in op.targets:
-            route = resolve_target(target, ctx.graph)
+            route = resolve_target(target, ctx.graphs)
             if route is not None:
                 writes.route(route)
     writes.per_row = writes.transactional and reads_after_writes(first)

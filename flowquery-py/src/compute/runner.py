@@ -380,7 +380,7 @@ class Runner:
             )
             self._source_context.parameters = dict(self._options.parameters or {})
             # Pin the default graph for the whole query.
-            self._source_context.graph = Database.get_instance().default_graph
+            self._source_context.graphs = dict(Database.get_instance().graphs)
             resolver.data_cache = DataCache(
                 provenance=self._options.provenance,
                 source_context=self._source_context,

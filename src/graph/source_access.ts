@@ -4,7 +4,12 @@ import BindingReference from "../parsing/expressions/binding_reference";
 import Expression from "../parsing/expressions/expression";
 import Reference from "../parsing/expressions/reference";
 import Function from "../parsing/functions/function";
-import { originMatches } from "./graph_records";
+import {
+    VIRTUAL_NAMESPACE,
+    endpointMatches,
+    originMatches,
+    withEndpointNamespaces,
+} from "./graph_records";
 import SourceContext, { canonicalKey } from "./source_context";
 import {
     NodeSourceProvider,
@@ -232,9 +237,16 @@ abstract class SourceEntry {
         public readonly provider: NodeSourceProvider | RelationshipSourceProvider,
         public readonly name: string,
         protected readonly kind: "node" | "relationship",
-        /** The entry reads the default graph (rows carry graph provenance). */
-        public readonly graph: boolean = false
+        /**
+         * Namespace of the entry: the name of the graph it reads, or
+         * `"virtual"` for a `CREATE VIRTUAL` definition.
+         */
+        public readonly namespace: string = VIRTUAL_NAMESPACE
     ) {}
+    /** The entry reads a graph (rows carry their graph's namespace). */
+    public get isGraph(): boolean {
+        return this.namespace !== VIRTUAL_NAMESPACE;
+    }
 
     protected abstract base(): Record<string, any>;
     protected abstract enrich(row: SourceRow): SourceRow;
@@ -427,11 +439,11 @@ class NodeEntry extends SourceEntry {
         ctx: SourceContext,
         provider: NodeSourceProvider,
         public readonly label: string | null,
-        graph: boolean = false,
-        /** Labels a default-graph node must all carry (`(n:A:B)`). */
+        namespace: string = VIRTUAL_NAMESPACE,
+        /** Labels a graph node must all carry (`(n:A:B)`). */
         public readonly labels: string[] | null = null
     ) {
-        super(ctx, provider, labels?.join(":") ?? label ?? "", "node", graph);
+        super(ctx, provider, labels?.join(":") ?? label ?? "", "node", namespace);
     }
     protected base(): Record<string, any> {
         return this.labels !== null
@@ -477,21 +489,39 @@ class RelationshipEntry extends SourceEntry {
         public readonly type: string | null,
         public readonly sourceLabel: string | null,
         public readonly targetLabel: string | null,
-        graph: boolean = false
+        namespace: string = VIRTUAL_NAMESPACE,
+        /** Namespace of the left endpoints (definitions; graphs: any). */
+        public readonly leftNamespace: string = namespace,
+        /** Namespace of the right endpoints (definitions; graphs: any). */
+        public readonly rightNamespace: string = namespace
     ) {
         super(
             ctx,
             provider,
             `(:${sourceLabel ?? ""})-[:${type ?? ""}]->(:${targetLabel ?? ""})`,
             "relationship",
-            graph
+            namespace
         );
     }
     protected base(): Record<string, any> {
         return { type: this.type, sourceLabel: this.sourceLabel, targetLabel: this.targetLabel };
     }
     protected enrich(row: SourceRow): SourceRow {
-        return { ...row, _type: this.type ?? row._type };
+        if (this.isGraph) return { ...row, _type: this.type ?? row._type };
+        return withEndpointNamespaces(
+            { ...row, _type: this.type ?? row._type },
+            this.leftNamespace,
+            this.rightNamespace
+        );
+    }
+    /** Rows of this entry can have their `side` endpoint in namespace `origin`. */
+    public reaches(side: "left" | "right", origin: string | undefined): boolean {
+        if (origin === undefined || this.isGraph) return true;
+        return (side === "left" ? this.leftNamespace : this.rightNamespace) === origin;
+    }
+    /** Request additions of an expansion from anchors in namespace `origin`. */
+    private expandExtra(side: "left" | "right", origin: string | undefined): Record<string, any> {
+        return this.isGraph && origin !== undefined ? { side, anchorGraph: origin } : { side };
     }
     public nativeExpand(side: "left" | "right"): boolean {
         return (this.provider as RelationshipSourceProvider).capabilities.expand?.[side] === true;
@@ -501,7 +531,8 @@ class RelationshipEntry extends SourceEntry {
         ids: any[],
         terms: PushTerm[],
         args: Record<string, any> | null,
-        maxRows: number
+        maxRows: number,
+        origin?: string
     ): Promise<Map<string, SourceRow[]> | null> {
         return this.fetchKeyed(
             "expand",
@@ -510,7 +541,7 @@ class RelationshipEntry extends SourceEntry {
             ids,
             terms,
             args,
-            { side },
+            this.expandExtra(side, origin),
             maxRows
         );
     }
@@ -519,11 +550,13 @@ class RelationshipEntry extends SourceEntry {
         side: "left" | "right",
         id: any,
         terms: PushTerm[],
-        args: Record<string, any> | null
+        args: Record<string, any> | null,
+        origin?: string
     ): AsyncGenerator<SourceRow[]> {
         const field = `${side}_id`;
         const predicate = predicateFor(this.caps.predicates, terms);
-        const extra = { side, id };
+        const keyed = this.expandExtra(side, origin);
+        const extra = { ...keyed, id };
         const key = this.cacheable ? this.cacheKey("expand", predicate, args, extra) : null;
         if (key !== null) {
             const cached = this.ctx.cacheGet(key);
@@ -533,7 +566,7 @@ class RelationshipEntry extends SourceEntry {
             }
         }
         if (!this.nativeExpand(side) || this._unsupported.has("expand")) {
-            const rows = await this.fetchKeyed("expand", false, field, [id], terms, args, { side });
+            const rows = await this.fetchKeyed("expand", false, field, [id], terms, args, keyed);
             yield rows!.get(canonicalKey(id)) ?? [];
             return;
         }
@@ -545,7 +578,7 @@ class RelationshipEntry extends SourceEntry {
             for await (const page of this.ctx.call(this.provider, "expand", this.name, this.kind, {
                 operation: "expand",
                 ...this.base(),
-                side,
+                ...keyed,
                 ids: [id],
                 predicate,
                 args,
@@ -565,7 +598,7 @@ class RelationshipEntry extends SourceEntry {
         } catch (e) {
             if (!(e instanceof SourceUnsupportedError) || yielded) throw e;
             this._unsupported.add("expand");
-            yield* this.expandOne(side, id, terms, args);
+            yield* this.expandOne(side, id, terms, args, origin);
             return;
         }
         if (key !== null && collected !== null && !overflow) this.ctx.cacheSet(key, collected);
@@ -575,9 +608,10 @@ class RelationshipEntry extends SourceEntry {
 /**
  * Common node access used by deferred traversal.
  *
- * `origin` constrains a step reached through a relationship: `true`
- * keeps only default-graph rows, `false` only definition rows, and
- * `undefined` keeps both.  Ids never join across the two.
+ * `origin` constrains a step reached through a relationship to one
+ * namespace: the name of a graph, or `"virtual"` for definition
+ * entities; `undefined` keeps every namespace.  Ids never join across
+ * namespaces.
  */
 export interface NodeAccess {
     readonly deferred: boolean;
@@ -586,13 +620,13 @@ export interface NodeAccess {
         id: any,
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<SourceRow[]>;
     prefetch(
         ids: any[],
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<void>;
     /** Selectivity hints for start-point selection. */
     canLookup(): boolean;
@@ -609,7 +643,7 @@ export interface RelationshipAccess {
         side: "left" | "right",
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): AsyncIterable<SourceRow[]>;
     /**
      * Batch-fetch relationships for many anchors.  Returns the buffered
@@ -621,20 +655,29 @@ export interface RelationshipAccess {
         side: "left" | "right",
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<SourceRow[] | null>;
 }
 
-function forOrigin<T extends SourceEntry>(entries: T[], origin: boolean | undefined): T[] {
-    return origin === undefined ? entries : entries.filter((e) => e.graph === origin);
+function forOrigin(entries: NodeEntry[], origin: string | undefined): NodeEntry[] {
+    return origin === undefined ? entries : entries.filter((e) => e.namespace === origin);
 }
 
-function rowsForOrigin(rows: SourceRow[], origin: boolean | undefined): SourceRow[] {
+function rowsForOrigin(rows: SourceRow[], origin: string | undefined): SourceRow[] {
     return origin === undefined ? rows : rows.filter((row) => originMatches(row, origin));
 }
 
+/** Relationship rows whose `side` endpoint is in namespace `origin`. */
+function rowsAnchored(
+    rows: SourceRow[],
+    side: "left" | "right",
+    origin: string | undefined
+): SourceRow[] {
+    return origin === undefined ? rows : rows.filter((row) => endpointMatches(row, side, origin));
+}
+
 /** A prefetch buffer built for `built` can serve a step constrained to `origin`. */
-function bufferServes(built: boolean | undefined, origin: boolean | undefined): boolean {
+function bufferServes(built: string | undefined, origin: string | undefined): boolean {
     return built === undefined || built === origin;
 }
 
@@ -643,18 +686,26 @@ export class NodeSourceAccess implements NodeAccess {
     public readonly deferred = true;
     private _entries: NodeEntry[];
     private _buffer: Map<string, SourceRow[]> | null = null;
-    private _bufferOrigin: boolean | undefined = undefined;
+    private _bufferOrigin: string | undefined = undefined;
     constructor(
         private readonly ctx: SourceContext,
         entries: {
             label: string | null;
             provider: NodeSourceProvider;
-            graph?: boolean;
+            /** Graph name; omitted for definitions. */
+            graph?: string | null;
             labels?: string[] | null;
         }[]
     ) {
         this._entries = entries.map(
-            (e) => new NodeEntry(ctx, e.provider, e.label, e.graph === true, e.labels ?? null)
+            (e) =>
+                new NodeEntry(
+                    ctx,
+                    e.provider,
+                    e.label,
+                    e.graph ?? VIRTUAL_NAMESPACE,
+                    e.labels ?? null
+                )
         );
     }
     public async *scan(
@@ -667,7 +718,7 @@ export class NodeSourceAccess implements NodeAccess {
         ids: any[],
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<void> {
         const unique = distinct(ids);
         const previous = bufferServes(this._bufferOrigin, origin) ? this._buffer : null;
@@ -696,7 +747,7 @@ export class NodeSourceAccess implements NodeAccess {
         id: any,
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<SourceRow[]> {
         if (id === null || id === undefined) return [];
         const key = canonicalKey(id);
@@ -734,7 +785,7 @@ export class RelationshipSourceAccess implements RelationshipAccess {
     private _entries: RelationshipEntry[];
     private _buffer: Map<string, SourceRow[]> | null = null;
     private _bufferSide: "left" | "right" | null = null;
-    private _bufferOrigin: boolean | undefined = undefined;
+    private _bufferOrigin: string | undefined = undefined;
     constructor(
         private readonly ctx: SourceContext,
         entries: {
@@ -742,27 +793,36 @@ export class RelationshipSourceAccess implements RelationshipAccess {
             sourceLabel: string | null;
             targetLabel: string | null;
             provider: RelationshipSourceProvider;
-            graph?: boolean;
+            /** Graph name; omitted for definitions. */
+            graph?: string | null;
+            /** Definitions: namespaces of the endpoints (default: definitions). */
+            leftNamespace?: string;
+            rightNamespace?: string;
         }[]
     ) {
-        this._entries = entries.map(
-            (e) =>
-                new RelationshipEntry(
-                    ctx,
-                    e.provider,
-                    e.type,
-                    e.sourceLabel,
-                    e.targetLabel,
-                    e.graph === true
-                )
-        );
+        this._entries = entries.map((e) => {
+            const namespace = e.graph ?? VIRTUAL_NAMESPACE;
+            return new RelationshipEntry(
+                ctx,
+                e.provider,
+                e.type,
+                e.sourceLabel,
+                e.targetLabel,
+                namespace,
+                e.leftNamespace ?? namespace,
+                e.rightNamespace ?? namespace
+            );
+        });
+    }
+    private entriesFor(side: "left" | "right", origin: string | undefined): RelationshipEntry[] {
+        return this._entries.filter((e) => e.reaches(side, origin));
     }
     public async *expand(
         anchor: any,
         side: "left" | "right",
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): AsyncGenerator<SourceRow[]> {
         if (anchor === null || anchor === undefined) return;
         const buffered =
@@ -770,11 +830,13 @@ export class RelationshipSourceAccess implements RelationshipAccess {
                 ? this._buffer?.get(canonicalKey(anchor))
                 : undefined;
         if (buffered !== undefined) {
-            yield rowsForOrigin(buffered, origin);
+            yield rowsAnchored(buffered, side, origin);
             return;
         }
-        for (const entry of forOrigin(this._entries, origin)) {
-            yield* entry.expandOne(side, anchor, terms, args);
+        for (const entry of this.entriesFor(side, origin)) {
+            for await (const page of entry.expandOne(side, anchor, terms, args, origin)) {
+                yield rowsAnchored(page, side, origin);
+            }
         }
     }
     public async prefetch(
@@ -782,22 +844,26 @@ export class RelationshipSourceAccess implements RelationshipAccess {
         side: "left" | "right",
         terms: PushTerm[],
         args: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<SourceRow[] | null> {
         this._buffer = null;
         this._bufferSide = null;
         this._bufferOrigin = undefined;
         const unique = distinct(anchors);
-        const entries = forOrigin(this._entries, origin);
+        const entries = this.entriesFor(side, origin);
         if (unique.length < 2 || !entries.every((e) => e.nativeExpand(side))) return null;
+        // Graph expansions are keyed by the anchors' namespace: anchors of
+        // mixed namespaces are expanded one by one instead.
+        if (origin === undefined && entries.some((e) => e.isGraph)) return null;
         const buffer: Map<string, SourceRow[]> = new Map();
         for (const id of unique) buffer.set(canonicalKey(id), []);
         let remaining = this.ctx.options.maxPrefetchRows;
         const all: SourceRow[] = [];
         for (const entry of entries) {
-            const rows = await entry.expandBatch(side, unique, terms, args, remaining);
+            const rows = await entry.expandBatch(side, unique, terms, args, remaining, origin);
             if (rows === null) return null;
-            for (const [key, list] of rows) {
+            for (const [key, fetched] of rows) {
+                const list = rowsAnchored(fetched, side, origin);
                 buffer.get(key)!.push(...list);
                 all.push(...list);
                 remaining -= list.length;
@@ -822,7 +888,7 @@ export class MemoryNodeAccess implements NodeAccess {
         id: any,
         _terms?: PushTerm[],
         _args?: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): Promise<SourceRow[]> {
         return rowsForOrigin(indexRows(this._records, "id").get(canonicalKey(id)) ?? [], origin);
     }
@@ -847,10 +913,11 @@ export class MemoryRelationshipAccess implements RelationshipAccess {
         side: "left" | "right",
         _terms?: PushTerm[],
         _args?: Record<string, any> | null,
-        origin?: boolean
+        origin?: string
     ): AsyncGenerator<SourceRow[]> {
-        yield rowsForOrigin(
+        yield rowsAnchored(
             indexRows(this._records, `${side}_id`).get(canonicalKey(anchor)) ?? [],
+            side,
             origin
         );
     }

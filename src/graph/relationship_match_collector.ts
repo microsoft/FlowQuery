@@ -38,7 +38,8 @@ class RelationshipMatchCollector {
         } else if (explicit) {
             relProperties = {};
             if (currentRecord != null) {
-                const { left_id, right_id, _type, ...props } = currentRecord;
+                const { left_id, right_id, _type, _leftGraph, _rightGraph, ...props } =
+                    currentRecord;
                 relProperties = props;
             }
         } else {
@@ -54,7 +55,7 @@ class RelationshipMatchCollector {
         // Thread the underlying record's inner provenance onto the
         // freshly constructed match object so the snapshot can read it
         // by reference.
-        if (flat !== null) (match as any)[GRAPH_KEY] = true;
+        if (flat !== null) (match as any)[GRAPH_KEY] = currentRecord![GRAPH_KEY];
         if (currentRecord != null) {
             const src = getVirtualSource(currentRecord);
             if (src !== undefined) attachVirtualSource(match, src);

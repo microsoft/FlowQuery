@@ -67,7 +67,7 @@ class RelationshipMatchCollector:
                 rel_props = {
                     k: v
                     for k, v in current_record.items()
-                    if k not in ("left_id", "right_id", "_type")
+                    if k not in ("left_id", "right_id", "_type", "_leftGraph", "_rightGraph")
                 }
         else:
             rel_props = (rel_data.properties() or {}) if rel_data else {}
@@ -79,7 +79,7 @@ class RelationshipMatchCollector:
             "properties": rel_props,
         }
         if flat is not None:
-            match[GRAPH_KEY] = True
+            match[GRAPH_KEY] = current_record[GRAPH_KEY]
         # Thread inner virtual sub-query lineage through to the match
         # record so :class:`ProvenanceSites` can attach it to the hop.
         if current_record is not None:

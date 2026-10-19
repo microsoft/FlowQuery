@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from ..parsing.ast_node import ASTNode
 from ..parsing.expressions.expression import Expression
-from .graph_records import common_origin, is_graph_record, labels_of, origin_matches
+from .graph_records import (
+    common_namespace,
+    endpoint_namespace,
+    labels_of,
+    namespace_of,
+    origin_matches,
+)
 from .node_data import NodeData, NodeRecord
 from .source_access import PushedPredicate, SourceTerms, build_terms
 
@@ -27,8 +33,10 @@ class Node(ASTNode):
         self._identifier = identifier
         self._label = label
         self._labels: list[str] = [label] if label is not None else []
-        #: (n:A:B): a match must carry every label (default graph only).
+        #: (n:A:B): a match must carry every label (graphs only).
         self._all_labels = False
+        #: Graph named by a qualified label, ``(n:hr.Person)``; None when unqualified.
+        self._graph: Optional[str] = None
         self._properties: Dict[str, Expression] = {}
         self._value: Optional['NodeRecord'] = None
         self._incoming: Optional['Relationship'] = None
@@ -72,6 +80,14 @@ class Node(ASTNode):
     @all_labels.setter
     def all_labels(self, value: bool) -> None:
         self._all_labels = value
+
+    @property
+    def graph(self) -> Optional[str]:
+        return self._graph
+
+    @graph.setter
+    def graph(self, value: Optional[str]) -> None:
+        self._graph = value
 
     @property
     def properties(self) -> Dict[str, Expression]:
@@ -185,14 +201,14 @@ class Node(ASTNode):
                         continue
                     if self._outgoing and self._value:
                         async for _ in self._outgoing.find(
-                            self._value['id'], 0, is_graph_record(self._value)
+                            self._value['id'], 0, namespace_of(self._value)
                         ):
                             yield
                     else:
                         yield
 
     async def find(
-        self, id_: Any, hop: int = 0, origin: Optional[bool] = None
+        self, id_: Any, hop: int = 0, origin: Optional[str] = None
     ) -> AsyncGenerator[None, None]:
         """Bind the node with id ``id_``, reached through a relationship.
         ``origin`` keeps the step within the relationship's graph (see
@@ -224,7 +240,7 @@ class Node(ASTNode):
                         continue
                     if self._outgoing and self._value:
                         async for _ in self._outgoing.find(
-                            self._value['id'], hop, is_graph_record(self._value)
+                            self._value['id'], hop, namespace_of(self._value)
                         ):
                             yield
                     else:
@@ -255,7 +271,7 @@ class Node(ASTNode):
                     if self._outgoing:
                         row_id: Any = row.get("id")
                         async with aclosing(
-                            self._outgoing.find(row_id, 0, is_graph_record(row))
+                            self._outgoing.find(row_id, 0, namespace_of(row))
                         ) as inner:
                             async for _ in inner:
                                 yield
@@ -263,7 +279,7 @@ class Node(ASTNode):
                         yield
 
     async def _deferred_find(
-        self, id_: Any, hop: int, origin: Optional[bool]
+        self, id_: Any, hop: int, origin: Optional[str]
     ) -> AsyncGenerator[None, None]:
         terms, args = self.source_terms()
         rows = await self._access.lookup(id_, terms, args, origin)
@@ -275,7 +291,7 @@ class Node(ASTNode):
                 continue
             if self._outgoing:
                 async with aclosing(
-                    self._outgoing.find(row.get("id"), hop, is_graph_record(row))
+                    self._outgoing.find(row.get("id"), hop, namespace_of(row))
                 ) as inner:
                     async for _ in inner:
                         yield
@@ -289,7 +305,7 @@ class Node(ASTNode):
         per batch instead of one per row."""
         current: Node = node
         anchors = [row.get("id") for row in anchor_rows]
-        origin = common_origin(anchor_rows)
+        origin = common_namespace(anchor_rows, namespace_of)
         while current.outgoing is not None:
             rel = current.outgoing
             target = rel.target
@@ -310,7 +326,9 @@ class Node(ASTNode):
             if target.access is None or not target.access.deferred:
                 return
             target_terms, target_args = target.source_terms()
-            origin = common_origin(rows)
+            origin = common_namespace(
+                rows, lambda row: endpoint_namespace(row, rel.next_side)
+            )
             await target.access.prefetch(next_ids, target_terms, target_args, origin)
             anchors = next_ids
             current = target

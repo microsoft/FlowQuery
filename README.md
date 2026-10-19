@@ -1192,7 +1192,7 @@ No definitions, property projections or schema refreshes are needed between thes
 USE GRAPH memorygraph($request)
 ```
 
-It is a schema-free store kept in the process memory (not persisted) with graph-wide integer ids starting at `1`, and it supports every operation of the default graph: lookups, expansions, predicate push-down, writes and transactions. Each query reads one consistent snapshot and writes to a private copy, so it reads its own writes and its changes become visible to other queries when it commits; a commit fails, and nothing is applied, when another query committed to the same store in the meantime. `memorygraph($request, 'name')` uses a separate named store; `MATCH (n) DETACH DELETE n` empties the bound one. From code, `MemoryGraph.store(name)` returns a store's committed state and `MemoryGraph.clear(name?)` discards stores.
+It is a schema-free store kept in the process memory (not persisted) with integer ids starting at `1`, and it supports every operation of the default graph: lookups, expansions, predicate push-down, writes and transactions. One store can hold several graphs: `USE GRAPH hr = memorygraph($request)` adds a graph `hr` to the same store (see [Named graphs](#named-graphs-and-relationships-across-graphs)). Each query reads one consistent snapshot and writes to a private copy, so it reads its own writes and its changes become visible to other queries when it commits; a commit fails, and nothing is applied, when another query committed to the same store in the meantime. `memorygraph($request, 'name')` uses a separate named store; `MATCH (n) DETACH DELETE n` empties the bound one. From code, `MemoryGraph.store(name)` returns a store's committed state (`nodeCount(graph?)`, `relationshipCount(graph?)`) and `MemoryGraph.clear(name?)` discards stores.
 
 **Your own backend.** The function is registered like any async function, and its capabilities (`lookup`, `expand`, `predicates`, `writes`, `transactions`, ...) are read once from its `static capabilities` when `USE GRAPH` runs; a `static capabilities(request)` method receives `{version: 1, operation: "capabilities", graph: true}`. Arguments other than `$request` are evaluated once, when the graph is bound.
 
@@ -1248,9 +1248,45 @@ Ids are graph-wide and relationships must have one. In a pushed-down predicate, 
 
 **Entities in queries.** A default-graph node behaves like any other node: `n.name` reads a property, `n.id` is its id, `labels(n)` returns every stored label, `type(r)` the stored type, and a property nobody has set yet is `null`. Metadata wins over a user property of the same name in that view (`n.id` is the entity id; `r.type` is the relationship type), while `properties(n)` / `properties(r)` always return the exact stored user properties, including keys such as `id`, `labels`, `type`, `left_id` or `right_id`. Returned entities contain their properties and `id` only; internal bookkeeping keys are removed.
 
-**Writes** use the [change-set protocol](#writing-to-backends) with `graph: true` on every request (`write`, `commit`, `rollback`), so they need `writes: true`; a read-only backend stays readable and rejects writes with a clear error. Node targets are graph-wide ids (`label` is informational and may be `null`), relationship changes carry the stored `type`, `createNode.labels` may hold zero or several labels (`CREATE (n)`, `CREATE (n:A:B)`), and `mergeNode` adds `labels` with every label of the pattern (`label` is the first). `MERGE` of a node needs at least one label; a new relationship still needs exactly one type, and its endpoints must be default-graph nodes. Without `transactions: true` the whole change set is sent once, when the query succeeds, and the query does not read its own writes; with it, the [transactional lifecycle](#transactions-read-your-writes) applies unchanged. The binding never enables transactions on its own. All reads and writes of a query share one read context (`openReadContext` / `closeReadContext`), signal and cleanup, exactly as for definitions.
+**Writes** use the [change-set protocol](#writing-to-backends) with `graph: true` on every request (`write`, `commit`, `rollback`), so they need `writes: true`; a read-only backend stays readable and rejects writes with a clear error. Node targets are graph-wide ids (`label` is informational and may be `null`), relationship changes carry the stored `type`, `createNode.labels` may hold zero or several labels (`CREATE (n)`, `CREATE (n:A:B)`), and `mergeNode` adds `labels` with every label of the pattern (`label` is the first). `MERGE` of a node needs at least one label; a new relationship still needs exactly one type; its endpoints may be nodes of any graph or definition (see [Named graphs](#named-graphs-and-relationships-across-graphs)). Without `transactions: true` the whole change set is sent once, when the query succeeds, and the query does not read its own writes; with it, the [transactional lifecycle](#transactions-read-your-writes) applies unchanged. The binding never enables transactions on its own. All reads and writes of a query share one read context (`openReadContext` / `closeReadContext`), signal and cleanup, exactly as for definitions.
 
-To see the binding with its effective capabilities, `LOAD JSON FROM source_capabilities() AS s` includes an entry with `kind: 'graph'`.
+To see the bindings with their effective capabilities, `LOAD JSON FROM source_capabilities() AS s` includes an entry with `kind: 'graph'` and the graph's `name` for each bound graph.
+
+##### Named graphs and relationships across graphs
+
+Besides the default graph, any number of **named graphs** can be bound. A label or relationship type qualified with a graph name addresses that graph:
+
+```cypher
+USE GRAPH hr = memorygraph($request, 'hr');
+CREATE (:hr.Employee {name: 'Ada'});
+MATCH (e:hr.Employee)-[:hr.REPORTS_TO]->(m:hr.Employee) RETURN e.name, m.name
+```
+
+- `USE GRAPH name = fn($request)` binds (or replaces) a named graph and `DROP GRAPH name` clears it; `USE GRAPH fn($request)` is the same as `USE GRAPH default = fn($request)`. The name `virtual` is reserved.
+- `(n:hr.Person)`, `(n:hr.Person:Manager)`, `(n:hr.Person|Contractor)` and `[:hr.KNOWS]` qualify the first label or type; every label or type of that element then belongs to the graph. Unqualified labels and types keep their meaning: a definition when one exists, else the default graph. Unlabelled nodes and untyped relationships match every definition and every graph.
+- Named graphs are separate namespaces, so definitions do not shadow them (`(:hr.Curated)` is fine even when `(:Curated)` is defined); the default graph keeps giving definitions precedence.
+- Requests and changes of a named graph carry `graphName` (absent for the default graph). A qualified label of a graph that is not bound is an error.
+
+**Relationships across graphs.** Every entity belongs to a namespace (a graph, or `virtual` for definition nodes), and ids only join within their namespace, so coincidentally equal ids never connect. A relationship may still connect nodes of different namespaces:
+
+- **Stored in a graph.** A relationship created in a graph may point at a node of another graph or at a definition node: `MATCH (e:hr.Employee), (p:Person) CREATE (e)-[:hr.SAME_AS]->(p)`. Its change carries `startGraph` / `endGraph` with the endpoint's namespace (and `startLabel` / `endLabel` for definition nodes); graph rows report it as `left_graph` / `right_graph`. Traversal works in both directions; expansion requests carry `anchorGraph`, the namespace of the anchor nodes.
+- **Defined by a relationship definition.** A relationship definition's endpoint labels declare where its ends live: a label with a node definition is a definition node, a graph-qualified label is a node of that graph, and any other label is a default-graph node when a default graph is bound (otherwise a definition node, as before):
+
+    ```cypher
+    CREATE VIRTUAL (:Badge)-[:ISSUED_TO]-(:Person) AS {
+        LOAD JSON FROM badges($request) AS r RETURN r.badge_id AS left_id, r.person_id AS right_id
+    }
+    ```
+
+    Writable definitions record graph endpoints in their changes the same way; an endpoint of another namespace than declared is rejected.
+
+**Consistency.** Graphs bound to the **same function with the same arguments** are one backend: a query may write to all of them, and its changes go out in one atomic change set (each change carrying its `graphName`), so the backend can keep references intact. `memorygraph` checks them: an endpoint in a graph of the store must exist, a plain `DELETE` of a node fails while relationships of any of the store's graphs still use it, and `DETACH DELETE` removes them all. Across **different backends** FlowQuery cannot change both sides atomically, so:
+
+- a query still writes through one backend; relationships are created between nodes the query has bound, so both endpoints exist when the relationship is created;
+- deleting a node (`DELETE` or `DETACH DELETE`) fails, before anything is applied, while relationships stored by another backend still reference it; delete those first, in a separate query;
+- a relationship whose other end disappeared anyway (for example, when its definition no longer returns the node) is never matched.
+
+With two `memorygraph` graphs on one store (`USE GRAPH memorygraph($request); USE GRAPH hr = memorygraph($request)`) cross-graph relationships are fully consistent; with separate stores (`memorygraph($request, 'hr')`) the rules for different backends apply.
 
 ### Reserved Keywords as Identifiers
 
@@ -1324,6 +1360,8 @@ RETURN f.name, f.description, f.category
 │  WRITES (definitions with writes: true, or default graph)   │
 ├─────────────────────────────────────────────────────────────┤
 │  USE GRAPH fn($request)  ·  DROP GRAPH  -- default graph    │
+│  USE GRAPH hr = fn($request)  ·  DROP GRAPH hr  -- named    │
+│  MATCH (n:hr.Person)-[:hr.KNOWS]->(m) -- qualified labels   │
 │  CREATE (n:Label {...})  ·  CREATE (a)-[:TYPE {...}]->(b)   │
 │  MERGE (n:Label {key}) [ON CREATE SET ...] [ON MATCH SET ..]│
 │  SET n.prop = v, n += {...}, n:Label                        │

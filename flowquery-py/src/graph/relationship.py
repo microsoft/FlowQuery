@@ -6,7 +6,13 @@ from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set, Union
 
 from ..parsing.ast_node import ASTNode
-from .graph_records import common_origin, is_graph_record, origin_matches
+from .graph_records import (
+    common_namespace,
+    endpoint_matches,
+    endpoint_namespace,
+    is_graph_record,
+    namespace_of,
+)
 from .hops import Hops
 from .relationship_data import RelationshipData
 from .relationship_match_collector import RelationshipMatchCollector, RelationshipMatchRecord
@@ -70,6 +76,8 @@ class Relationship(ASTNode):
         super().__init__()
         self._identifier: Optional[str] = None
         self._types: List[str] = []
+        #: Graph named by a qualified type, ``[:hr.KNOWS]``; None when unqualified.
+        self._graph: Optional[str] = None
         self._hops: Hops = Hops()
         self._source: Optional['Node'] = None
         self._target: Optional['Node'] = None
@@ -105,7 +113,9 @@ class Relationship(ASTNode):
         if rel_type is None:
             rel_type = self.type or ""
         if row.get("id") is not None:
-            return f"{rel_type}\u0000#{canonical_key(row['id'])}"
+            # Ids are scoped to their namespace: graphs on other backends reuse them.
+            ns = f"{namespace_of(row)}\u0000" if is_graph_record(row) else ""
+            return f"{ns}{rel_type}\u0000#{canonical_key(row['id'])}"
         rest = {k: v for k, v in row.items() if k != "_type"}
         return f"{rel_type}\u0000{canonical_key(rest)}"
 
@@ -147,6 +157,14 @@ class Relationship(ASTNode):
     @types.setter
     def types(self, value: List[str]) -> None:
         self._types = value
+
+    @property
+    def graph(self) -> Optional[str]:
+        return self._graph
+
+    @graph.setter
+    def graph(self, value: Optional[str]) -> None:
+        self._graph = value
 
     @property
     def hops(self) -> Hops:
@@ -248,6 +266,11 @@ class Relationship(ASTNode):
         return "right" if self._direction == "left" else "left"
 
     @property
+    def next_side(self) -> str:
+        """Stored endpoint of the next node in traversal order."""
+        return "left" if self._direction == "left" else "right"
+
+    @property
     def next_field(self) -> str:
         """Stored endpoint holding the id of the next node in traversal order."""
         return "left_id" if self._direction == "left" else "right_id"
@@ -304,7 +327,7 @@ class Relationship(ASTNode):
         return "left_id" if self._direction == "left" else "right_id"
 
     async def find(
-        self, left_id: str, hop: int = 0, origin: Optional[bool] = None
+        self, left_id: str, hop: int = 0, origin: Optional[str] = None
     ) -> AsyncGenerator[None, None]:
         """Traverse the relationships anchored at node `left_id`.  `origin`
         is the graph provenance of that node: relationships of the other
@@ -336,9 +359,9 @@ class Relationship(ASTNode):
                 data = self._data.current(hop)
                 if data is None:
                     continue
-                if not origin_matches(data, origin):
+                if not endpoint_matches(data, self.anchor_side, origin):
                     continue
-                next_origin = is_graph_record(data)
+                next_origin = endpoint_namespace(data, self.next_side)
                 id = data[self._left_id_or_right_id()]
                 if hop + 1 >= self._hops.min:
                     self.set_value(self, left_id)
@@ -373,7 +396,7 @@ class Relationship(ASTNode):
             self._source = original
 
     async def _deferred_find(
-        self, left_id: Any, hop: int, origin: Optional[bool]
+        self, left_id: Any, hop: int, origin: Optional[str]
     ) -> AsyncGenerator[None, None]:
         original = self._source
         if hop > 0:
@@ -410,7 +433,9 @@ class Relationship(ASTNode):
                             [row.get(self.next_field) for row in page],
                             t_terms,
                             t_args,
-                            common_origin(page),
+                            common_namespace(
+                                page, lambda row: endpoint_namespace(row, self.next_side)
+                            ),
                         )
                     for row in page:
                         async with aclosing(self._visit(row, left_id, hop)) as visit:
@@ -424,7 +449,7 @@ class Relationship(ASTNode):
     ) -> AsyncGenerator[None, None]:
         self._frames[hop] = record
         id_: Any = record.get(self.next_field)
-        next_origin = is_graph_record(record)
+        next_origin = endpoint_namespace(record, self.next_side)
         if hop + 1 >= self._hops.min:
             if not self.matches_record(record):
                 return

@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
+from .graph_records import DEFAULT_GRAPH
 from .source_provider import (
     QueryCancelledError,
     SourceError,
@@ -186,9 +187,10 @@ class SourceContext:
         self.parameters: Dict[str, Any] = {}
         #: Changes collected by write clauses; sent to the backend when the query succeeds.
         self.writes: Optional[WriteSet] = None
-        #: Default graph pinned by this query (the registry's binding when the
-        #: query started, or one bound by the query's own ``USE GRAPH``).
-        self.graph: Optional["DefaultGraph"] = None
+        #: Graphs pinned by this query, by name: the registry's bindings when
+        #: the query started, updated by the query's own ``USE GRAPH`` /
+        #: ``DROP GRAPH``.
+        self.graphs: Dict[str, "DefaultGraph"] = {}
         self.signal = SourceSignal()
         self._cache = RowCache(self.options.cache_capacity)
         self._inflight: Dict[str, "asyncio.Future[Any]"] = {}
@@ -199,6 +201,11 @@ class SourceContext:
         external = options.signal if options is not None else None
         if external is not None:
             self._attach_external(external)
+
+    @property
+    def graph(self) -> Optional["DefaultGraph"]:
+        """The pinned default graph, or None."""
+        return self.graphs.get(DEFAULT_GRAPH)
 
     def _attach_external(self, external: Any) -> None:
         if isinstance(external, asyncio.Event):

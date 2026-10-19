@@ -1,4 +1,4 @@
-"""The default graph of the FlowQuery registry (``USE GRAPH fn($request)``)."""
+"""Graphs of the FlowQuery registry (``USE GRAPH [name =] fn($request)``)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ..parsing.functions.function_factory import FunctionFactory
 from .database import Database
-from .graph_records import graph_node_record, graph_relationship_record
+from .graph_records import DEFAULT_GRAPH, graph_node_record, graph_relationship_record
 from .source_context import context_of
 from .source_provider import (
     SourceResponseError,
@@ -43,18 +43,22 @@ class _GraphRelationshipProvider:
 
 
 class DefaultGraph:
-    """The default graph of the FlowQuery registry, bound with
-    ``USE GRAPH fn($request)``.
+    """A graph of the FlowQuery registry, bound with ``USE GRAPH fn($request)``
+    (the default graph) or ``USE GRAPH name = fn($request)`` (a named graph).
 
     Labels and relationship types without a ``CREATE VIRTUAL`` definition
-    are read from, and written to, this one backend function.  Every
-    request is the usual versioned source/write request with
-    ``graph: true`` added; read requests may carry ``label: None`` (any
-    node) or ``type: None`` (any relationship), and the function answers
-    with graph rows that keep metadata and user properties apart:
+    are read from, and written to, the default graph; labels qualified
+    with a graph name (``(:hr.Person)``) address that graph.  Every request
+    is the usual versioned source/write request with ``graph: true`` added
+    (and ``graphName`` for named graphs); read requests may carry
+    ``label: None`` (any node) or ``type: None`` (any relationship), and the
+    function answers with graph rows that keep metadata and user
+    properties apart:
 
     - nodes: ``{id, labels: [...], properties: {...}}``
-    - relationships: ``{id, type, left_id, right_id, properties: {...}}``
+    - relationships: ``{id, type, left_id, right_id, properties: {...}}``,
+      plus ``left_graph`` / ``right_graph`` when an endpoint belongs to
+      another graph (or ``"virtual"``: a definition node)
 
     Capabilities are those the function declares (``capabilities``, or a
     ``capabilities(request)`` static method called once with
@@ -68,8 +72,11 @@ class DefaultGraph:
         request_index: int,
         args: List[Any],
         declared: Optional[Dict[str, Any]],
+        graph_name: str = DEFAULT_GRAPH,
     ) -> None:
         self.name = name
+        #: Name the graph is bound under (``"default"`` for the default graph).
+        self.graph_name = graph_name
         self.function_class = function_class
         self.request_index = request_index
         self.args = args
@@ -84,8 +91,16 @@ class DefaultGraph:
         validate_relationship_provider(self.relationship_provider, self.description)
 
     @property
+    def is_default(self) -> bool:
+        return self.graph_name == DEFAULT_GRAPH
+
+    @property
     def description(self) -> str:
-        return f"default graph {self.name}"
+        return (
+            f"default graph {self.name}"
+            if self.is_default
+            else f"graph {self.graph_name} ({self.name})"
+        )
 
     @property
     def writable(self) -> bool:
@@ -103,7 +118,14 @@ class DefaultGraph:
             request_index=self.request_index,
             args=self.args,
             graph=True,
+            graph_name=self.graph_name,
         )
+
+    def tag(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """The request envelope additions identifying this graph."""
+        if self.is_default:
+            return {**request, "graph": True}
+        return {**request, "graph": True, "graphName": self.graph_name}
 
     async def _read(
         self, request: Dict[str, Any], context: Any, kind: str
@@ -112,7 +134,7 @@ class DefaultGraph:
         fn.source_context = context_of(context)
         await fn.prepare_context()
         args = list(self.args)
-        args[self.request_index] = {**request, "graph": True}
+        args[self.request_index] = self.tag(request)
         page_size = max(1, request.get("pageSize") or 256)
         page: List[SourceRow] = []
         generator = fn.generate(*args)
@@ -170,11 +192,13 @@ class DefaultGraph:
         if not all(label in labels for label in wanted):
             return None
         # Labels with a CREATE VIRTUAL definition are served by that
-        # definition only, so the default graph never bypasses it.
-        defined = Database.get_instance().nodes
-        if any(label in defined for label in labels):
-            return None
-        return graph_node_record(row["id"], labels, properties)
+        # definition only, so the default graph never bypasses it.  Named
+        # graphs are separate namespaces and are not shadowed.
+        if self.is_default:
+            defined = Database.get_instance().nodes
+            if any(label in defined for label in labels):
+                return None
+        return graph_node_record(row["id"], labels, properties, self.graph_name)
 
     def _relationship_row(self, row: Any, request: Dict[str, Any]) -> Optional[SourceRow]:
         if not isinstance(row, dict):
@@ -186,10 +210,29 @@ class DefaultGraph:
         if "left_id" not in row or "right_id" not in row:
             raise self._invalid(request, "a relationship row without left_id/right_id")
         properties = self._properties(row, request)
+        left_graph = self._endpoint_graph(row.get("left_graph"), request)
+        right_graph = self._endpoint_graph(row.get("right_graph"), request)
         if request.get("type") is not None and row["type"] != request["type"]:
             return None
-        if row["type"] in Database.get_instance().relationships:
+        if self.is_default and row["type"] in Database.get_instance().relationships:
             return None
         return graph_relationship_record(
-            row["id"], row["type"], row["left_id"], row["right_id"], properties
+            row["id"],
+            row["type"],
+            row["left_id"],
+            row["right_id"],
+            properties,
+            self.graph_name,
+            left_graph,
+            right_graph,
         )
+
+    def _endpoint_graph(self, value: Any, request: Dict[str, Any]) -> str:
+        """Namespace of a relationship endpoint (``left_graph`` / ``right_graph``, else this graph)."""
+        if value is None:
+            return self.graph_name
+        if not isinstance(value, str):
+            raise self._invalid(
+                request, "a relationship row whose left_graph/right_graph is not a string"
+            )
+        return value

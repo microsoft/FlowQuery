@@ -1,6 +1,12 @@
 import ASTNode from "../parsing/ast_node";
 import Expression from "../parsing/expressions/expression";
-import { commonOrigin, isGraphRecord, labelsOf, originMatches } from "./graph_records";
+import {
+    commonNamespace,
+    endpointNamespace,
+    labelsOf,
+    namespaceOf,
+    originMatches,
+} from "./graph_records";
 import NodeData, { NodeRecord } from "./node_data";
 import Relationship from "./relationship";
 import { NodeAccess, PushedPredicate, SourceTerms, buildTerms } from "./source_access";
@@ -9,8 +15,10 @@ class Node extends ASTNode {
     protected _identifier: string | null = null;
     protected _label: string | null = null;
     protected _labels: string[] = [];
-    /** `(n:A:B)`: a match must carry every label (default graph only). */
+    /** `(n:A:B)`: a match must carry every label (graphs only). */
     protected _allLabels: boolean = false;
+    /** Graph named by a qualified label, `(n:hr.Person)`; `null` when unqualified. */
+    protected _graph: string | null = null;
     protected _properties: Map<string, Expression> = new Map();
     protected _value: NodeRecord | null = null;
 
@@ -58,6 +66,12 @@ class Node extends ASTNode {
     }
     public set allLabels(value: boolean) {
         this._allLabels = value;
+    }
+    public get graph(): string | null {
+        return this._graph;
+    }
+    public set graph(value: string | null) {
+        this._graph = value;
     }
     public get properties(): Map<string, Expression> {
         return this._properties;
@@ -159,7 +173,7 @@ class Node extends ASTNode {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(this._value!.id, 0, isGraphRecord(this._value));
+                yield* this._outgoing.find(this._value!.id, 0, namespaceOf(this._value));
             } else {
                 yield;
             }
@@ -170,7 +184,7 @@ class Node extends ASTNode {
      * `origin` keeps the step within the relationship's graph (see
      * {@link NodeAccess}).
      */
-    public async *find(id: string, hop: number = 0, origin?: boolean): AsyncGenerator<void> {
+    public async *find(id: string, hop: number = 0, origin?: string): AsyncGenerator<void> {
         if (this._access !== null) {
             yield* this._deferredFind(id, hop, origin);
             return;
@@ -191,7 +205,7 @@ class Node extends ASTNode {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(this._value!.id, hop, isGraphRecord(this._value));
+                yield* this._outgoing.find(this._value!.id, hop, namespaceOf(this._value));
             } else {
                 yield;
             }
@@ -215,7 +229,7 @@ class Node extends ASTNode {
             for (const row of rows) {
                 this.setValue(row);
                 if (this._outgoing) {
-                    yield* this._outgoing.find(row.id, 0, isGraphRecord(row));
+                    yield* this._outgoing.find(row.id, 0, namespaceOf(row));
                 } else {
                     yield;
                 }
@@ -225,7 +239,7 @@ class Node extends ASTNode {
     private async *_deferredFind(
         id: string,
         hop: number,
-        origin: boolean | undefined
+        origin: string | undefined
     ): AsyncGenerator<void> {
         const { terms, args } = this.sourceTerms();
         const rows = (await this._access!.lookup(id, terms, args, origin)) as NodeRecord[];
@@ -236,7 +250,7 @@ class Node extends ASTNode {
                 continue;
             }
             if (this._outgoing) {
-                yield* this._outgoing.find(row.id, hop, isGraphRecord(row));
+                yield* this._outgoing.find(row.id, hop, namespaceOf(row));
             } else {
                 yield;
             }
@@ -250,7 +264,7 @@ class Node extends ASTNode {
     public static async prefetchChain(node: Node, anchorRows: NodeRecord[]): Promise<void> {
         let current: Node = node;
         let anchors = anchorRows.map((row) => row.id);
-        let origin = commonOrigin(anchorRows);
+        let origin = commonNamespace(anchorRows, namespaceOf);
         while (current.outgoing !== null) {
             const rel = current.outgoing;
             const target = rel.target;
@@ -274,7 +288,7 @@ class Node extends ASTNode {
             const nextIds = rows.map((row) => row[rel.nextField]);
             if (target.access === null || !target.access.deferred) return;
             const targetTerms = target.sourceTerms();
-            origin = commonOrigin(rows);
+            origin = commonNamespace(rows, (row) => endpointNamespace(row, rel.nextSide));
             await target.access.prefetch(nextIds, targetTerms.terms, targetTerms.args, origin);
             anchors = nextIds;
             current = target;

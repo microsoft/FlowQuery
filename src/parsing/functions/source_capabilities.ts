@@ -1,4 +1,5 @@
 import Database from "../../graph/database";
+import { qualifiedLabel } from "../../graph/namespaces";
 import AsyncFunction from "./async_function";
 import { FunctionDef } from "./function_metadata";
 
@@ -9,7 +10,7 @@ import { FunctionDef } from "./function_metadata";
  *
  * Nodes: {kind: 'node', label, mode, capabilities}
  * Relationships: {kind: 'relationship', type, from_label, to_label, mode, capabilities}
- * Default graph: {kind: 'graph', function, mode: 'graph', capabilities}
+ * Graphs: {kind: 'graph', name, function, mode: 'graph', capabilities}
  *
  * `mode` is `'eager'` (legacy definition, no capabilities),
  * `'statement'` (`CREATE VIRTUAL` opted into the source contract) or
@@ -57,17 +58,18 @@ class SourceCapabilities extends AsyncFunction {
                 yield {
                     kind: "relationship",
                     type,
-                    from_label: physical.source?.label ?? null,
-                    to_label: physical.target?.label ?? null,
+                    from_label: qualifiedLabel(physical.source),
+                    to_label: qualifiedLabel(physical.target),
                     mode: modeOf(physical),
                     capabilities: physical.provider?.capabilities ?? null,
                 };
             }
         }
-        const graph = this.sourceContext !== null ? this.sourceContext.graph : db.defaultGraph;
-        if (graph !== null) {
+        const graphs = this.sourceContext !== null ? this.sourceContext.graphs : db.graphs;
+        for (const graph of graphs.values()) {
             yield {
                 kind: "graph",
+                name: graph.graphName,
                 function: graph.name,
                 mode: "graph",
                 capabilities: graph.capabilities,

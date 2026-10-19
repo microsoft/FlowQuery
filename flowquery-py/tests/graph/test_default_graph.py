@@ -483,9 +483,24 @@ class TestDefinitionsTakePrecedence:
                 ),
             ):
                 await run("MATCH (n:Free) SET n.x = 1 WITH n MATCH (c:Curated) SET c.x = 1")
-            with pytest.raises(Exception, match="an endpoint is not a default-graph node"):
-                await run("MATCH (c:Curated), (f:Free) CREATE (c)-[:OWNS]->(f)")
             assert mock.change_sets == []
+            # A default-graph relationship may point at a definition node; the
+            # change records the endpoint's namespace.
+            await run("MATCH (c:Curated), (f:Free) CREATE (c)-[:OWNS]->(f)")
+            assert mock.change_sets == [
+                [
+                    {
+                        "op": "createRelationship",
+                        "ref": "$1",
+                        "type": "OWNS",
+                        "start": 1,
+                        "end": 1000,
+                        "properties": {},
+                        "startGraph": "virtual",
+                        "startLabel": "Curated",
+                    }
+                ]
+            ]
         finally:
             for label in ["Curated", "Locked", "Filtered"]:
                 await run(f"DELETE VIRTUAL (:{label})")

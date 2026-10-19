@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from ..parsing.ast_node import ASTNode
+from .graph_records import DEFAULT_GRAPH
+from .namespaces import qualified_label
 from .node import Node
 from .physical_node import PhysicalNode
 from .physical_relationship import PhysicalRelationship
@@ -20,7 +22,7 @@ class Database:
     _instance: Optional['Database'] = None
     _nodes: Dict[str, 'PhysicalNode'] = {}
     _relationships: Dict[str, Dict[str, 'PhysicalRelationship']] = {}
-    _default_graph: Optional['DefaultGraph'] = None
+    _graphs: Dict[str, 'DefaultGraph'] = {}
 
     @classmethod
     def get_instance(cls) -> 'Database':
@@ -29,17 +31,25 @@ class Database:
         return cls._instance
 
     @property
-    def default_graph(self) -> Optional['DefaultGraph']:
-        """The default graph bound with ``USE GRAPH fn($request)``, or None.
+    def graphs(self) -> Mapping[str, 'DefaultGraph']:
+        """Graphs bound with ``USE GRAPH [name =] fn($request)``, by name.
 
-        Like virtual definitions it belongs to the process-wide registry;
-        each query pins the binding that was current when it started.
+        Like virtual definitions they belong to the process-wide registry;
+        each query pins the bindings that were current when it started.
         """
-        return Database._default_graph
+        return Database._graphs
 
-    @default_graph.setter
-    def default_graph(self, graph: Optional['DefaultGraph']) -> None:
-        Database._default_graph = graph
+    def bind_graph(self, name: str, graph: Optional['DefaultGraph']) -> None:
+        """Bind ``graph`` under ``name``, or clear the binding with None."""
+        if graph is None:
+            Database._graphs.pop(name, None)
+        else:
+            Database._graphs[name] = graph
+
+    @property
+    def default_graph(self) -> Optional['DefaultGraph']:
+        """The default graph bound with ``USE GRAPH fn($request)``, or None."""
+        return Database._graphs.get(DEFAULT_GRAPH)
 
     @property
     def nodes(self) -> Dict[str, 'PhysicalNode']:
@@ -110,14 +120,14 @@ class Database:
         if relationship.type is None:
             raise ValueError("Relationship type is null")
         key = Database._endpoint_key(
-            relationship.source.label if relationship.source else None,
-            relationship.target.label if relationship.target else None,
+            qualified_label(relationship.source),
+            qualified_label(relationship.target),
         )
         type_map = Database._relationships.get(relationship.type)
         existing = type_map.get(key) if type_map is not None else None
         if existing is not None and (existing.is_static or is_static):
-            src = relationship.source.label if relationship.source else ""
-            tgt = relationship.target.label if relationship.target else ""
+            src = qualified_label(relationship.source) or ""
+            tgt = qualified_label(relationship.target) or ""
             raise ValueError(
                 f"Virtual relationship [:{relationship.type}] between "
                 f"(:{src}) and (:{tgt}) already exists; "
@@ -145,8 +155,8 @@ class Database:
         if type_map is None:
             return
         key = Database._endpoint_key(
-            relationship.source.label if relationship.source else None,
-            relationship.target.label if relationship.target else None,
+            qualified_label(relationship.source),
+            qualified_label(relationship.target),
         )
         type_map.pop(key, None)
         if not type_map:
@@ -158,13 +168,13 @@ class Database:
             raise ValueError("Relationship type is null")
         type_map = Database._relationships.get(relationship.type)
         key = Database._endpoint_key(
-            relationship.source.label if relationship.source else None,
-            relationship.target.label if relationship.target else None,
+            qualified_label(relationship.source),
+            qualified_label(relationship.target),
         )
         physical = type_map.get(key) if type_map is not None else None
         if physical is None:
-            src = relationship.source.label if relationship.source else ""
-            tgt = relationship.target.label if relationship.target else ""
+            src = qualified_label(relationship.source) or ""
+            tgt = qualified_label(relationship.target) or ""
             raise ValueError(
                 f"Virtual relationship [:{relationship.type}] between "
                 f"(:{src}) and (:{tgt}) does not exist"
@@ -280,8 +290,8 @@ class Database:
         type_map = Database._relationships.get(relationship.type) if relationship.type else None
         if not type_map:
             return None
-        src = relationship.source.label if relationship.source else None
-        tgt = relationship.target.label if relationship.target else None
+        src = qualified_label(relationship.source)
+        tgt = qualified_label(relationship.target)
         if src is not None or tgt is not None:
             return type_map.get(Database._endpoint_key(src, tgt))
         # Null labels = wildcard: return last entry

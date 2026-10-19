@@ -8689,3 +8689,16 @@ test("Test provenance chains data_sources from a virtual back through a LET bind
         fs.rmdirSync(tmpDir);
     }
 });
+
+test("Variable and label spelled like the same keyword", async () => {
+    await new Runner(
+        "CREATE VIRTUAL (:Order) AS { UNWIND [{id: 1, total: 5}] AS r RETURN r.id AS id, r.total AS total }"
+    ).run();
+    try {
+        const runner = new Runner("MATCH (order:Order) RETURN order.total AS total");
+        await runner.run();
+        expect(runner.results).toEqual([{ total: 5 }]);
+    } finally {
+        await new Runner("DELETE VIRTUAL (:Order)").run();
+    }
+});

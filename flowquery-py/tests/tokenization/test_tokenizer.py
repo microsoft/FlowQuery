@@ -212,3 +212,9 @@ class TestTokenizer:
         tokens = tokenizer.tokenize()
         assert tokens is not None
         assert len(tokens) > 0
+
+    def test_each_keyword_occurrence_keeps_its_own_spelling(self):
+        """Each keyword occurrence keeps its own spelling (post vs Post)."""
+        tokens = Tokenizer("MATCH (post:Post) RETURN post").tokenize()
+        words = [t.value for t in tokens if t.is_keyword()]
+        assert words == ["MATCH", "post", "Post", "RETURN", "post"]

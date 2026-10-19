@@ -199,13 +199,16 @@ class Tokenizer:
         last: Optional[Token] = None,
         skip: Optional[Callable[[Optional[Token], Token], bool]] = None
     ) -> Optional[Token]:
-        token = mapper.map(self._walker.get_remaining_string())
-        if token is not None and token.value is not None:
-            if token.can_be_identifier and self._walker.word_continuation(token.value):
+        shared = mapper.map(self._walker.get_remaining_string())
+        if shared is not None and shared.value is not None:
+            if shared.can_be_identifier and self._walker.word_continuation(shared.value):
                 return None
-            if skip and last and skip(last, token):
+            if skip and last and skip(last, shared):
                 return None
-            self._walker.move_by(len(token.value))
+            self._walker.move_by(len(shared.value))
+            # The mapper returns one shared token per keyword/symbol; copy it
+            # so each occurrence keeps its own spelling (`post` vs `Post`).
+            token = Token(shared.type, shared.value)
             if mapper.last_found is not None:
                 token.case_sensitive_value = mapper.last_found
             return token

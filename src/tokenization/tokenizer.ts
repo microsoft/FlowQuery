@@ -229,15 +229,18 @@ class Tokenizer {
         last: Token | null = null,
         skip?: (last: Token | null, current: Token) => boolean
     ): Token | null {
-        const token = mapper.map(this.walker.getRemainingString());
-        if (token !== undefined && token.value !== null) {
-            if (token.can_be_identifier && this.walker.word_continuation(token.value)) {
+        const shared = mapper.map(this.walker.getRemainingString());
+        if (shared !== undefined && shared.value !== null) {
+            if (shared.can_be_identifier && this.walker.word_continuation(shared.value)) {
                 return null;
             }
-            if (skip && last && skip(last, token)) {
+            if (skip && last && skip(last, shared)) {
                 return null;
             }
-            this.walker.moveBy(token.value.length);
+            this.walker.moveBy(shared.value.length);
+            // The mapper returns one shared token per keyword/symbol; copy it
+            // so each occurrence keeps its own spelling (`post` vs `Post`).
+            const token = new Token(shared.type, shared.value);
             if (mapper.last_found !== null) {
                 token.case_sensitive_value = mapper.last_found;
             }

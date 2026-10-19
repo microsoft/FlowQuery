@@ -8531,3 +8531,16 @@ class TestStaticLetBinding:
         assert _py_let_refresh_counter["count"] == 2
 
         await Runner("DROP BINDING pyLetTtlRefresh").run()
+
+    @pytest.mark.asyncio
+    async def test_variable_and_label_spelled_like_the_same_keyword(self):
+        """A variable and a label spelled like the same keyword (order:Order)."""
+        await Runner(
+            "CREATE VIRTUAL (:Order) AS { UNWIND [{id: 1, total: 5}] AS r RETURN r.id AS id, r.total AS total }"
+        ).run()
+        try:
+            runner = Runner("MATCH (order:Order) RETURN order.total AS total")
+            await runner.run()
+            assert runner.results == [{"total": 5}]
+        finally:
+            await Runner("DELETE VIRTUAL (:Order)").run()
